@@ -5691,22 +5691,29 @@ void DumpSidechainActivationStatusCache()
 
 bool LoadActiveSidechainCache()
 {
+    LogPrintf("%s: 0\n", __func__);
     fs::path path = GetDataDir() / "drivechain" / "activesidechains.dat";
     CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
+        LogPrintf("%s: 0a ERROR filein IsNull\n", __func__);
         return true;
     }
+    LogPrintf("%s: 1 path: %s\n", __func__, path);
 
     std::vector<Sidechain> vSidechain;
     try {
+    LogPrintf("%s: 2\n", __func__);
         uint64_t nVersion;
         filein >> nVersion;
         if (nVersion != SCDB_DUMP_VERSION) {
+    LogPrintf("%s: 2a ERROR nVersion wrong\n", __func__);
             return false;
         }
 
+    LogPrintf("%s: 3 nVersion: %u\n", __func__, nVersion);
         int count = 0;
         filein >> count;
+    LogPrintf("%s: 4 count: %u\n", __func__, count);
         for (int i = 0; i < count; i++) {
             Sidechain sidechain;
             filein >> sidechain;
@@ -5718,34 +5725,43 @@ bool LoadActiveSidechainCache()
         return false;
     }
 
+    LogPrintf("%s: 5\n", __func__);
     // Add to SCDB
     scdb.CacheActiveSidechains(vSidechain);
 
+    LogPrintf("%s: 6 DONE\n", __func__);
     return true;
 }
 
 void DumpActiveSidechainCache()
 {
+    LogPrintf("%s: A\n", __func__);
     std::vector<Sidechain> vSidechain = scdb.GetActiveSidechains();
 
     int count = vSidechain.size();
+    LogPrintf("%s: B count: %u\n", __func__, count);
 
     // Write the active sidechain cache
     fs::path path = GetDataDir() / "drivechain" / "activesidechains.dat";
     CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
+    LogPrintf("%s: Ba ERROR fileout null\n", __func__);
         return;
     }
+    LogPrintf("%s: C\n", __func__);
 
     try {
         fileout << SCDB_DUMP_VERSION; // version required to read
         fileout << count; // Number of sidechains in file
 
+    LogPrintf("%s: D ver: %u\n", __func__, SCDB_DUMP_VERSION);
+    LogPrintf("%s: D count: %u\n", __func__, count);
         for (const Sidechain& s : vSidechain) {
             fileout << s;
         }
     }
     catch (const std::exception& e) {
+    LogPrintf("%s: E EXCEPTION\n", __func__);
         LogPrintf("%s: Exception: %s\n", __func__, e.what());
     }
 }
