@@ -5387,7 +5387,7 @@ static const uint64_t SCDB_DUMP_VERSION = 1;
 bool LoadCustomVoteCache()
 {
     fs::path path = GetDataDir() / "drivechain" / "customvotes.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
+    CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
     }
@@ -5429,7 +5429,7 @@ void DumpCustomVoteCache()
 
     // Write the votes
     fs::path path = GetDataDir() / "drivechain" / "customvotes.dat.new";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
     }
@@ -5457,7 +5457,7 @@ void DumpCustomVoteCache()
 bool LoadDepositCache()
 {
     fs::path path = GetDataDir() / "drivechain" / "deposit.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
+    CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
     }
@@ -5505,7 +5505,7 @@ void DumpDepositCache()
 
     // Write the deposits
     fs::path path = GetDataDir() / "drivechain" / "deposit.dat.new";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
     }
@@ -5533,7 +5533,7 @@ void DumpDepositCache()
 bool LoadWTPrimeCache(bool fReindex)
 {
     fs::path path = GetDataDir() / "drivechain" / "wtprime.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
+    CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
     }
@@ -5608,7 +5608,7 @@ void DumpWTPrimeCache()
 
     // Write the WT^ raw tx cache & spent WT^ cache
     fs::path path = GetDataDir() / "drivechain" / "wtprime.dat.new";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
     }
@@ -5647,7 +5647,7 @@ void DumpWTPrimeCache()
 bool LoadSidechainActivationStatusCache()
 {
     fs::path path = GetDataDir() / "drivechain" / "sidechainactivation.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
+    CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
     }
@@ -5688,7 +5688,7 @@ void DumpSidechainActivationStatusCache()
 
     // Write the sidechain activation status cache
     fs::path path = GetDataDir() / "drivechain" / "sidechainactivation.dat.new";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
     }
@@ -5717,7 +5717,7 @@ bool LoadActiveSidechainCache()
 {
     LogPrintf("%s: 0\n", __func__);
     fs::path path = GetDataDir() / "drivechain" / "activesidechains.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
+    CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         LogPrintf("%s: 0a ERROR filein IsNull\n", __func__);
         return true;
@@ -5767,7 +5767,7 @@ void DumpActiveSidechainCache()
 
     // Write the active sidechain cache
     fs::path path = GetDataDir() / "drivechain" / "activesidechains.dat.new";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
     LogPrintf("%s: Ba ERROR fileout null\n", __func__);
         return;
