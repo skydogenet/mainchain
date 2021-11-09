@@ -9,7 +9,7 @@
 #include <sync.h>
 #include <utilstrencodings.h>
 #include <utilmoneystr.h>
-#include <test/test_drivenet.h>
+#include <test/test_skydoge.h>
 
 #include <stdint.h>
 #include <vector>

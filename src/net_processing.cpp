@@ -408,7 +408,7 @@ void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman* connman) {
     AssertLockHeld(cs_main);
     CNodeState* nodestate = State(nodeid);
     if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion || !nodestate->fHaveDrivechain) {
-        // Never ask from peers who can't provide witnesses or drivechain support
+        // Never ask from peers who can't provide witnesses or skydoge support
         return;
     }
     if (nodestate->fProvidesHeaderAndIDs) {
@@ -526,7 +526,7 @@ void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vector<con
                 return;
             }
             if (!State(nodeid)->fHaveDrivechain && IsDrivechainEnabled(pindex->pprev, consensusParams)) {
-                // We would rather download this block from a Drivechain node
+                // We would rather download this block from a Skydoge node
                 return;
             }
 

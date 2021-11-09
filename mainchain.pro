@@ -130,10 +130,10 @@ HEADERS += src/addrdb.h \
            src/qt/coinsplitconfirmationdialog.h \
            src/qt/createnewsdialog.h \
            src/qt/csvmodelwriter.h \
-           src/qt/drivenetaddressvalidator.h \
-           src/qt/drivenetamountfield.h \
-           src/qt/drivenetgui.h \
-           src/qt/drivenetunits.h \
+           src/qt/skydogeaddressvalidator.h \
+           src/qt/skydogeamountfield.h \
+           src/qt/skydogegui.h \
+           src/qt/skydogeunits.h \
            src/qt/editaddressdialog.h \
            src/qt/guiconstants.h \
            src/qt/guiutil.h \
@@ -204,7 +204,7 @@ HEADERS += src/addrdb.h \
            src/rpc/safemode.h \
            src/rpc/server.h \
            src/rpc/util.h \
-           src/script/drivenetconsensus.h \
+           src/script/skydogeconsensus.h \
            src/script/interpreter.h \
            src/script/ismine.h \
            src/script/script.h \
@@ -216,7 +216,7 @@ HEADERS += src/addrdb.h \
            src/support/events.h \
            src/support/lockedpool.h \
            src/test/scriptnum10.h \
-           src/test/test_drivenet.h \
+           src/test/test_skydoge.h \
            src/wallet/coincontrol.h \
            src/wallet/crypter.h \
            src/wallet/db.h \
@@ -401,9 +401,9 @@ SOURCES += src/addrdb.cpp \
            src/core_read.cpp \
            src/core_write.cpp \
            src/dbwrapper.cpp \
-           src/drivenet-cli.cpp \
-           src/drivenet-tx.cpp \
-           src/drivenetd.cpp \
+           src/skydoge-cli.cpp \
+           src/skydoge-tx.cpp \
+           src/skydoged.cpp \
            src/fs.cpp \
            src/hash.cpp \
            src/httprpc.cpp \
@@ -491,12 +491,12 @@ SOURCES += src/addrdb.cpp \
            src/qt/coinsplitconfirmationdialog.cpp \
            src/qt/createnewsdialog.cpp \
            src/qt/csvmodelwriter.cpp \
-           src/qt/drivenet.cpp \
-           src/qt/drivenetaddressvalidator.cpp \
-           src/qt/drivenetamountfield.cpp \
-           src/qt/drivenetgui.cpp \
-           src/qt/drivenetstrings.cpp \
-           src/qt/drivenetunits.cpp \
+           src/qt/skydoge.cpp \
+           src/qt/skydogeaddressvalidator.cpp \
+           src/qt/skydogeamountfield.cpp \
+           src/qt/skydogegui.cpp \
+           src/qt/skydogestrings.cpp \
+           src/qt/skydogeunits.cpp \
            src/qt/editaddressdialog.cpp \
            src/qt/guiutil.cpp \
            src/qt/hashcalcdialog.cpp \
@@ -566,7 +566,7 @@ SOURCES += src/addrdb.cpp \
            src/rpc/safemode.cpp \
            src/rpc/server.cpp \
            src/rpc/util.cpp \
-           src/script/drivenetconsensus.cpp \
+           src/script/skydogeconsensus.cpp \
            src/script/interpreter.cpp \
            src/script/ismine.cpp \
            src/script/script.cpp \
@@ -631,9 +631,9 @@ SOURCES += src/addrdb.cpp \
            src/test/sigopcount_tests.cpp \
            src/test/skiplist_tests.cpp \
            src/test/streams_tests.cpp \
-           src/test/test_drivenet.cpp \
-           src/test/test_drivenet_fuzzy.cpp \
-           src/test/test_drivenet_main.cpp \
+           src/test/test_skydoge.cpp \
+           src/test/test_skydoge_fuzzy.cpp \
+           src/test/test_skydoge_main.cpp \
            src/test/timedata_tests.cpp \
            src/test/torcontrol_tests.cpp \
            src/test/transaction_criticaldata_tests.cpp \
@@ -765,7 +765,7 @@ SOURCES += src/addrdb.cpp \
            src/leveldb/helpers/memenv/memenv_test.cc \
            src/secp256k1/src/java/org_bitcoin_NativeSecp256k1.c \
            src/secp256k1/src/java/org_bitcoin_Secp256k1Context.c
-RESOURCES += src/qt/drivenet.qrc src/qt/drivenet_locale.qrc
+RESOURCES += src/qt/skydoge.qrc src/qt/skydoge_locale.qrc
 TRANSLATIONS += src/qt/locale/bitcoin_af.ts \
                 src/qt/locale/bitcoin_af_ZA.ts \
                 src/qt/locale/bitcoin_ar.ts \

@@ -6,7 +6,7 @@
 #define BITCOIN_QT_BITCOINGUI_H
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivenet-config.h>
+#include <config/skydoge-config.h>
 #endif
 
 #include <amount.h>

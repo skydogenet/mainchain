@@ -9,7 +9,7 @@
 #include <script/script.h>
 #include <script/standard.h>
 #include <uint256.h>
-#include <test/test_drivenet.h>
+#include <test/test_skydoge.h>
 
 #include <vector>
 

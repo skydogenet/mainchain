@@ -87,7 +87,7 @@
                <string>New</string>
               </property>
               <property name="icon">
-               <iconset resource="../drivenet.qrc">
+               <iconset resource="../skydoge.qrc">
                 <normaloff>:/movies/spinner-035</normaloff>:/movies/spinner-035</iconset>
               </property>
               <property name="autoExclusive">
@@ -113,7 +113,7 @@
                <string>Copy</string>
               </property>
               <property name="icon">
-               <iconset resource="../drivenet.qrc">
+               <iconset resource="../skydoge.qrc">
                 <normaloff>:/icons/editcopy</normaloff>:/icons/editcopy</iconset>
               </property>
               <property name="autoExclusive">
@@ -146,7 +146,7 @@
                <string>Payment Requests</string>
               </property>
               <property name="icon">
-               <iconset resource="../drivenet.qrc">
+               <iconset resource="../skydoge.qrc">
                 <normaloff>:/icons/receiving_addresses</normaloff>:/icons/receiving_addresses</iconset>
               </property>
               <property name="autoExclusive">
@@ -220,7 +220,7 @@
   </customwidget>
  </customwidgets>
  <resources>
-  <include location="../drivenet.qrc"/>
+  <include location="../skydoge.qrc"/>
  </resources>
  <connections/>
 </ui>

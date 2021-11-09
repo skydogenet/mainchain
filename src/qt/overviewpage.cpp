@@ -8,7 +8,7 @@
 #include <qt/blockindexdetailsdialog.h>
 #include <qt/clientmodel.h>
 #include <qt/createnewsdialog.h>
-#include <qt/drivenetunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
 #include <qt/latestblocktablemodel.h>
@@ -312,7 +312,7 @@ void OverviewPage::setWalletModel(WalletModel *model)
         connect(model, SIGNAL(notifyWatchonlyChanged(bool)), this, SLOT(updateWatchOnlyLabels(bool)));
     }
 
-    // update the display unit, to not use the default ("BTC")
+    // update the display unit, to not use the default ("SKYDOGE")
     updateDisplayUnit();
 }
 

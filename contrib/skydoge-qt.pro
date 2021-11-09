@@ -22,4 +22,4 @@ FORMS += \
     ../src/qt/forms/transactiondescdialog.ui \
 
 RESOURCES += \
-    ../src/qt/drivenet.qrc
+    ../src/qt/skydoge.qrc

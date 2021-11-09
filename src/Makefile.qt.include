@@ -2,10 +2,10 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-bin_PROGRAMS += qt/drivenet-qt
-EXTRA_LIBRARIES += qt/libdrivenetqt.a
+bin_PROGRAMS += qt/skydoge-qt
+EXTRA_LIBRARIES += qt/libskydogeqt.a
 
-# drivenet qt core #
+# skydoge qt core #
 QT_TS = \
   qt/locale/bitcoin_af.ts \
   qt/locale/bitcoin_af_ZA.ts \
@@ -141,10 +141,10 @@ QT_MOC_CPP = \
   qt/moc_blockexplorer.cpp \
   qt/moc_blockexplorertablemodel.cpp \
   qt/moc_blockindexdetailsdialog.cpp \
-  qt/moc_drivenetaddressvalidator.cpp \
-  qt/moc_drivenetamountfield.cpp \
-  qt/moc_drivenetgui.cpp \
-  qt/moc_drivenetunits.cpp \
+  qt/moc_skydogeaddressvalidator.cpp \
+  qt/moc_skydogeamountfield.cpp \
+  qt/moc_skydogegui.cpp \
+  qt/moc_skydogeunits.cpp \
   qt/moc_callback.cpp \
   qt/moc_clientmodel.cpp \
   qt/moc_coincontroldialog.cpp \
@@ -216,17 +216,17 @@ DRIVENET_MM = \
   qt/macnotificationhandler.mm
 
 QT_MOC = \
-  qt/drivenet.moc \
-  qt/drivenetamountfield.moc \
+  qt/skydoge.moc \
+  qt/skydogeamountfield.moc \
   qt/callback.moc \
   qt/intro.moc \
   qt/overviewpage.moc \
   qt/rpcconsole.moc
 
-QT_QRC_CPP = qt/qrc_drivenet.cpp
-QT_QRC = qt/drivenet.qrc
-QT_QRC_LOCALE_CPP = qt/qrc_drivenet_locale.cpp
-QT_QRC_LOCALE = qt/drivenet_locale.qrc
+QT_QRC_CPP = qt/qrc_skydoge.cpp
+QT_QRC = qt/skydoge.qrc
+QT_QRC_LOCALE_CPP = qt/qrc_skydoge_locale.cpp
+QT_QRC_LOCALE = qt/skydoge_locale.qrc
 
 PROTOBUF_CC = qt/paymentrequest.pb.cc
 PROTOBUF_H = qt/paymentrequest.pb.h
@@ -240,10 +240,10 @@ DRIVENET_QT_H = \
   qt/blockexplorer.h \
   qt/blockexplorertablemodel.h \
   qt/blockindexdetailsdialog.h \
-  qt/drivenetaddressvalidator.h \
-  qt/drivenetamountfield.h \
-  qt/drivenetgui.h \
-  qt/drivenetunits.h \
+  qt/skydogeaddressvalidator.h \
+  qt/skydogeamountfield.h \
+  qt/skydogegui.h \
+  qt/skydogeunits.h \
   qt/callback.h \
   qt/clientmodel.h \
   qt/coincontroldialog.h \
@@ -325,9 +325,9 @@ RES_ICONS = \
   qt/res/icons/about_qt.png \
   qt/res/icons/broadcastnews.png \
   qt/res/icons/delete.png \
-  qt/res/icons/drivenet.ico \
-  qt/res/icons/drivenet_testnet.ico \
-  qt/res/icons/drivenet.png \
+  qt/res/icons/skydoge.ico \
+  qt/res/icons/skydoge_testnet.ico \
+  qt/res/icons/skydoge.png \
   qt/res/icons/calculator.png \
   qt/res/icons/chevron.png \
   qt/res/icons/clock1.png \
@@ -435,10 +435,10 @@ RES_QSS = \
 
 DRIVENET_QT_BASE_CPP = \
   qt/bantablemodel.cpp \
-  qt/drivenetaddressvalidator.cpp \
-  qt/drivenetamountfield.cpp \
-  qt/drivenetgui.cpp \
-  qt/drivenetunits.cpp \
+  qt/skydogeaddressvalidator.cpp \
+  qt/skydogeamountfield.cpp \
+  qt/skydogegui.cpp \
+  qt/skydogeunits.cpp \
   qt/clientmodel.cpp \
   qt/csvmodelwriter.cpp \
   qt/guiutil.cpp \
@@ -529,19 +529,19 @@ RES_IMAGES =
 
 RES_MOVIES = $(wildcard $(srcdir)/qt/res/movies/spinner-*.png)
 
-DRIVENET_RC = qt/res/drivenet-qt-res.rc
+DRIVENET_RC = qt/res/skydoge-qt-res.rc
 
 DRIVENET_QT_INCLUDES = -DQT_NO_KEYWORDS
 
-qt_libdrivenetqt_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES) $(DRIVENET_QT_INCLUDES) \
+qt_libskydogeqt_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES) $(DRIVENET_QT_INCLUDES) \
   $(QT_INCLUDES) $(QT_DBUS_INCLUDES) $(PROTOBUF_CFLAGS) $(QR_CFLAGS)
-qt_libdrivenetqt_a_CXXFLAGS = $(AM_CXXFLAGS) $(QT_PIE_FLAGS)
-qt_libdrivenetqt_a_OBJCXXFLAGS = $(AM_OBJCXXFLAGS) $(QT_PIE_FLAGS)
+qt_libskydogeqt_a_CXXFLAGS = $(AM_CXXFLAGS) $(QT_PIE_FLAGS)
+qt_libskydogeqt_a_OBJCXXFLAGS = $(AM_OBJCXXFLAGS) $(QT_PIE_FLAGS)
 
-qt_libdrivenetqt_a_SOURCES = $(DRIVENET_QT_CPP) $(DRIVENET_QT_H) $(QT_FORMS_UI) \
+qt_libskydogeqt_a_SOURCES = $(DRIVENET_QT_CPP) $(DRIVENET_QT_H) $(QT_FORMS_UI) \
   $(QT_QRC) $(QT_QRC_LOCALE) $(QT_TS) $(PROTOBUF_PROTO) $(RES_ICONS) $(RES_QSS) $(RES_IMAGES) $(RES_MOVIES)
 
-nodist_qt_libdrivenetqt_a_SOURCES = $(QT_MOC_CPP) $(QT_MOC) $(PROTOBUF_CC) \
+nodist_qt_libskydogeqt_a_SOURCES = $(QT_MOC_CPP) $(QT_MOC) $(PROTOBUF_CC) \
   $(PROTOBUF_H) $(QT_QRC_CPP) $(QT_QRC_LOCALE_CPP)
 
 # forms/foo.h -> forms/ui_foo.h
@@ -550,71 +550,71 @@ QT_FORMS_H=$(join $(dir $(QT_FORMS_UI)),$(addprefix ui_, $(notdir $(QT_FORMS_UI:
 # Most files will depend on the forms and moc files as includes. Generate them
 # before anything else.
 $(QT_MOC): $(QT_FORMS_H)
-$(qt_libdrivenetqt_a_OBJECTS) $(qt_drivenet_qt_OBJECTS) : | $(QT_MOC)
+$(qt_libskydogeqt_a_OBJECTS) $(qt_skydoge_qt_OBJECTS) : | $(QT_MOC)
 
 #Generating these with a half-written protobuf header leads to wacky results.
 #This makes sure it's done.
 $(QT_MOC): $(PROTOBUF_H)
 $(QT_MOC_CPP): $(PROTOBUF_H)
 
-# drivenet-qt binary #
-qt_drivenet_qt_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES) $(DRIVENET_QT_INCLUDES) \
+# skydoge-qt binary #
+qt_skydoge_qt_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES) $(DRIVENET_QT_INCLUDES) \
   $(QT_INCLUDES) $(PROTOBUF_CFLAGS) $(QR_CFLAGS)
-qt_drivenet_qt_CXXFLAGS = $(AM_CXXFLAGS) $(QT_PIE_FLAGS)
+qt_skydoge_qt_CXXFLAGS = $(AM_CXXFLAGS) $(QT_PIE_FLAGS)
 
-qt_drivenet_qt_SOURCES = qt/drivenet.cpp
+qt_skydoge_qt_SOURCES = qt/skydoge.cpp
 if TARGET_DARWIN
-  qt_drivenet_qt_SOURCES += $(DRIVENET_MM)
+  qt_skydoge_qt_SOURCES += $(DRIVENET_MM)
 endif
 if TARGET_WINDOWS
-  qt_drivenet_qt_SOURCES += $(DRIVENET_RC)
+  qt_skydoge_qt_SOURCES += $(DRIVENET_RC)
 endif
-qt_drivenet_qt_LDADD = qt/libdrivenetqt.a $(LIBDRIVENET_SERVER)
+qt_skydoge_qt_LDADD = qt/libskydogeqt.a $(LIBDRIVENET_SERVER)
 if ENABLE_WALLET
-qt_drivenet_qt_LDADD += $(LIBDRIVENET_WALLET)
+qt_skydoge_qt_LDADD += $(LIBDRIVENET_WALLET)
 endif
 if ENABLE_ZMQ
-qt_drivenet_qt_LDADD += $(LIBDRIVENET_ZMQ) $(ZMQ_LIBS)
+qt_skydoge_qt_LDADD += $(LIBDRIVENET_ZMQ) $(ZMQ_LIBS)
 endif
-qt_drivenet_qt_LDADD += $(LIBDRIVENET_CLI) $(LIBDRIVENET_COMMON) $(LIBDRIVENET_UTIL) $(LIBDRIVENET_CONSENSUS) $(LIBDRIVENET_CRYPTO) $(LIBUNIVALUE) $(LIBLEVELDB) $(LIBLEVELDB_SSE42) $(LIBMEMENV) \
+qt_skydoge_qt_LDADD += $(LIBDRIVENET_CLI) $(LIBDRIVENET_COMMON) $(LIBDRIVENET_UTIL) $(LIBDRIVENET_CONSENSUS) $(LIBDRIVENET_CRYPTO) $(LIBUNIVALUE) $(LIBLEVELDB) $(LIBLEVELDB_SSE42) $(LIBMEMENV) \
   $(BOOST_LIBS) $(QT_LIBS) $(QT_DBUS_LIBS) $(QR_LIBS) $(PROTOBUF_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(LIBSECP256K1) \
   $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS)
-qt_drivenet_qt_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(QT_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
-qt_drivenet_qt_LIBTOOLFLAGS = --tag CXX
+qt_skydoge_qt_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(QT_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+qt_skydoge_qt_LIBTOOLFLAGS = --tag CXX
 
 #locale/foo.ts -> locale/foo.qm
 QT_QM=$(QT_TS:.ts=.qm)
 
 SECONDARY: $(QT_QM)
 
-$(srcdir)/qt/drivenetstrings.cpp: $(libdrivenet_server_a_SOURCES) $(libdrivenet_wallet_a_SOURCES) $(libdrivenet_common_a_SOURCES) $(libdrivenet_zmq_a_SOURCES) $(libdrivenet_consensus_a_SOURCES) $(libdrivenet_util_a_SOURCES)
+$(srcdir)/qt/skydogestrings.cpp: $(libskydoge_server_a_SOURCES) $(libskydoge_wallet_a_SOURCES) $(libskydoge_common_a_SOURCES) $(libskydoge_zmq_a_SOURCES) $(libskydoge_consensus_a_SOURCES) $(libskydoge_util_a_SOURCES)
 	@test -n $(XGETTEXT) || echo "xgettext is required for updating translations"
 	$(AM_V_GEN) cd $(srcdir); XGETTEXT=$(XGETTEXT) PACKAGE_NAME="$(PACKAGE_NAME)" COPYRIGHT_HOLDERS="$(COPYRIGHT_HOLDERS)" COPYRIGHT_HOLDERS_SUBSTITUTION="$(COPYRIGHT_HOLDERS_SUBSTITUTION)" $(PYTHON) ../share/qt/extract_strings_qt.py $^
 
-translate: $(srcdir)/qt/drivenetstrings.cpp $(QT_FORMS_UI) $(QT_FORMS_UI) $(DRIVENET_QT_BASE_CPP) qt/drivenet.cpp $(DRIVENET_QT_WINDOWS_CPP) $(DRIVENET_QT_WALLET_CPP) $(DRIVENET_QT_H) $(DRIVENET_MM)
+translate: $(srcdir)/qt/skydogestrings.cpp $(QT_FORMS_UI) $(QT_FORMS_UI) $(DRIVENET_QT_BASE_CPP) qt/skydoge.cpp $(DRIVENET_QT_WINDOWS_CPP) $(DRIVENET_QT_WALLET_CPP) $(DRIVENET_QT_H) $(DRIVENET_MM)
 	@test -n $(LUPDATE) || echo "lupdate is required for updating translations"
 	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(LUPDATE) $^ -locations relative -no-obsolete -ts $(srcdir)/qt/locale/bitcoin_en.ts
 
 $(QT_QRC_LOCALE_CPP): $(QT_QRC_LOCALE) $(QT_QM)
 	@test -f $(RCC)
 	@cp -f $< $(@D)/temp_$(<F)
-	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(RCC) -name drivenet_locale $(@D)/temp_$(<F) | \
+	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(RCC) -name skydoge_locale $(@D)/temp_$(<F) | \
 	  $(SED) -e '/^\*\*.*Created:/d' -e '/^\*\*.*by:/d' > $@
 	@rm $(@D)/temp_$(<F)
 
 $(QT_QRC_CPP): $(QT_QRC) $(QT_FORMS_H) $(RES_ICONS) $(RES_QSS) $(RES_IMAGES) $(RES_MOVIES) $(PROTOBUF_H)
 	@test -f $(RCC)
-	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(RCC) -name drivenet $< | \
+	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(RCC) -name skydoge $< | \
 	  $(SED) -e '/^\*\*.*Created:/d' -e '/^\*\*.*by:/d' > $@
 
-CLEAN_QT = $(nodist_qt_libdrivenetqt_a_SOURCES) $(QT_QM) $(QT_FORMS_H) qt/*.gcda qt/*.gcno qt/temp_drivenet_locale.qrc
+CLEAN_QT = $(nodist_qt_libskydogeqt_a_SOURCES) $(QT_QM) $(QT_FORMS_H) qt/*.gcda qt/*.gcno qt/temp_skydoge_locale.qrc
 
 CLEANFILES += $(CLEAN_QT)
 
-drivenet_qt_clean: FORCE
-	rm -f $(CLEAN_QT) $(qt_libdrivenetqt_a_OBJECTS) $(qt_drivenet_qt_OBJECTS) qt/drivenet-qt$(EXEEXT) $(LIBDRIVENETQT)
+skydoge_qt_clean: FORCE
+	rm -f $(CLEAN_QT) $(qt_libskydogeqt_a_OBJECTS) $(qt_skydoge_qt_OBJECTS) qt/skydoge-qt$(EXEEXT) $(LIBDRIVENETQT)
 
-drivenet_qt : qt/drivenet-qt$(EXEEXT)
+skydoge_qt : qt/skydoge-qt$(EXEEXT)
 
 ui_%.h: %.ui
 	@test -f $(UIC)

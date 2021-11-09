@@ -6,7 +6,7 @@
 #include <txmempool.h>
 #include <util.h>
 
-#include <test/test_drivenet.h>
+#include <test/test_skydoge.h>
 
 #include <boost/test/unit_test.hpp>
 #include <list>

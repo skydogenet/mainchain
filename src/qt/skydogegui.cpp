@@ -2,11 +2,11 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <qt/drivenetgui.h>
+#include <qt/skydogegui.h>
 
 #include <qt/blockexplorer.h>
 #include <qt/clientmodel.h>
-#include <qt/drivenetunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/hashcalcdialog.h>
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
@@ -297,7 +297,7 @@ void BitcoinGUI::createActions()
     tabGroup->addAction(overviewAction);
 
     sendCoinsAction = new QAction(platformStyle->SingleColorIcon(":/icons/send"), tr("&Send"), this);
-    sendCoinsAction->setStatusTip(tr("Send coins to a DriveNet address"));
+    sendCoinsAction->setStatusTip(tr("Send coins to a Skydoge address"));
     sendCoinsAction->setToolTip(sendCoinsAction->statusTip());
     sendCoinsAction->setCheckable(true);
     sendCoinsAction->setShortcut(QKeySequence(Qt::ALT + Qt::Key_2));
@@ -308,7 +308,7 @@ void BitcoinGUI::createActions()
     sendCoinsMenuAction->setToolTip(sendCoinsMenuAction->statusTip());
 
     receiveCoinsAction = new QAction(platformStyle->SingleColorIcon(":/icons/receiving_addresses"), tr("&Receive"), this);
-    receiveCoinsAction->setStatusTip(tr("Request payments (generates QR codes and DriveNet: URIs)"));
+    receiveCoinsAction->setStatusTip(tr("Request payments (generates QR codes and Skydoge: URIs)"));
     receiveCoinsAction->setToolTip(receiveCoinsAction->statusTip());
     receiveCoinsAction->setCheckable(true);
     receiveCoinsAction->setShortcut(QKeySequence(Qt::ALT + Qt::Key_3));
@@ -390,11 +390,11 @@ void BitcoinGUI::createActions()
     usedReceivingAddressesAction->setStatusTip(tr("Show the list of used receiving addresses and labels"));
 
     openAction = new QAction(platformStyle->TextColorIcon(":/icons/open"), tr("Open &URI..."), this);
-    openAction->setStatusTip(tr("Open a DriveNet: URI or payment request"));
+    openAction->setStatusTip(tr("Open a Skydoge: URI or payment request"));
 
     showHelpMessageAction = new QAction(platformStyle->TextColorIcon(":/icons/info"), tr("&Command-line options"), this);
     showHelpMessageAction->setMenuRole(QAction::NoRole);
-    showHelpMessageAction->setStatusTip(tr("Show the %1 help message to get a list with possible DriveNet command-line options").arg(tr(PACKAGE_NAME)));
+    showHelpMessageAction->setStatusTip(tr("Show the %1 help message to get a list with possible Skydoge command-line options").arg(tr(PACKAGE_NAME)));
 
     showSidechainTableDialogAction = new QAction(platformStyle->TextColorIcon(":/icons/history"), tr("&Sidechain Tables"), this);
     showSidechainTableDialogAction->setStatusTip(tr("Show Sidechain tables"));
@@ -840,7 +840,7 @@ void BitcoinGUI::updateNetworkState()
 
     bool fNetworking = clientModel->getNetworkActive();
     if (fNetworking) {
-        tooltip = tr("%n active connection(s) to DriveNet network", "", count) + QString(".<br>");
+        tooltip = tr("%n active connection(s) to Skydoge network", "", count) + QString(".<br>");
     } else {
         tooltip = tr("Network activity disabled.") + QString("<br>") + tr("Click to enable network activity again.");
     }
@@ -996,7 +996,7 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, double nVer
 
 void BitcoinGUI::message(const QString &title, const QString &message, unsigned int style, bool *ret)
 {
-    QString strTitle = tr("DriveNet"); // default title
+    QString strTitle = tr("Skydoge"); // default title
     // Default to information icon
     int nMBoxIcon = QMessageBox::Information;
     int nNotifyIcon = Notificator::Information;

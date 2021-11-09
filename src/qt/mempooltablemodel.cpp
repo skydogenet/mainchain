@@ -4,7 +4,7 @@
 
 #include <qt/mempooltablemodel.h>
 
-#include <qt/drivenetunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/guiutil.h>
 
 #include <primitives/transaction.h>
@@ -60,11 +60,11 @@ QVariant MemPoolTableModel::data(const QModelIndex &index, int role) const
         }
         // Value
         if (col == 2) {
-            return BitcoinUnits::formatWithUnit(BitcoinUnit::BTC, object.value, false, BitcoinUnits::separatorAlways);
+            return BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, object.value, false, BitcoinUnits::separatorAlways);
         }
         // Feerate
         if (col == 3) {
-            QString rate = BitcoinUnits::formatWithUnit(BitcoinUnit::BTC, object.feeRate.GetFeePerK(), false, BitcoinUnits::separatorAlways);
+            QString rate = BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, object.feeRate.GetFeePerK(), false, BitcoinUnits::separatorAlways);
             rate += "/kB";
             return rate;
         }

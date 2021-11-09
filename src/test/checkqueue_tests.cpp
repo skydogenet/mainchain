@@ -6,7 +6,7 @@
 #include <utiltime.h>
 #include <validation.h>
 
-#include <test/test_drivenet.h>
+#include <test/test_skydoge.h>
 #include <checkqueue.h>
 #include <boost/test/unit_test.hpp>
 #include <boost/thread.hpp>

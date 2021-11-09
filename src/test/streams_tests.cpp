@@ -4,7 +4,7 @@
 
 #include <streams.h>
 #include <support/allocators/zeroafterfree.h>
-#include <test/test_drivenet.h>
+#include <test/test_skydoge.h>
 
 #include <boost/assign/std/vector.hpp> // for 'operator+=()'
 #include <boost/test/unit_test.hpp>

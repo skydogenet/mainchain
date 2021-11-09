@@ -40,7 +40,7 @@ SidechainProposalDialog::~SidechainProposalDialog()
 void SidechainProposalDialog::on_toolButtonKeyHash_clicked()
 {
     // TODO move text into static const
-    QMessageBox::information(this, tr("DriveNet - information"),
+    QMessageBox::information(this, tr("Skydoge - information"),
         tr("Sidechain address bytes:\n\n"
            "Deposits to this sidechain must be sent to a specific address "
            "(really, a specific script). It must be different from the "
@@ -60,15 +60,15 @@ void SidechainProposalDialog::on_toolButtonIDHash1_clicked()
 {
     // TODO display message based on current selected version
     // TODO move text into static const
-    QMessageBox::information(this, tr("DriveNet - information"),
+    QMessageBox::information(this, tr("Skydoge - information"),
         tr("Release tarball hash:\n\n"
            "hash of the original gitian software build of this sidechain.\n\n"
            "Use the sha256sum utility to generate this hash, or copy the hash "
            "when it is printed to the console after gitian builds complete.\n\n"
            "Example:\n"
-           "sha256sum DriveNet-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
+           "sha256sum Skydoge-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
            "Result:\n"
-           "fd9637e427f1e967cc658bfe1a836d537346ce3a6dd0746878129bb5bc646680  DriveNet-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
+           "fd9637e427f1e967cc658bfe1a836d537346ce3a6dd0746878129bb5bc646680  Skydoge-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
            "Paste the resulting hash into this field."),
         QMessageBox::Ok);
 }
@@ -77,7 +77,7 @@ void SidechainProposalDialog::on_toolButtonIDHash2_clicked()
 {
     // TODO display message based on current selected version
     // TODO move text into static const
-    QMessageBox::information(this, tr("DriveNet - information"),
+    QMessageBox::information(this, tr("Skydoge - information"),
         tr("Build commit hash (160 bits):\n\n"
            "If the software was developed using git, the build commit hash "
            "should match the commit hash of the first sidechain release.\n\n"
@@ -90,7 +90,7 @@ void SidechainProposalDialog::on_toolButtonSoftwareHashes_clicked()
 {
     // TODO display message based on current selected version
     // TODO move text into static const
-    QMessageBox::information(this, tr("DriveNet - information"),
+    QMessageBox::information(this, tr("Skydoge - information"),
         tr("These help users find the sidechain node software. "
            "Only this software can filter out invalid withdrawals. \n\n"
            "These fields are optional but highly recommended."),
@@ -108,7 +108,7 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
     int nSidechain = ui->spinBoxNSidechain->value();
 
     if (nSidechain < 0 || nSidechain > 255) {
-        QMessageBox::critical(this, tr("DriveNet - error"),
+        QMessageBox::critical(this, tr("Skydoge - error"),
             tr("Sidechain number must be 0-255!"),
             QMessageBox::Ok);
         return;
@@ -122,7 +122,7 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
         warning += "This would create a sidechain replacement proposal which ";
         warning += "is much slower to activate than a new sidechain.\n\n";
         warning += "Are you sure?\n";
-        int nRes = QMessageBox::critical(this, tr("DriveNet - warning"),
+        int nRes = QMessageBox::critical(this, tr("Skydoge - warning"),
             warning,
             QMessageBox::Ok, QMessageBox::Cancel);
 
@@ -131,7 +131,7 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
     }
 
     if (strTitle.empty()) {
-        QMessageBox::critical(this, tr("DriveNet - error"),
+        QMessageBox::critical(this, tr("Skydoge - error"),
             tr("Sidechain must have a title!"),
             QMessageBox::Ok);
         return;
@@ -140,14 +140,14 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
     // TODO maybe we should allow sidechains with no description? Anyways this
     // isn't a consensus rule right now
     if (strDescription.empty()) {
-        QMessageBox::critical(this, tr("DriveNet - error"),
+        QMessageBox::critical(this, tr("Skydoge - error"),
             tr("Sidechain must have a description!"),
             QMessageBox::Ok);
         return;
     }
 
     if (nVersion > SIDECHAIN_VERSION_MAX) {
-        QMessageBox::critical(this, tr("DriveNet - error"),
+        QMessageBox::critical(this, tr("Skydoge - error"),
             tr("This sidechain has an invalid version number (too high)!"),
             QMessageBox::Ok);
         return;
@@ -155,7 +155,7 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
 
     uint256 uHash = uint256S(strHash);
     if (uHash.IsNull()) {
-        QMessageBox::critical(this, tr("DriveNet - error"),
+        QMessageBox::critical(this, tr("Skydoge - error"),
             tr("Invalid sidechain address bytes!"),
             QMessageBox::Ok);
         return;
@@ -168,7 +168,7 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
 
     if (!key.IsValid()) {
         // Nobody should see this, but we don't want to fail silently
-        QMessageBox::critical(this, tr("DriveNet - error"),
+        QMessageBox::critical(this, tr("Skydoge - error"),
             tr("Private key outside allowed range!"),
             QMessageBox::Ok);
         return;
@@ -179,13 +179,13 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
     CKeyID vchAddress = pubkey.GetID();
 
     if (!strHashID1.empty() && strHashID1.size() != 64) {
-        QMessageBox::critical(this, tr("DriveNet - error"),
+        QMessageBox::critical(this, tr("Skydoge - error"),
             tr("HashID1 (release tarball hash) invalid size!"),
             QMessageBox::Ok);
         return;
     }
     if (!strHashID2.empty() && strHashID2.size() != 40) {
-        QMessageBox::critical(this, tr("DriveNet - error"),
+        QMessageBox::critical(this, tr("Skydoge - error"),
             tr("HashID2 (build commit hash) invalid size!"),
             QMessageBox::Ok);
         return;
@@ -232,7 +232,7 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
     " active sidechains.\n";
 
     // Show result message popup
-    QMessageBox::information(this, tr("DriveNet - sidechain proposal created!"),
+    QMessageBox::information(this, tr("Skydoge - sidechain proposal created!"),
         message,
         QMessageBox::Ok);
 

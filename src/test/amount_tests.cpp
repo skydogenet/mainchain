@@ -4,7 +4,7 @@
 
 #include <amount.h>
 #include <policy/feerate.h>
-#include <test/test_drivenet.h>
+#include <test/test_skydoge.h>
 
 #include <boost/test/unit_test.hpp>
 
@@ -93,7 +93,7 @@ BOOST_AUTO_TEST_CASE(BinaryOperatorTest)
     BOOST_CHECK(a <= a);
     BOOST_CHECK(b >= a);
     BOOST_CHECK(b >= b);
-    // a should be 0.00000002 BTC/kB now
+    // a should be 0.00000002 SKYDOGE/kB now
     a += a;
     BOOST_CHECK(a == b);
 }
@@ -102,7 +102,7 @@ BOOST_AUTO_TEST_CASE(ToStringTest)
 {
     CFeeRate feeRate;
     feeRate = CFeeRate(1);
-    BOOST_CHECK_EQUAL(feeRate.ToString(), "0.00000001 BTC/kB");
+    BOOST_CHECK_EQUAL(feeRate.ToString(), "0.00000001 SKYDOGE/kB");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

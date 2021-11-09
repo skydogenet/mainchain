@@ -142,7 +142,7 @@
             <string>...</string>
            </property>
            <property name="icon">
-            <iconset resource="../drivenet.qrc">
+            <iconset resource="../skydoge.qrc">
              <normaloff>:/icons/transaction_0</normaloff>:/icons/transaction_0</iconset>
            </property>
            <property name="iconSize">
@@ -208,7 +208,7 @@
             <string>...</string>
            </property>
            <property name="icon">
-            <iconset resource="../drivenet.qrc">
+            <iconset resource="../skydoge.qrc">
              <normaloff>:/icons/transaction_0</normaloff>:/icons/transaction_0</iconset>
            </property>
            <property name="iconSize">
@@ -263,7 +263,7 @@
             <string>...</string>
            </property>
            <property name="icon">
-            <iconset resource="../drivenet.qrc">
+            <iconset resource="../skydoge.qrc">
              <normaloff>:/icons/transaction_0</normaloff>:/icons/transaction_0</iconset>
            </property>
            <property name="iconSize">
@@ -318,7 +318,7 @@
             <string>...</string>
            </property>
            <property name="icon">
-            <iconset resource="../drivenet.qrc">
+            <iconset resource="../skydoge.qrc">
              <normaloff>:/icons/transaction_0</normaloff>:/icons/transaction_0</iconset>
            </property>
            <property name="iconSize">
@@ -360,7 +360,7 @@
       <string>  Propose Sidechain</string>
      </property>
      <property name="icon">
-      <iconset resource="../drivenet.qrc">
+      <iconset resource="../skydoge.qrc">
        <normaloff>:/icons/add</normaloff>:/icons/add</iconset>
      </property>
      <property name="iconSize">
@@ -374,7 +374,7 @@
   </layout>
  </widget>
  <resources>
-  <include location="../drivenet.qrc"/>
+  <include location="../skydoge.qrc"/>
  </resources>
  <connections/>
 </ui>

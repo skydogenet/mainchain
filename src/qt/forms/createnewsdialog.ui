@@ -88,7 +88,7 @@
         <string/>
        </property>
        <property name="icon">
-        <iconset resource="../drivenet.qrc">
+        <iconset resource="../skydoge.qrc">
          <normaloff>:/icons/replay_unknown</normaloff>:/icons/replay_unknown</iconset>
        </property>
        <property name="iconSize">
@@ -125,7 +125,7 @@
         <string>Broadcast</string>
        </property>
        <property name="icon">
-        <iconset resource="../drivenet.qrc">
+        <iconset resource="../skydoge.qrc">
          <normaloff>:/icons/edit</normaloff>:/icons/edit</iconset>
        </property>
        <property name="iconSize">
@@ -157,12 +157,12 @@
   <customwidget>
    <class>BitcoinAmountField</class>
    <extends>QLineEdit</extends>
-   <header>qt/drivenetamountfield.h</header>
+   <header>qt/skydogeamountfield.h</header>
    <container>1</container>
   </customwidget>
  </customwidgets>
  <resources>
-  <include location="../drivenet.qrc"/>
+  <include location="../skydoge.qrc"/>
  </resources>
  <connections/>
 </ui>

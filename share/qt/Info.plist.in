@@ -29,16 +29,16 @@
   <string>????</string>
 
   <key>CFBundleExecutable</key>
-  <string>DriveNet-Qt</string>
+  <string>Skydoge-Qt</string>
 
   <key>CFBundleName</key>
-  <string>DriveNet-Qt</string>
+  <string>Skydoge-Qt</string>
 
   <key>LSHasLocalizedDisplayName</key>
   <true/>
 
   <key>CFBundleIdentifier</key>
-  <string>org.bitcoinfoundation.DriveNet-Qt</string>
+  <string>org.bitcoinfoundation.Skydoge-Qt</string>
 
   <key>CFBundleURLTypes</key>
   <array>

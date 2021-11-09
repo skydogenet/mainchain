@@ -11,7 +11,7 @@
 #define BITCOIN_UTIL_H
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivenet-config.h>
+#include <config/skydoge-config.h>
 #endif
 
 #include <compat.h>
@@ -320,7 +320,7 @@ void RenameThread(const char* name);
  */
 template <typename Callable> void TraceThread(const char* name,  Callable func)
 {
-    std::string s = strprintf("drivenet-%s", name);
+    std::string s = strprintf("skydoge-%s", name);
     RenameThread(s.c_str());
     try
     {

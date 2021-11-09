@@ -10,7 +10,7 @@
 #include <txdb.h>
 #include <validation.h>
 
-#include <qt/drivenetunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/newstablemodel.h>
 #include <qt/newstypestablemodel.h>
 #include <qt/platformstyle.h>
@@ -47,7 +47,7 @@ void CreateNewsDialog::on_pushButtonCreate_clicked()
     std::string strText = ui->plainTextEdit->toPlainText().toStdString();
 
     // Format strings for confirmation dialog
-    QString strFee = BitcoinUnits::formatWithUnit(BitcoinUnit::BTC, nFee, false, BitcoinUnits::separatorAlways);
+    QString strFee = BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, nFee, false, BitcoinUnits::separatorAlways);
 
     // Show confirmation dialog
     int nRes = QMessageBox::question(this, tr("Confirm news broadcast"),

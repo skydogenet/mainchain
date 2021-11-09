@@ -16,7 +16,7 @@
 #include "utilstrencodings.h"
 #include "validation.h"
 
-#include "test/test_drivenet.h"
+#include "test/test_skydoge.h"
 
 #include <boost/test/unit_test.hpp>
 

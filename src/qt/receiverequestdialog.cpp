@@ -5,7 +5,7 @@
 #include <qt/receiverequestdialog.h>
 #include <qt/forms/ui_receiverequestdialog.h>
 
-#include <qt/drivenetunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
@@ -21,7 +21,7 @@
 #endif
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivenet-config.h> /* for USE_QRCODE */
+#include <config/skydoge-config.h> /* for USE_QRCODE */
 #endif
 
 #ifdef USE_QRCODE

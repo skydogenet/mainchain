@@ -3,7 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivenet-config.h>
+#include <config/skydoge-config.h>
 #endif
 
 #include <fs.h>
@@ -207,8 +207,8 @@ bool Intro::pickDataDirectory()
                 if (TryCreateDirectories(GUIUtil::qstringToBoostPath(dataDir))) {
                     // If a new data directory has been created, make wallets subdirectory too
                     TryCreateDirectories(GUIUtil::qstringToBoostPath(dataDir) / "wallets");
-                    // Also create drivechain subdirectory
-                    TryCreateDirectories(GUIUtil::qstringToBoostPath(dataDir) / "drivechain");
+                    // Also create skydoge subdirectory
+                    TryCreateDirectories(GUIUtil::qstringToBoostPath(dataDir) / "skydoge");
                 }
                 break;
             } catch (const fs::filesystem_error&) {

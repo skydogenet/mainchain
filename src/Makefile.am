@@ -23,23 +23,23 @@ DRIVENET_INCLUDES=-I$(builddir) $(BDB_CPPFLAGS) $(BOOST_CPPFLAGS) $(LEVELDB_CPPF
 DRIVENET_INCLUDES += -I$(srcdir)/secp256k1/include
 DRIVENET_INCLUDES += $(UNIVALUE_CFLAGS)
 
-LIBDRIVENET_SERVER=libdrivenet_server.a
-LIBDRIVENET_COMMON=libdrivenet_common.a
-LIBDRIVENET_CONSENSUS=libdrivenet_consensus.a
-LIBDRIVENET_CLI=libdrivenet_cli.a
-LIBDRIVENET_UTIL=libdrivenet_util.a
-LIBDRIVENET_CRYPTO=crypto/libdrivenet_crypto.a
-LIBDRIVENETQT=qt/libdrivenetqt.a
+LIBDRIVENET_SERVER=libskydoge_server.a
+LIBDRIVENET_COMMON=libskydoge_common.a
+LIBDRIVENET_CONSENSUS=libskydoge_consensus.a
+LIBDRIVENET_CLI=libskydoge_cli.a
+LIBDRIVENET_UTIL=libskydoge_util.a
+LIBDRIVENET_CRYPTO=crypto/libskydoge_crypto.a
+LIBDRIVENETQT=qt/libskydogeqt.a
 LIBSECP256K1=secp256k1/libsecp256k1.la
 
 if ENABLE_ZMQ
-LIBDRIVENET_ZMQ=libdrivenet_zmq.a
+LIBDRIVENET_ZMQ=libskydoge_zmq.a
 endif
 if BUILD_DRIVENET_LIBS
-LIBDRIVENETCONSENSUS=libdrivenetconsensus.la
+LIBDRIVENETCONSENSUS=libskydogeconsensus.la
 endif
 if ENABLE_WALLET
-LIBDRIVENET_WALLET=libdrivenet_wallet.a
+LIBDRIVENET_WALLET=libskydoge_wallet.a
 endif
 
 $(LIBSECP256K1): $(wildcard secp256k1/src/*) $(wildcard secp256k1/include/*)
@@ -65,15 +65,15 @@ TESTS =
 BENCHMARKS =
 
 if BUILD_DRIVENETD
-  bin_PROGRAMS += drivenetd
+  bin_PROGRAMS += skydoged
 endif
 
 if BUILD_DRIVENET_UTILS
-  bin_PROGRAMS += drivenet-cli drivenet-tx
+  bin_PROGRAMS += skydoge-cli skydoge-tx
 endif
 
 .PHONY: FORCE check-symbols check-security
-# drivenet core #
+# skydoge core #
 DRIVENET_CORE_H = \
   addrdb.h \
   addrman.h \
@@ -184,12 +184,12 @@ obj/build.h: FORCE
 	@$(MKDIR_P) $(builddir)/obj
 	@$(top_srcdir)/share/genbuild.sh "$(abs_top_builddir)/src/obj/build.h" \
 	  "$(abs_top_srcdir)"
-libdrivenet_util_a-clientversion.$(OBJEXT): obj/build.h
+libskydoge_util_a-clientversion.$(OBJEXT): obj/build.h
 
-# server: shared between drivenetd and drivenet-qt
-libdrivenet_server_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
-libdrivenet_server_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivenet_server_a_SOURCES = \
+# server: shared between skydoged and skydoge-qt
+libskydoge_server_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
+libskydoge_server_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_server_a_SOURCES = \
   addrdb.cpp \
   addrman.cpp \
   apiclient.cpp \
@@ -234,20 +234,20 @@ libdrivenet_server_a_SOURCES = \
   $(DRIVENET_CORE_H)
 
 if ENABLE_ZMQ
-libdrivenet_zmq_a_CPPFLAGS = $(DRIVENET_INCLUDES) $(ZMQ_CFLAGS)
-libdrivenet_zmq_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivenet_zmq_a_SOURCES = \
+libskydoge_zmq_a_CPPFLAGS = $(DRIVENET_INCLUDES) $(ZMQ_CFLAGS)
+libskydoge_zmq_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_zmq_a_SOURCES = \
   zmq/zmqabstractnotifier.cpp \
   zmq/zmqnotificationinterface.cpp \
   zmq/zmqpublishnotifier.cpp
 endif
 
 
-# wallet: shared between drivenetd and drivenet-qt, but only linked
+# wallet: shared between skydoged and skydoge-qt, but only linked
 # when wallet enabled
-libdrivenet_wallet_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
-libdrivenet_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivenet_wallet_a_SOURCES = \
+libskydoge_wallet_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
+libskydoge_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_wallet_a_SOURCES = \
   wallet/crypter.cpp \
   wallet/db.cpp \
   wallet/feebumper.cpp \
@@ -261,9 +261,9 @@ libdrivenet_wallet_a_SOURCES = \
   $(DRIVENET_CORE_H)
 
 # crypto primitives library
-crypto_libdrivenet_crypto_a_CPPFLAGS = $(AM_CPPFLAGS)
-crypto_libdrivenet_crypto_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-crypto_libdrivenet_crypto_a_SOURCES = \
+crypto_libskydoge_crypto_a_CPPFLAGS = $(AM_CPPFLAGS)
+crypto_libskydoge_crypto_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+crypto_libskydoge_crypto_a_SOURCES = \
   crypto/aes.cpp \
   crypto/aes.h \
   crypto/chacha20.h \
@@ -283,13 +283,13 @@ crypto_libdrivenet_crypto_a_SOURCES = \
   crypto/sha512.h
 
 if USE_ASM
-crypto_libdrivenet_crypto_a_SOURCES += crypto/sha256_sse4.cpp
+crypto_libskydoge_crypto_a_SOURCES += crypto/sha256_sse4.cpp
 endif
 
 # consensus: shared between all executables that validate any consensus rules.
-libdrivenet_consensus_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
-libdrivenet_consensus_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivenet_consensus_a_SOURCES = \
+libskydoge_consensus_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
+libskydoge_consensus_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_consensus_a_SOURCES = \
   amount.h \
   arith_uint256.cpp \
   arith_uint256.h \
@@ -306,7 +306,7 @@ libdrivenet_consensus_a_SOURCES = \
   primitives/transaction.h \
   pubkey.cpp \
   pubkey.h \
-  script/drivenetconsensus.cpp \
+  script/skydogeconsensus.cpp \
   script/interpreter.cpp \
   script/interpreter.h \
   script/script.cpp \
@@ -321,10 +321,10 @@ libdrivenet_consensus_a_SOURCES = \
   utilstrencodings.h \
   version.h
 
-# common: shared between drivenetd, and drivenet-qt and non-server tools
-libdrivenet_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
-libdrivenet_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivenet_common_a_SOURCES = \
+# common: shared between skydoged, and skydoge-qt and non-server tools
+libskydoge_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
+libskydoge_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_common_a_SOURCES = \
   base58.cpp \
   bech32.cpp \
   chainparams.cpp \
@@ -347,9 +347,9 @@ libdrivenet_common_a_SOURCES = \
 # util: shared between all executables.
 # This library *must* be included to make sure that the glibc
 # backward-compatibility objects and their sanity checks are linked.
-libdrivenet_util_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
-libdrivenet_util_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivenet_util_a_SOURCES = \
+libskydoge_util_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
+libskydoge_util_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_util_a_SOURCES = \
   support/lockedpool.cpp \
   chainparamsbase.cpp \
   clientversion.cpp \
@@ -370,30 +370,30 @@ libdrivenet_util_a_SOURCES = \
   $(DRIVENET_CORE_H)
 
 if GLIBC_BACK_COMPAT
-libdrivenet_util_a_SOURCES += compat/glibc_compat.cpp
+libskydoge_util_a_SOURCES += compat/glibc_compat.cpp
 endif
 
-# cli: shared between drivenet-cli and drivenet-qt
-libdrivenet_cli_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
-libdrivenet_cli_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivenet_cli_a_SOURCES = \
+# cli: shared between skydoge-cli and skydoge-qt
+libskydoge_cli_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
+libskydoge_cli_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_cli_a_SOURCES = \
   rpc/client.cpp \
   $(DRIVENET_CORE_H)
 
-nodist_libdrivenet_util_a_SOURCES = $(srcdir)/obj/build.h
+nodist_libskydoge_util_a_SOURCES = $(srcdir)/obj/build.h
 #
 
-# drivenetd binary #
-drivenetd_SOURCES = drivenetd.cpp
-drivenetd_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
-drivenetd_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-drivenetd_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+# skydoged binary #
+skydoged_SOURCES = skydoged.cpp
+skydoged_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
+skydoged_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+skydoged_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 if TARGET_WINDOWS
-drivenetd_SOURCES += drivenetd-res.rc
+skydoged_SOURCES += skydoged-res.rc
 endif
 
-drivenetd_LDADD = \
+skydoged_LDADD = \
   $(LIBDRIVENET_SERVER) \
   $(LIBDRIVENET_COMMON) \
   $(LIBUNIVALUE) \
@@ -407,38 +407,38 @@ drivenetd_LDADD = \
   $(LIBMEMENV) \
   $(LIBSECP256K1)
 
-drivenetd_LDADD += $(BOOST_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(ZMQ_LIBS)
+skydoged_LDADD += $(BOOST_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(ZMQ_LIBS)
 
-# drivenet-cli binary #
-drivenet_cli_SOURCES = drivenet-cli.cpp
-drivenet_cli_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES) $(EVENT_CFLAGS)
-drivenet_cli_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-drivenet_cli_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+# skydoge-cli binary #
+skydoge_cli_SOURCES = skydoge-cli.cpp
+skydoge_cli_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES) $(EVENT_CFLAGS)
+skydoge_cli_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+skydoge_cli_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 if TARGET_WINDOWS
-drivenet_cli_SOURCES += drivenet-cli-res.rc
+skydoge_cli_SOURCES += skydoge-cli-res.rc
 endif
 
-drivenet_cli_LDADD = \
+skydoge_cli_LDADD = \
   $(LIBDRIVENET_CLI) \
   $(LIBUNIVALUE) \
   $(LIBDRIVENET_UTIL) \
   $(LIBDRIVENET_CRYPTO)
 
-drivenet_cli_LDADD += $(BOOST_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(EVENT_LIBS)
+skydoge_cli_LDADD += $(BOOST_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(EVENT_LIBS)
 #
 
-# drivenet-tx binary #
-drivenet_tx_SOURCES = drivenet-tx.cpp
-drivenet_tx_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
-drivenet_tx_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-drivenet_tx_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+# skydoge-tx binary #
+skydoge_tx_SOURCES = skydoge-tx.cpp
+skydoge_tx_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
+skydoge_tx_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+skydoge_tx_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 if TARGET_WINDOWS
-drivenet_tx_SOURCES += drivenet-tx-res.rc
+skydoge_tx_SOURCES += skydoge-tx-res.rc
 endif
 
-drivenet_tx_LDADD = \
+skydoge_tx_LDADD = \
   $(LIBUNIVALUE) \
   $(LIBDRIVENET_COMMON) \
   $(LIBDRIVENET_UTIL) \
@@ -446,22 +446,22 @@ drivenet_tx_LDADD = \
   $(LIBDRIVENET_CRYPTO) \
   $(LIBSECP256K1)
 
-drivenet_tx_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
+skydoge_tx_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
 #
 
-# drivenetconsensus library #
+# skydogeconsensus library #
 if BUILD_DRIVENET_LIBS
-include_HEADERS = script/drivenetconsensus.h
-libdrivenetconsensus_la_SOURCES = $(crypto_libdrivenet_crypto_a_SOURCES) $(libdrivenet_consensus_a_SOURCES)
+include_HEADERS = script/skydogeconsensus.h
+libskydogeconsensus_la_SOURCES = $(crypto_libskydoge_crypto_a_SOURCES) $(libskydoge_consensus_a_SOURCES)
 
 if GLIBC_BACK_COMPAT
-  libdrivenetconsensus_la_SOURCES += compat/glibc_compat.cpp
+  libskydogeconsensus_la_SOURCES += compat/glibc_compat.cpp
 endif
 
-libdrivenetconsensus_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS)
-libdrivenetconsensus_la_LIBADD = $(LIBSECP256K1)
-libdrivenetconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1/include -DBUILD_DRIVENET_INTERNAL
-libdrivenetconsensus_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydogeconsensus_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS)
+libskydogeconsensus_la_LIBADD = $(LIBSECP256K1)
+libskydogeconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1/include -DBUILD_DRIVENET_INTERNAL
+libskydogeconsensus_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 
 endif
 #
@@ -491,12 +491,12 @@ CLEANFILES += obj/build.h
 EXTRA_DIST = $(CTAES_DIST)
 
 
-config/drivenet-config.h: config/stamp-h1
+config/skydoge-config.h: config/stamp-h1
 	@$(MAKE) -C $(top_builddir) $(subdir)/$(@)
-config/stamp-h1: $(top_srcdir)/$(subdir)/config/drivenet-config.h.in $(top_builddir)/config.status
+config/stamp-h1: $(top_srcdir)/$(subdir)/config/skydoge-config.h.in $(top_builddir)/config.status
 	$(AM_V_at)$(MAKE) -C $(top_builddir) $(subdir)/$(@)
-$(top_srcdir)/$(subdir)/config/drivenet-config.h.in:  $(am__configure_deps)
-	$(AM_V_at)$(MAKE) -C $(top_srcdir) $(subdir)/config/drivenet-config.h.in
+$(top_srcdir)/$(subdir)/config/skydoge-config.h.in:  $(am__configure_deps)
+	$(AM_V_at)$(MAKE) -C $(top_srcdir) $(subdir)/config/skydoge-config.h.in
 
 clean-local:
 	-$(MAKE) -C secp256k1 clean

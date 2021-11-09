@@ -19,7 +19,7 @@ const struct VBDeploymentInfo VersionBitsDeploymentInfo[Consensus::MAX_VERSION_B
         /*.gbt_force =*/ true,
     },
     {
-        /*.name =*/ "drivechains",
+        /*.name =*/ "skydoges",
         /*.gbt_force =*/ true,
     }
 };

@@ -56,7 +56,7 @@
   <customwidget>
    <class>BitcoinAmountField</class>
    <extends>QLineEdit</extends>
-   <header>qt/drivenetamountfield.h</header>
+   <header>qt/skydogeamountfield.h</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

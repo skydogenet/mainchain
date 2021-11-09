@@ -13,31 +13,31 @@
 %endif
 %endif
 
-Name:		drivenet
+Name:		skydoge
 Version:	0.12.0
 Release:	2%{?dist}
 Summary:	Peer to Peer Cryptographic Currency
 
 Group:		Applications/System
 License:	MIT
-URL:		https://drivenet.org/
-Source0:	https://drivenet.org/bin/drivenet-core-%{version}/drivenet-%{version}.tar.gz
+URL:		https://skydoge.org/
+Source0:	https://skydoge.org/bin/skydoge-core-%{version}/skydoge-%{version}.tar.gz
 Source1:	http://download.oracle.com/berkeley-db/db-%{bdbv}.NC.tar.gz
 
-Source10:	https://raw.githubusercontent.com/drivenet/drivenet/v%{version}/contrib/debian/examples/drivenet.conf
+Source10:	https://raw.githubusercontent.com/skydoge/skydoge/v%{version}/contrib/debian/examples/skydoge.conf
 
 #man pages
-Source20:	https://raw.githubusercontent.com/drivenet/drivenet/v%{version}/doc/man/drivenetd.1
-Source21:	https://raw.githubusercontent.com/drivenet/drivenet/v%{version}/doc/man/drivenet-cli.1
-Source22:	https://raw.githubusercontent.com/drivenet/drivenet/v%{version}/doc/man/drivenet-qt.1
+Source20:	https://raw.githubusercontent.com/skydoge/skydoge/v%{version}/doc/man/skydoged.1
+Source21:	https://raw.githubusercontent.com/skydoge/skydoge/v%{version}/doc/man/skydoge-cli.1
+Source22:	https://raw.githubusercontent.com/skydoge/skydoge/v%{version}/doc/man/skydoge-qt.1
 
 #selinux
-Source30:	https://raw.githubusercontent.com/drivenet/drivenet/v%{version}/contrib/rpm/drivenet.te
-# Source31 - what about drivenet-tx and bench_drivenet ???
-Source31:	https://raw.githubusercontent.com/drivenet/drivenet/v%{version}/contrib/rpm/drivenet.fc
-Source32:	https://raw.githubusercontent.com/drivenet/drivenet/v%{version}/contrib/rpm/drivenet.if
+Source30:	https://raw.githubusercontent.com/skydoge/skydoge/v%{version}/contrib/rpm/skydoge.te
+# Source31 - what about skydoge-tx and bench_skydoge ???
+Source31:	https://raw.githubusercontent.com/skydoge/skydoge/v%{version}/contrib/rpm/skydoge.fc
+Source32:	https://raw.githubusercontent.com/skydoge/skydoge/v%{version}/contrib/rpm/skydoge.if
 
-Source100:	https://upload.wikimedia.org/wikipedia/commons/4/46/drivenet.svg
+Source100:	https://upload.wikimedia.org/wikipedia/commons/4/46/skydoge.svg
 
 %if 0%{?_use_libressl:1}
 BuildRequires:	libressl-devel
@@ -50,13 +50,13 @@ BuildRequires:	autoconf automake libtool
 BuildRequires:	libevent-devel
 
 
-Patch0:		drivenet-0.12.0-libressl.patch
+Patch0:		skydoge-0.12.0-libressl.patch
 
 
 %description
-drivenet is a digital cryptographic currency that uses peer-to-peer technology to
+skydoge is a digital cryptographic currency that uses peer-to-peer technology to
 operate with no central authority or banks; managing transactions and the
-issuing of drivenets is carried out collectively by the network.
+issuing of skydoges is carried out collectively by the network.
 
 %if %{_buildqt}
 %package core
@@ -79,42 +79,42 @@ BuildRequires:	%{_bindir}/inkscape
 BuildRequires:	%{_bindir}/convert
 
 %description core
-drivenet is a digital cryptographic currency that uses peer-to-peer technology to
+skydoge is a digital cryptographic currency that uses peer-to-peer technology to
 operate with no central authority or banks; managing transactions and the
-issuing of drivenets is carried out collectively by the network.
+issuing of skydoges is carried out collectively by the network.
 
 This package contains the Qt based graphical client and node. If you are looking
-to run a drivenet wallet, this is probably the package you want.
+to run a skydoge wallet, this is probably the package you want.
 %endif
 
 
 %package libs
-Summary:	drivenet shared libraries
+Summary:	skydoge shared libraries
 Group:		System Environment/Libraries
 
 %description libs
-This package provides the drivenetconsensus shared libraries. These libraries
+This package provides the skydogeconsensus shared libraries. These libraries
 may be used by third party software to provide consensus verification
 functionality.
 
 Unless you know need this package, you probably do not.
 
 %package devel
-Summary:	Development files for drivenet
+Summary:	Development files for skydoge
 Group:		Development/Libraries
 Requires:	%{name}-libs = %{version}-%{release}
 
 %description devel
 This package contains the header files and static library for the
-drivenetconsensus shared library. If you are developing or compiling software
+skydogeconsensus shared library. If you are developing or compiling software
 that wants to link against that library, then you need this package installed.
 
 Most people do not need this package installed.
 
 %package server
-Summary:	The drivenet daemon
+Summary:	The skydoge daemon
 Group:		System Environment/Daemons
-Requires:	drivenet-utils = %{version}-%{release}
+Requires:	skydoge-utils = %{version}-%{release}
 Requires:	selinux-policy policycoreutils-python
 Requires(pre):	shadow-utils
 Requires(post):	%{_sbindir}/semodule %{_sbindir}/restorecon %{_sbindir}/fixfiles %{_sbindir}/sestatus
@@ -124,34 +124,34 @@ BuildRequires:	checkpolicy
 BuildRequires:	%{_datadir}/selinux/devel/Makefile
 
 %description server
-This package provides a stand-alone drivenet-core daemon. For most users, this
+This package provides a stand-alone skydoge-core daemon. For most users, this
 package is only needed if they need a full-node without the graphical client.
 
 Some third party wallet software will want this package to provide the actual
-drivenet-core node they use to connect to the network.
+skydoge-core node they use to connect to the network.
 
-If you use the graphical drivenet-core client then you almost certainly do not
+If you use the graphical skydoge-core client then you almost certainly do not
 need this package.
 
 %package utils
-Summary:	drivenet utilities
+Summary:	skydoge utilities
 Group:		Applications/System
 
 %description utils
 This package provides several command line utilities for interacting with a
-drivenet-core daemon.
+skydoge-core daemon.
 
-The drivenet-cli utility allows you to communicate and control a drivenet daemon
-over RPC, the drivenet-tx utility allows you to create a custom transaction, and
-the bench_drivenet utility can be used to perform some benchmarks.
+The skydoge-cli utility allows you to communicate and control a skydoge daemon
+over RPC, the skydoge-tx utility allows you to create a custom transaction, and
+the bench_skydoge utility can be used to perform some benchmarks.
 
-This package contains utilities needed by the drivenet-server package.
+This package contains utilities needed by the skydoge-server package.
 
 
 %prep
 %setup -q
 %patch0 -p1 -b .libressl
-cp -p %{SOURCE10} ./drivenet.conf.example
+cp -p %{SOURCE10} ./skydoge.conf.example
 tar -zxf %{SOURCE1}
 cp -p db-%{bdbv}.NC/LICENSE ./db-%{bdbv}.NC-LICENSE
 mkdir db4 SELinux
@@ -172,7 +172,7 @@ make %{?_smp_mflags}
 pushd SELinux
 for selinuxvariant in %{selinux_variants}; do
 	make NAME=${selinuxvariant} -f %{_datadir}/selinux/devel/Makefile
-	mv drivenet.pp drivenet.pp.${selinuxvariant}
+	mv skydoge.pp skydoge.pp.${selinuxvariant}
 	make NAME=${selinuxvariant} -f %{_datadir}/selinux/devel/Makefile clean
 done
 popd
@@ -182,42 +182,42 @@ popd
 make install DESTDIR=%{buildroot}
 
 mkdir -p -m755 %{buildroot}%{_sbindir}
-mv %{buildroot}%{_bindir}/drivenetd %{buildroot}%{_sbindir}/drivenetd
+mv %{buildroot}%{_bindir}/skydoged %{buildroot}%{_sbindir}/skydoged
 
 # systemd stuff
 mkdir -p %{buildroot}%{_tmpfilesdir}
-cat <<EOF > %{buildroot}%{_tmpfilesdir}/drivenet.conf
-d /run/drivenetd 0750 drivenet drivenet -
+cat <<EOF > %{buildroot}%{_tmpfilesdir}/skydoge.conf
+d /run/skydoged 0750 skydoge skydoge -
 EOF
-touch -a -m -t 201504280000 %{buildroot}%{_tmpfilesdir}/drivenet.conf
+touch -a -m -t 201504280000 %{buildroot}%{_tmpfilesdir}/skydoge.conf
 
 mkdir -p %{buildroot}%{_sysconfdir}/sysconfig
-cat <<EOF > %{buildroot}%{_sysconfdir}/sysconfig/drivenet
-# Provide options to the drivenet daemon here, for example
+cat <<EOF > %{buildroot}%{_sysconfdir}/sysconfig/skydoge
+# Provide options to the skydoge daemon here, for example
 # OPTIONS="-testnet -disable-wallet"
 
 OPTIONS=""
 
 # System service defaults.
 # Don't change these unless you know what you're doing.
-CONFIG_FILE="%{_sysconfdir}/drivenet/drivenet.conf"
-DATA_DIR="%{_localstatedir}/lib/drivenet"
-PID_FILE="/run/drivenetd/drivenetd.pid"
+CONFIG_FILE="%{_sysconfdir}/skydoge/skydoge.conf"
+DATA_DIR="%{_localstatedir}/lib/skydoge"
+PID_FILE="/run/skydoged/skydoged.pid"
 EOF
-touch -a -m -t 201504280000 %{buildroot}%{_sysconfdir}/sysconfig/drivenet
+touch -a -m -t 201504280000 %{buildroot}%{_sysconfdir}/sysconfig/skydoge
 
 mkdir -p %{buildroot}%{_unitdir}
-cat <<EOF > %{buildroot}%{_unitdir}/drivenet.service
+cat <<EOF > %{buildroot}%{_unitdir}/skydoge.service
 [Unit]
-Description=drivenet daemon
+Description=skydoge daemon
 After=syslog.target network.target
 
 [Service]
 Type=forking
-ExecStart=%{_sbindir}/drivenetd -daemon -conf=\${CONFIG_FILE} -datadir=\${DATA_DIR} -pid=\${PID_FILE} \$OPTIONS
-EnvironmentFile=%{_sysconfdir}/sysconfig/drivenet
-User=drivenet
-Group=drivenet
+ExecStart=%{_sbindir}/skydoged -daemon -conf=\${CONFIG_FILE} -datadir=\${DATA_DIR} -pid=\${PID_FILE} \$OPTIONS
+EnvironmentFile=%{_sysconfdir}/sysconfig/skydoge
+User=skydoge
+Group=skydoge
 
 Restart=on-failure
 PrivateTmp=true
@@ -229,63 +229,63 @@ StartLimitBurst=5
 [Install]
 WantedBy=multi-user.target
 EOF
-touch -a -m -t 201504280000 %{buildroot}%{_unitdir}/drivenet.service
+touch -a -m -t 201504280000 %{buildroot}%{_unitdir}/skydoge.service
 #end systemd stuff
 
-mkdir %{buildroot}%{_sysconfdir}/drivenet
-mkdir -p %{buildroot}%{_localstatedir}/lib/drivenet
+mkdir %{buildroot}%{_sysconfdir}/skydoge
+mkdir -p %{buildroot}%{_localstatedir}/lib/skydoge
 
 #SELinux
 for selinuxvariant in %{selinux_variants}; do
 	install -d %{buildroot}%{_datadir}/selinux/${selinuxvariant}
-	install -p -m 644 SELinux/drivenet.pp.${selinuxvariant} %{buildroot}%{_datadir}/selinux/${selinuxvariant}/drivenet.pp
+	install -p -m 644 SELinux/skydoge.pp.${selinuxvariant} %{buildroot}%{_datadir}/selinux/${selinuxvariant}/skydoge.pp
 done
 
 %if %{_buildqt}
 # qt icons
-install -D -p share/pixmaps/drivenet.ico %{buildroot}%{_datadir}/pixmaps/drivenet.ico
+install -D -p share/pixmaps/skydoge.ico %{buildroot}%{_datadir}/pixmaps/skydoge.ico
 install -p share/pixmaps/nsis-header.bmp %{buildroot}%{_datadir}/pixmaps/
 install -p share/pixmaps/nsis-wizard.bmp %{buildroot}%{_datadir}/pixmaps/
-install -p %{SOURCE100} %{buildroot}%{_datadir}/pixmaps/drivenet.svg
-%{_bindir}/inkscape %{SOURCE100} --export-png=%{buildroot}%{_datadir}/pixmaps/drivenet16.png -w16 -h16
-%{_bindir}/inkscape %{SOURCE100} --export-png=%{buildroot}%{_datadir}/pixmaps/drivenet32.png -w32 -h32
-%{_bindir}/inkscape %{SOURCE100} --export-png=%{buildroot}%{_datadir}/pixmaps/drivenet64.png -w64 -h64
-%{_bindir}/inkscape %{SOURCE100} --export-png=%{buildroot}%{_datadir}/pixmaps/drivenet128.png -w128 -h128
-%{_bindir}/inkscape %{SOURCE100} --export-png=%{buildroot}%{_datadir}/pixmaps/drivenet256.png -w256 -h256
-%{_bindir}/convert -resize 16x16 %{buildroot}%{_datadir}/pixmaps/drivenet256.png %{buildroot}%{_datadir}/pixmaps/drivenet16.xpm
-%{_bindir}/convert -resize 32x32 %{buildroot}%{_datadir}/pixmaps/drivenet256.png %{buildroot}%{_datadir}/pixmaps/drivenet32.xpm
-%{_bindir}/convert -resize 64x64 %{buildroot}%{_datadir}/pixmaps/drivenet256.png %{buildroot}%{_datadir}/pixmaps/drivenet64.xpm
-%{_bindir}/convert -resize 128x128 %{buildroot}%{_datadir}/pixmaps/drivenet256.png %{buildroot}%{_datadir}/pixmaps/drivenet128.xpm
-%{_bindir}/convert %{buildroot}%{_datadir}/pixmaps/drivenet256.png %{buildroot}%{_datadir}/pixmaps/drivenet256.xpm
+install -p %{SOURCE100} %{buildroot}%{_datadir}/pixmaps/skydoge.svg
+%{_bindir}/inkscape %{SOURCE100} --export-png=%{buildroot}%{_datadir}/pixmaps/skydoge16.png -w16 -h16
+%{_bindir}/inkscape %{SOURCE100} --export-png=%{buildroot}%{_datadir}/pixmaps/skydoge32.png -w32 -h32
+%{_bindir}/inkscape %{SOURCE100} --export-png=%{buildroot}%{_datadir}/pixmaps/skydoge64.png -w64 -h64
+%{_bindir}/inkscape %{SOURCE100} --export-png=%{buildroot}%{_datadir}/pixmaps/skydoge128.png -w128 -h128
+%{_bindir}/inkscape %{SOURCE100} --export-png=%{buildroot}%{_datadir}/pixmaps/skydoge256.png -w256 -h256
+%{_bindir}/convert -resize 16x16 %{buildroot}%{_datadir}/pixmaps/skydoge256.png %{buildroot}%{_datadir}/pixmaps/skydoge16.xpm
+%{_bindir}/convert -resize 32x32 %{buildroot}%{_datadir}/pixmaps/skydoge256.png %{buildroot}%{_datadir}/pixmaps/skydoge32.xpm
+%{_bindir}/convert -resize 64x64 %{buildroot}%{_datadir}/pixmaps/skydoge256.png %{buildroot}%{_datadir}/pixmaps/skydoge64.xpm
+%{_bindir}/convert -resize 128x128 %{buildroot}%{_datadir}/pixmaps/skydoge256.png %{buildroot}%{_datadir}/pixmaps/skydoge128.xpm
+%{_bindir}/convert %{buildroot}%{_datadir}/pixmaps/skydoge256.png %{buildroot}%{_datadir}/pixmaps/skydoge256.xpm
 touch %{buildroot}%{_datadir}/pixmaps/*.png -r %{SOURCE100}
 touch %{buildroot}%{_datadir}/pixmaps/*.xpm -r %{SOURCE100}
 
 # Desktop File - change the touch timestamp if modifying
 mkdir -p %{buildroot}%{_datadir}/applications
-cat <<EOF > %{buildroot}%{_datadir}/applications/drivenet-core.desktop
+cat <<EOF > %{buildroot}%{_datadir}/applications/skydoge-core.desktop
 [Desktop Entry]
 Encoding=UTF-8
-Name=drivenet
-Comment=drivenet P2P Cryptocurrency
-Comment[fr]=drivenet, monnaie virtuelle cryptographique pair à pair
-Comment[tr]=drivenet, eşten eşe kriptografik sanal para birimi
-Exec=drivenet-qt %u
+Name=skydoge
+Comment=skydoge P2P Cryptocurrency
+Comment[fr]=skydoge, monnaie virtuelle cryptographique pair à pair
+Comment[tr]=skydoge, eşten eşe kriptografik sanal para birimi
+Exec=skydoge-qt %u
 Terminal=false
 Type=Application
-Icon=drivenet128
-MimeType=x-scheme-handler/drivenet;
+Icon=skydoge128
+MimeType=x-scheme-handler/skydoge;
 Categories=Office;Finance;
 EOF
 # change touch date when modifying desktop
-touch -a -m -t 201511100546 %{buildroot}%{_datadir}/applications/drivenet-core.desktop
-%{_bindir}/desktop-file-validate %{buildroot}%{_datadir}/applications/drivenet-core.desktop
+touch -a -m -t 201511100546 %{buildroot}%{_datadir}/applications/skydoge-core.desktop
+%{_bindir}/desktop-file-validate %{buildroot}%{_datadir}/applications/skydoge-core.desktop
 
 # KDE protocol - change the touch timestamp if modifying
 mkdir -p %{buildroot}%{_datadir}/kde4/services
-cat <<EOF > %{buildroot}%{_datadir}/kde4/services/drivenet-core.protocol
+cat <<EOF > %{buildroot}%{_datadir}/kde4/services/skydoge-core.protocol
 [Protocol]
-exec=drivenet-qt '%u'
-protocol=drivenet
+exec=skydoge-qt '%u'
+protocol=skydoge
 input=none
 output=none
 helper=true
@@ -296,14 +296,14 @@ makedir=false
 deleting=false
 EOF
 # change touch date when modifying protocol
-touch -a -m -t 201511100546 %{buildroot}%{_datadir}/kde4/services/drivenet-core.protocol
+touch -a -m -t 201511100546 %{buildroot}%{_datadir}/kde4/services/skydoge-core.protocol
 %endif
 
 # man pages
-install -D -p %{SOURCE20} %{buildroot}%{_mandir}/man1/drivenetd.1
-install -p %{SOURCE21} %{buildroot}%{_mandir}/man1/drivenet-cli.1
+install -D -p %{SOURCE20} %{buildroot}%{_mandir}/man1/skydoged.1
+install -p %{SOURCE21} %{buildroot}%{_mandir}/man1/skydoge-cli.1
 %if %{_buildqt}
-install -p %{SOURCE22} %{buildroot}%{_mandir}/man1/drivenet-qt.1
+install -p %{SOURCE22} %{buildroot}%{_mandir}/man1/skydoge-qt.1
 %endif
 
 # nuke these, we do extensive testing of binaries in %%check before packaging
@@ -311,7 +311,7 @@ rm -f %{buildroot}%{_bindir}/test_*
 
 %check
 make check
-srcdir=src test/drivenet-util-test.py
+srcdir=src test/skydoge-util-test.py
 test/functional/test_runner.py --extended
 
 %post libs -p /sbin/ldconfig
@@ -319,37 +319,37 @@ test/functional/test_runner.py --extended
 %postun libs -p /sbin/ldconfig
 
 %pre server
-getent group drivenet >/dev/null || groupadd -r drivenet
-getent passwd drivenet >/dev/null ||
-	useradd -r -g drivenet -d /var/lib/drivenet -s /sbin/nologin \
-	-c "drivenet wallet server" drivenet
+getent group skydoge >/dev/null || groupadd -r skydoge
+getent passwd skydoge >/dev/null ||
+	useradd -r -g skydoge -d /var/lib/skydoge -s /sbin/nologin \
+	-c "skydoge wallet server" skydoge
 exit 0
 
 %post server
-%systemd_post drivenet.service
+%systemd_post skydoge.service
 # SELinux
 if [ `%{_sbindir}/sestatus |grep -c "disabled"` -eq 0 ]; then
 for selinuxvariant in %{selinux_variants}; do
-	%{_sbindir}/semodule -s ${selinuxvariant} -i %{_datadir}/selinux/${selinuxvariant}/drivenet.pp &> /dev/null || :
+	%{_sbindir}/semodule -s ${selinuxvariant} -i %{_datadir}/selinux/${selinuxvariant}/skydoge.pp &> /dev/null || :
 done
-%{_sbindir}/semanage port -a -t drivenet_port_t -p tcp 8332
-%{_sbindir}/semanage port -a -t drivenet_port_t -p tcp 8333
-%{_sbindir}/semanage port -a -t drivenet_port_t -p tcp 18332
-%{_sbindir}/semanage port -a -t drivenet_port_t -p tcp 18333
-%{_sbindir}/semanage port -a -t drivenet_port_t -p tcp 18443
-%{_sbindir}/semanage port -a -t drivenet_port_t -p tcp 18444
-%{_sbindir}/fixfiles -R drivenet-server restore &> /dev/null || :
-%{_sbindir}/restorecon -R %{_localstatedir}/lib/drivenet || :
+%{_sbindir}/semanage port -a -t skydoge_port_t -p tcp 8332
+%{_sbindir}/semanage port -a -t skydoge_port_t -p tcp 8333
+%{_sbindir}/semanage port -a -t skydoge_port_t -p tcp 18332
+%{_sbindir}/semanage port -a -t skydoge_port_t -p tcp 18333
+%{_sbindir}/semanage port -a -t skydoge_port_t -p tcp 18443
+%{_sbindir}/semanage port -a -t skydoge_port_t -p tcp 18444
+%{_sbindir}/fixfiles -R skydoge-server restore &> /dev/null || :
+%{_sbindir}/restorecon -R %{_localstatedir}/lib/skydoge || :
 fi
 
 %posttrans server
 %{_bindir}/systemd-tmpfiles --create
 
 %preun server
-%systemd_preun drivenet.service
+%systemd_preun skydoge.service
 
 %postun server
-%systemd_postun drivenet.service
+%systemd_postun skydoge.service
 # SELinux
 if [ $1 -eq 0 ]; then
 	if [ `%{_sbindir}/sestatus |grep -c "disabled"` -eq 0 ]; then
@@ -360,11 +360,11 @@ if [ $1 -eq 0 ]; then
 	%{_sbindir}/semanage port -d -p tcp 18443
 	%{_sbindir}/semanage port -d -p tcp 18444
 	for selinuxvariant in %{selinux_variants}; do
-		%{_sbindir}/semodule -s ${selinuxvariant} -r drivenet &> /dev/null || :
+		%{_sbindir}/semodule -s ${selinuxvariant} -r skydoge &> /dev/null || :
 	done
-	%{_sbindir}/fixfiles -R drivenet-server restore &> /dev/null || :
-	[ -d %{_localstatedir}/lib/drivenet ] && \
-		%{_sbindir}/restorecon -R %{_localstatedir}/lib/drivenet &> /dev/null || :
+	%{_sbindir}/fixfiles -R skydoge-server restore &> /dev/null || :
+	[ -d %{_localstatedir}/lib/skydoge ] && \
+		%{_sbindir}/restorecon -R %{_localstatedir}/lib/skydoge &> /dev/null || :
 	fi
 fi
 
@@ -375,16 +375,16 @@ rm -rf %{buildroot}
 %files core
 %defattr(-,root,root,-)
 %license COPYING db-%{bdbv}.NC-LICENSE
-%doc COPYING drivenet.conf.example doc/README.md doc/bips.md doc/files.md doc/multiwallet-qt.md doc/reduce-traffic.md doc/release-notes.md doc/tor.md
-%attr(0755,root,root) %{_bindir}/drivenet-qt
-%attr(0644,root,root) %{_datadir}/applications/drivenet-core.desktop
-%attr(0644,root,root) %{_datadir}/kde4/services/drivenet-core.protocol
+%doc COPYING skydoge.conf.example doc/README.md doc/bips.md doc/files.md doc/multiwallet-qt.md doc/reduce-traffic.md doc/release-notes.md doc/tor.md
+%attr(0755,root,root) %{_bindir}/skydoge-qt
+%attr(0644,root,root) %{_datadir}/applications/skydoge-core.desktop
+%attr(0644,root,root) %{_datadir}/kde4/services/skydoge-core.protocol
 %attr(0644,root,root) %{_datadir}/pixmaps/*.ico
 %attr(0644,root,root) %{_datadir}/pixmaps/*.bmp
 %attr(0644,root,root) %{_datadir}/pixmaps/*.svg
 %attr(0644,root,root) %{_datadir}/pixmaps/*.png
 %attr(0644,root,root) %{_datadir}/pixmaps/*.xpm
-%attr(0644,root,root) %{_mandir}/man1/drivenet-qt.1*
+%attr(0644,root,root) %{_mandir}/man1/skydoge-qt.1*
 %endif
 
 %files libs
@@ -406,30 +406,30 @@ rm -rf %{buildroot}
 %files server
 %defattr(-,root,root,-)
 %license COPYING db-%{bdbv}.NC-LICENSE
-%doc COPYING drivenet.conf.example doc/README.md doc/REST-interface.md doc/bips.md doc/dnsseed-policy.md doc/files.md doc/reduce-traffic.md doc/release-notes.md doc/tor.md
-%attr(0755,root,root) %{_sbindir}/drivenetd
-%attr(0644,root,root) %{_tmpfilesdir}/drivenet.conf
-%attr(0644,root,root) %{_unitdir}/drivenet.service
-%dir %attr(0750,drivenet,drivenet) %{_sysconfdir}/drivenet
-%dir %attr(0750,drivenet,drivenet) %{_localstatedir}/lib/drivenet
-%config(noreplace) %attr(0600,root,root) %{_sysconfdir}/sysconfig/drivenet
+%doc COPYING skydoge.conf.example doc/README.md doc/REST-interface.md doc/bips.md doc/dnsseed-policy.md doc/files.md doc/reduce-traffic.md doc/release-notes.md doc/tor.md
+%attr(0755,root,root) %{_sbindir}/skydoged
+%attr(0644,root,root) %{_tmpfilesdir}/skydoge.conf
+%attr(0644,root,root) %{_unitdir}/skydoge.service
+%dir %attr(0750,skydoge,skydoge) %{_sysconfdir}/skydoge
+%dir %attr(0750,skydoge,skydoge) %{_localstatedir}/lib/skydoge
+%config(noreplace) %attr(0600,root,root) %{_sysconfdir}/sysconfig/skydoge
 %attr(0644,root,root) %{_datadir}/selinux/*/*.pp
-%attr(0644,root,root) %{_mandir}/man1/drivenetd.1*
+%attr(0644,root,root) %{_mandir}/man1/skydoged.1*
 
 %files utils
 %defattr(-,root,root,-)
 %license COPYING
-%doc COPYING drivenet.conf.example doc/README.md
-%attr(0755,root,root) %{_bindir}/drivenet-cli
-%attr(0755,root,root) %{_bindir}/drivenet-tx
-%attr(0755,root,root) %{_bindir}/bench_drivenet
-%attr(0644,root,root) %{_mandir}/man1/drivenet-cli.1*
+%doc COPYING skydoge.conf.example doc/README.md
+%attr(0755,root,root) %{_bindir}/skydoge-cli
+%attr(0755,root,root) %{_bindir}/skydoge-tx
+%attr(0755,root,root) %{_bindir}/bench_skydoge
+%attr(0644,root,root) %{_mandir}/man1/skydoge-cli.1*
 
 
 
 %changelog
 * Fri Feb 26 2016 Alice Wonder <buildmaster@librelamp.com> - 0.12.0-2
-- Rename Qt package from drivenet to drivenet-core
+- Rename Qt package from skydoge to skydoge-core
 - Make building of the Qt package optional
 - When building the Qt package, default to Qt5 but allow building
 -  against Qt4
@@ -439,4 +439,4 @@ rm -rf %{buildroot}
 - Initial spec file for 0.12.0 release
 
 # This spec file is written from scratch but a lot of the packaging decisions are directly
-# based upon the 0.11.2 package spec file from https://www.ringingliberty.com/drivenet/
+# based upon the 0.11.2 package spec file from https://www.ringingliberty.com/skydoge/

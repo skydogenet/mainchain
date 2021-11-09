@@ -83,7 +83,7 @@
         <string>  Create Sidechain Proposal</string>
        </property>
        <property name="icon">
-        <iconset resource="../drivenet.qrc">
+        <iconset resource="../skydoge.qrc">
          <normaloff>:/icons/add</normaloff>:/icons/add</iconset>
        </property>
        <property name="iconSize">
@@ -132,7 +132,7 @@
   </layout>
  </widget>
  <resources>
-  <include location="../drivenet.qrc"/>
+  <include location="../skydoge.qrc"/>
  </resources>
  <connections/>
 </ui>

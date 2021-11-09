@@ -1,22 +1,22 @@
-DriveNet
+Skydoge
 ------------------
 Learn more about Drivechains here:
-http://drivechain.info
+http://skydoge.info
 
 Start helping here:
-https://github.com/drivechain-project/bitcoin/issues
+https://github.com/skydoge-project/bitcoin/issues
 
-For an example sidechain implementation, see: https://github.com/drivechain-project/sidechains
+For an example sidechain implementation, see: https://github.com/skydoge-project/sidechains
 
 
-What is DriveNet?
+What is Skydoge?
 --------------------------
 ```TODO```
 
 License
 -------
 
-Bitcoin Core (and DriveNet) are released under the terms of the MIT license. See [COPYING](COPYING) for more
+Bitcoin Core (and Skydoge) are released under the terms of the MIT license. See [COPYING](COPYING) for more
 information or see https://opensource.org/licenses/MIT.
 
 Development Process

@@ -238,7 +238,7 @@
       </size>
      </property>
      <property name="text">
-      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;The process of catching up with the UTXO set / blockchain usually requires downloading several hundred gigabytes and can take several weeks.&lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;p&gt;DriveNet will take care of this in about 5 minutes on a high end system. It will take a bit longer if you are using a VM or have slow disk IO, please be patient. &lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;p&gt;Once the Bitcoin Core UTXO set has been loaded, you may import Bitcoin Core private keys and access coins as you normally would.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;The process of catching up with the UTXO set / blockchain usually requires downloading several hundred gigabytes and can take several weeks.&lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;p&gt;Skydoge will take care of this in about 5 minutes on a high end system. It will take a bit longer if you are using a VM or have slow disk IO, please be patient. &lt;/p&gt;&lt;p&gt;&lt;br/&gt;&lt;/p&gt;&lt;p&gt;Once the Bitcoin Core UTXO set has been loaded, you may import Bitcoin Core private keys and access coins as you normally would.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>

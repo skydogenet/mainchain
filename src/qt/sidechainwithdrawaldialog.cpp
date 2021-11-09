@@ -110,7 +110,7 @@ void SidechainWithdrawalDialog::on_comboBoxDefaultVote_currentIndexChanged(const
 void SidechainWithdrawalDialog::on_pushButtonHelp_clicked()
 {
     // TODO move text into static const
-    QMessageBox::information(this, tr("DriveNet - information"),
+    QMessageBox::information(this, tr("Skydoge - information"),
         tr("Sidechain withdrawal vote signalling:\n\n"
            "Use this page to set votes for withdrawal(s).\n\n"
            "Set Upvote to increase the work score of withdrawal(s) in blocks "

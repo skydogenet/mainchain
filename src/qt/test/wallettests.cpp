@@ -1,6 +1,6 @@
 #include <qt/test/wallettests.h>
 
-#include <qt/drivenetamountfield.h>
+#include <qt/skydogeamountfield.h>
 #include <qt/callback.h>
 #include <qt/optionsmodel.h>
 #include <qt/platformstyle.h>
@@ -10,7 +10,7 @@
 #include <qt/transactiontablemodel.h>
 #include <qt/transactionview.h>
 #include <qt/walletmodel.h>
-#include <test/test_drivenet.h>
+#include <test/test_skydoge.h>
 #include <validation.h>
 #include <wallet/wallet.h>
 #include <qt/overviewpage.h>

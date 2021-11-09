@@ -1,15 +1,15 @@
-# bash programmable completion for drivenetd(1) and drivenet-qt(1)
-# Copyright (c) 2012-2016 The drivenet Core developers
+# bash programmable completion for skydoged(1) and skydoge-qt(1)
+# Copyright (c) 2012-2016 The skydoge Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-_drivenetd() {
+_skydoged() {
     local cur prev words=() cword
-    local drivenetd
+    local skydoged
 
-    # save and use original argument to invoke drivenetd for -help
+    # save and use original argument to invoke skydoged for -help
     # it might not be in $PATH
-    drivenetd="$1"
+    skydoged="$1"
 
     COMPREPLY=()
     _get_comp_words_by_ref -n = cur prev words cword
@@ -33,7 +33,7 @@ _drivenetd() {
             # only parse -help if sensible
             if [[ -z "$cur" || "$cur" =~ ^- ]]; then
                 local helpopts
-                helpopts=$($drivenetd -help 2>&1 | awk '$1 ~ /^-/ { sub(/=.*/, "="); print $1 }' )
+                helpopts=$($skydoged -help 2>&1 | awk '$1 ~ /^-/ { sub(/=.*/, "="); print $1 }' )
                 COMPREPLY=( $( compgen -W "$helpopts" -- "$cur" ) )
             fi
 
@@ -45,7 +45,7 @@ _drivenetd() {
             ;;
     esac
 } &&
-complete -F _drivenetd drivenetd drivenet-qt
+complete -F _skydoged skydoged skydoge-qt
 
 # Local variables:
 # mode: shell-script

@@ -3,7 +3,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivenet-config.h>
+#include <config/skydoge-config.h>
 #endif
 
 #include <base58.h>
@@ -54,10 +54,10 @@ static int AppInitRawTx(int argc, char* argv[])
     if (argc<2 || gArgs.IsArgSet("-?") || gArgs.IsArgSet("-h") || gArgs.IsArgSet("-help"))
     {
         // First part of help message is specific to this utility
-        std::string strUsage = strprintf(_("%s drivenet-tx utility version"), _(PACKAGE_NAME)) + " " + FormatFullVersion() + "\n\n" +
+        std::string strUsage = strprintf(_("%s skydoge-tx utility version"), _(PACKAGE_NAME)) + " " + FormatFullVersion() + "\n\n" +
             _("Usage:") + "\n" +
-              "  drivenet-tx [options] <hex-tx> [commands]  " + _("Update hex-encoded DriveNet transaction") + "\n" +
-              "  drivenet-tx [options] -create [commands]   " + _("Create hex-encoded DriveNet transaction") + "\n" +
+              "  skydoge-tx [options] <hex-tx> [commands]  " + _("Update hex-encoded Skydoge transaction") + "\n" +
+              "  skydoge-tx [options] -create [commands]   " + _("Create hex-encoded Skydoge transaction") + "\n" +
               "\n";
 
         fprintf(stdout, "%s", strUsage.c_str());

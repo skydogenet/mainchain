@@ -4,7 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivenet-config.h>
+#include <config/skydoge-config.h>
 #endif
 
 #include "init.h"
@@ -196,7 +196,7 @@ void Shutdown()
     /// for example if the data directory was found to be locked.
     /// Be sure that anything that writes files or flushes caches only does this if the respective
     /// module was initialized.
-    RenameThread("drivenet-shutoff");
+    RenameThread("skydoge-shutoff");
     mempool.AddTransactionsUpdated(1);
 
     StopHTTPRPC();
@@ -538,8 +538,8 @@ std::string HelpMessage(HelpMessageMode mode)
 
 std::string LicenseInfo()
 {
-    const std::string URL_SOURCE_CODE = "<https://github.com/drivechain-project/mainchain>";
-    const std::string URL_WEBSITE = "<http://drivechain.info>";
+    const std::string URL_SOURCE_CODE = "<https://github.com/skydoge-project/mainchain>";
+    const std::string URL_WEBSITE = "<http://skydoge.info>";
 
     return CopyrightHolders(strprintf(_("Copyright (C) %i-%i"), 2009, COPYRIGHT_YEAR) + " ") + "\n" +
            "\n" +
@@ -643,7 +643,7 @@ void CleanupBlockRevFiles()
 void ThreadImport(std::vector<fs::path> vImportFiles)
 {
     const CChainParams& chainparams = Params();
-    RenameThread("drivenet-loadblk");
+    RenameThread("skydoge-loadblk");
 
     {
     CImportingNow imp;
@@ -1414,7 +1414,7 @@ bool AppInitMain()
     // ********************************************************* Step 7: load caches
     fReindex = gArgs.GetBoolArg("-reindex", false);
 
-    bool drivechainsEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
+    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
 
     std::string strFailSCDAT;
     strFailSCDAT = "Failed to load sidechain database files!\n";
@@ -1548,7 +1548,7 @@ bool AppInitMain()
                 }
 
                 // Synchronize SCDB
-                if (drivechainsEnabled && !fReindex && chainActive.Tip() && (chainActive.Tip()->GetBlockHash() != scdb.GetHashBlockLastSeen()))
+                if (skydogesEnabled && !fReindex && chainActive.Tip() && (chainActive.Tip()->GetBlockHash() != scdb.GetHashBlockLastSeen()))
                 {
                     uiInterface.InitMessage(_("Synchronizing sidechain database..."));
                     if (!ResyncSCDB(chainActive.Tip())) {
@@ -1561,7 +1561,7 @@ bool AppInitMain()
                     }
                 }
 
-                if (drivechainsEnabled && !fReindex) {
+                if (skydogesEnabled && !fReindex) {
                     if (!LoadDepositCache()) {
                         // Ask to reindex to fix issue loading DAT
                         bool fRet = uiInterface.ThreadSafeQuestion(
@@ -1619,8 +1619,8 @@ bool AppInitMain()
                     }
                 }
 
-                // Load user's drivechain data
-                if (drivechainsEnabled) {
+                // Load user's skydoge data
+                if (skydogesEnabled) {
                     // We want to read the user's data even if reindexing - this data
                     // was created by the user and is not in any block
                     if (!LoadSidechainProposalCache() ||
@@ -1799,9 +1799,9 @@ bool AppInitMain()
             // Failed to read loaded coins, abort
             // TODO add link to website with setup guide
             std::string strError = "Error reading loading coins!\n\n";
-            strError += "DriveNet needs to import a UTXO set (loaded coins) before starting for the first time.";
+            strError += "Skydoge needs to import a UTXO set (loaded coins) before starting for the first time.";
             strError += "\n\n";
-            strError += "You must move loaded_coins.dat to your DriveNet datadir.";
+            strError += "You must move loaded_coins.dat to your Skydoge datadir.";
             strError += "\n\n";
             strError += "Shutting down.";
             uiInterface.ThreadSafeMessageBox(_(strError.c_str()), "", CClientUIInterface::MSG_ERROR);
@@ -1904,7 +1904,7 @@ bool AppInitMain()
     }
 
     // ********************************************************* Step 14: finished
-    uiInterface.InitMessage(_("DriveNet ready to TESTDRIVE"));
+    uiInterface.InitMessage(_("Skydoge ready to TESTDRIVE"));
 
     SetRPCWarmupFinished();
 

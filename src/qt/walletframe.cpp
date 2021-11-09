@@ -4,7 +4,7 @@
 
 #include <qt/walletframe.h>
 
-#include <qt/drivenetgui.h>
+#include <qt/skydogegui.h>
 #include <qt/mempooltablemodel.h>
 #include <qt/walletview.h>
 #include <qt/sidechainwithdrawaltablemodel.h>

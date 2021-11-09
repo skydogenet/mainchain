@@ -2,7 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <qt/drivenetunits.h>
+#include <qt/skydogeunits.h>
 
 #include <primitives/transaction.h>
 
@@ -17,9 +17,9 @@ BitcoinUnits::BitcoinUnits(QObject *parent):
 QList<BitcoinUnits::Unit> BitcoinUnits::availableUnits()
 {
     QList<BitcoinUnits::Unit> unitlist;
-    unitlist.append(BTC);
-    unitlist.append(mBTC);
-    unitlist.append(uBTC);
+    unitlist.append(SKYDOGE);
+    unitlist.append(mSKYDOGE);
+    unitlist.append(uSKYDOGE);
     return unitlist;
 }
 
@@ -27,9 +27,9 @@ bool BitcoinUnits::valid(int unit)
 {
     switch(unit)
     {
-    case BTC:
-    case mBTC:
-    case uBTC:
+    case SKYDOGE:
+    case mSKYDOGE:
+    case uSKYDOGE:
         return true;
     default:
         return false;
@@ -40,9 +40,9 @@ QString BitcoinUnits::longName(int unit)
 {
     switch(unit)
     {
-    case BTC: return QString("BTC");
-    case mBTC: return QString("mBTC");
-    case uBTC: return QString::fromUtf8("µBTC (bits)");
+    case SKYDOGE: return QString("SKYDOGE");
+    case mSKYDOGE: return QString("mSKYDOGE");
+    case uSKYDOGE: return QString::fromUtf8("µSKYDOGE (bits)");
     default: return QString("???");
     }
 }
@@ -51,7 +51,7 @@ QString BitcoinUnits::shortName(int unit)
 {
     switch(unit)
     {
-    case uBTC: return QString::fromUtf8("bits");
+    case uSKYDOGE: return QString::fromUtf8("bits");
     default:   return longName(unit);
     }
 }
@@ -60,9 +60,9 @@ QString BitcoinUnits::description(int unit)
 {
     switch(unit)
     {
-    case BTC: return QString("Bitcoins");
-    case mBTC: return QString("Milli-Bitcoins (1 / 1" THIN_SP_UTF8 "000)");
-    case uBTC: return QString("Micro-Bitcoins (bits) (1 / 1" THIN_SP_UTF8 "000" THIN_SP_UTF8 "000)");
+    case SKYDOGE: return QString("Bitcoins");
+    case mSKYDOGE: return QString("Milli-Bitcoins (1 / 1" THIN_SP_UTF8 "000)");
+    case uSKYDOGE: return QString("Micro-Bitcoins (bits) (1 / 1" THIN_SP_UTF8 "000" THIN_SP_UTF8 "000)");
     default: return QString("???");
     }
 }
@@ -71,9 +71,9 @@ qint64 BitcoinUnits::factor(int unit)
 {
     switch(unit)
     {
-    case BTC:  return 100000000;
-    case mBTC: return 100000;
-    case uBTC: return 100;
+    case SKYDOGE:  return 100000000;
+    case mSKYDOGE: return 100000;
+    case uSKYDOGE: return 100;
     default:   return 100000000;
     }
 }
@@ -82,9 +82,9 @@ int BitcoinUnits::decimals(int unit)
 {
     switch(unit)
     {
-    case BTC: return 8;
-    case mBTC: return 5;
-    case uBTC: return 2;
+    case SKYDOGE: return 8;
+    case mSKYDOGE: return 5;
+    case uSKYDOGE: return 2;
     default: return 0;
     }
 }
@@ -120,7 +120,7 @@ QString BitcoinUnits::format(int unit, const CAmount& nIn, bool fPlus, Separator
     QString final = quotient_str + QString(".") + remainder_str;
 
     // Insert comma if needed
-    if (unit == BTC && remainder_str.size() == 8) {
+    if (unit == SKYDOGE && remainder_str.size() == 8) {
         final.insert(final.size() - 4, ",");
     }
 
@@ -171,7 +171,7 @@ bool BitcoinUnits::parse(int unit, const QString &value, CAmount *val_out)
     }
     if(decimals.size() > num_decimals)
     {
-        if (unit != BTC)
+        if (unit != SKYDOGE)
             return false; // Exceeds max precision
 
         // Check if decimals contains valid comma
@@ -181,7 +181,7 @@ bool BitcoinUnits::parse(int unit, const QString &value, CAmount *val_out)
     bool ok = false;
 
     // Remove commas
-    if (unit == BTC)
+    if (unit == SKYDOGE)
     {
         for (int i = 0; i < decimals.size(); i++) {
             if (decimals[i] ==',')

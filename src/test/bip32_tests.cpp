@@ -9,7 +9,7 @@
 #include <uint256.h>
 #include <util.h>
 #include <utilstrencodings.h>
-#include <test/test_drivenet.h>
+#include <test/test_skydoge.h>
 
 #include <string>
 #include <vector>

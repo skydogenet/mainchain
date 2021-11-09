@@ -1,13 +1,13 @@
 *.tar.gz
 
 *.exe
-src/drivenet
-src/drivenetd
-src/drivenet-cli
-src/drivenet-tx
-src/test/test_drivenet
-src/test/test_drivenet_fuzzy
-src/qt/test/test_drivenet-qt
+src/skydoge
+src/skydoged
+src/skydoge-cli
+src/skydoge-tx
+src/test/test_skydoge
+src/test/test_skydoge_fuzzy
+src/qt/test/test_skydoge-qt
 
 # autoreconf
 Makefile.in
@@ -30,8 +30,8 @@ config.log
 config.status
 configure
 libtool
-src/config/drivenet-config.h
-src/config/drivenet-config.h.in
+src/config/skydoge-config.h
+src/config/skydoge-config.h.in
 src/config/stamp-h1
 share/setup.nsi
 share/qt/Info.plist
@@ -44,11 +44,11 @@ src/qt/forms/ui_*.h
 
 src/qt/test/moc*.cpp
 
-src/qt/drivenet-qt.config
-src/qt/drivenet-qt.creator
-src/qt/drivenet-qt.creator.user
-src/qt/drivenet-qt.files
-src/qt/drivenet-qt.includes
+src/qt/skydoge-qt.config
+src/qt/skydoge-qt.creator
+src/qt/skydoge-qt.creator.user
+src/qt/skydoge-qt.files
+src/qt/skydoge-qt.includes
 
 .deps
 .dirstamp
@@ -80,15 +80,15 @@ src/qt/drivenet-qt.includes
 # Compilation and Qt preprocessor part
 *.qm
 Makefile
-drivenet-qt
-DriveNet-Qt.app
+skydoge-qt
+Skydoge-Qt.app
 background.tiff*
 
 mainchain.pro.user
 
 # Unit-tests
 Makefile.test
-drivenet-qt_test
+skydoge-qt_test
 
 # Resources cpp
 qrc_*.cpp
@@ -101,7 +101,7 @@ build
 *.gcno
 *.gcda
 /*.info
-test_drivenet.coverage/
+test_skydoge.coverage/
 total.coverage/
 coverage_percent.txt
 
@@ -116,5 +116,5 @@ test/cache/*
 
 /doc/doxygen/
 
-libdrivenetconsensus.pc
+libskydogeconsensus.pc
 contrib/devtools/split-debug.sh

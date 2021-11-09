@@ -211,7 +211,7 @@ def main():
     logging.basicConfig(format='%(message)s', level=logging_level)
 
     # Create base test directory
-    tmpdir = "%s/drivenet_test_runner_%s" % (args.tmpdirprefix, datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+    tmpdir = "%s/skydoge_test_runner_%s" % (args.tmpdirprefix, datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
     os.makedirs(tmpdir)
 
     logging.debug("Temporary test directory at %s" % tmpdir)
@@ -227,7 +227,7 @@ def main():
         sys.exit(0)
 
     if not (enable_wallet and enable_utils and enable_bitcoind):
-        print("No functional tests to run. Wallet, utils, and drivenetd must all be enabled")
+        print("No functional tests to run. Wallet, utils, and skydoged must all be enabled")
         print("Rerun `configure` with -enable-wallet, -with-utils and -with-daemon and rerun make")
         sys.exit(0)
 
@@ -282,8 +282,8 @@ def main():
 def run_tests(test_list, src_dir, build_dir, exeext, tmpdir, jobs=1, enable_coverage=False, args=[], combined_logs_len=0):
     # Warn if bitcoind is already running (unix only)
     try:
-        if subprocess.check_output(["pidof", "drivenetd"]) is not None:
-            print("%sWARNING!%s There is already a drivenetd process running on this system. Tests may fail unexpectedly due to resource contention!" % (BOLD[1], BOLD[0]))
+        if subprocess.check_output(["pidof", "skydoged"]) is not None:
+            print("%sWARNING!%s There is already a skydoged process running on this system. Tests may fail unexpectedly due to resource contention!" % (BOLD[1], BOLD[0]))
     except (OSError, subprocess.SubprocessError):
         pass
 
@@ -294,8 +294,8 @@ def run_tests(test_list, src_dir, build_dir, exeext, tmpdir, jobs=1, enable_cove
 
     #Set env vars
     if "DRIVENETD" not in os.environ:
-        os.environ["DRIVENETD"] = build_dir + '/src/drivenetd' + exeext
-        os.environ["DRIVENETCLI"] = build_dir + '/src/drivenet-cli' + exeext
+        os.environ["DRIVENETD"] = build_dir + '/src/skydoged' + exeext
+        os.environ["DRIVENETCLI"] = build_dir + '/src/skydoge-cli' + exeext
 
     tests_dir = src_dir + '/test/functional/'
 

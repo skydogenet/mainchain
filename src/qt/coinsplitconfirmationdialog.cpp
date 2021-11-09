@@ -7,7 +7,7 @@
 
 #include <QMessageBox>
 
-#include <qt/drivenetunits.h>
+#include <qt/skydogeunits.h>
 
 #include <base58.h>
 #include <consensus/validation.h>
@@ -78,7 +78,7 @@ void CoinSplitConfirmationDialog::SetInfo(const CAmount& amountIn, QString txidI
 
     ui->labelTXID->setText(txidIn);
 
-    QString strAmount = BitcoinUnits::formatWithUnit(BitcoinUnit::BTC, amountIn, false, BitcoinUnits::separatorAlways);
+    QString strAmount = BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, amountIn, false, BitcoinUnits::separatorAlways);
 
     ui->labelAmount->setText(strAmount);
     ui->labelAddress->setText(addressIn);
