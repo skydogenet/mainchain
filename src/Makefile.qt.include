@@ -186,7 +186,7 @@ QT_MOC_CPP = \
   qt/moc_sendcoinsdialog.cpp \
   qt/moc_sendcoinsentry.cpp \
   qt/moc_sidechainactivationtablemodel.cpp \
-  qt/moc_withdrawalvotetablemodel.cpp \
+  qt/moc_sidechainwithdrawalvotetablemodel.cpp \
   qt/moc_sidechainactivationdialog.cpp \
   qt/moc_sidechaindetailsdialog.cpp \
   qt/moc_sidechainproposaldialog.cpp \
@@ -289,7 +289,7 @@ DRIVENET_QT_H = \
   qt/sendcoinsdialog.h \
   qt/sendcoinsentry.h \
   qt/sidechainactivationtablemodel.h \
-  qt/withdrawalvotetablemodel.h \
+  qt/sidechainwithdrawalvotetablemodel.h \
   qt/sidechainactivationdialog.h \
   qt/sidechaindetailsdialog.h \
   qt/sidechaindepositconfirmationdialog.h \
@@ -493,7 +493,7 @@ DRIVENET_QT_WALLET_CPP = \
   qt/sendcoinsdialog.cpp \
   qt/sendcoinsentry.cpp \
   qt/sidechainactivationtablemodel.cpp \
-  qt/withdrawalvotetablemodel.cpp \
+  qt/sidechainwithdrawalvotetablemodel.cpp \
   qt/sidechainactivationdialog.cpp \
   qt/sidechaindetailsdialog.cpp \
   qt/sidechaindepositconfirmationdialog.cpp \

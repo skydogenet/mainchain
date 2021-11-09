@@ -1,4 +1,4 @@
-#include <qt/withdrawalvotetablemodel.h>
+#include <qt/sidechainwithdrawalvotetablemodel.h>
 
 #include <sidechain.h>
 #include <sidechaindb.h>
@@ -14,9 +14,9 @@
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
 
-Q_DECLARE_METATYPE(WithdrawalVoteTableObject)
+Q_DECLARE_METATYPE(VoteTableObject)
 
-WithdrawalVoteTableModel::WithdrawalVoteTableModel(QObject *parent) :
+SidechainWithdrawalVoteTableModel::SidechainWithdrawalVoteTableModel(QObject *parent) :
     QAbstractTableModel(parent)
 {
     // This timer will be fired repeatedly to update the model
@@ -25,17 +25,17 @@ WithdrawalVoteTableModel::WithdrawalVoteTableModel(QObject *parent) :
     pollTimer->start(MODEL_UPDATE_DELAY);
 }
 
-int WithdrawalVoteTableModel::rowCount(const QModelIndex & /*parent*/) const
+int SidechainWithdrawalVoteTableModel::rowCount(const QModelIndex & /*parent*/) const
 {
     return model.size();
 }
 
-int WithdrawalVoteTableModel::columnCount(const QModelIndex & /*parent*/) const
+int SidechainWithdrawalVoteTableModel::columnCount(const QModelIndex & /*parent*/) const
 {
     return 3;
 }
 
-QVariant WithdrawalVoteTableModel::data(const QModelIndex &index, int role) const
+QVariant SidechainWithdrawalVoteTableModel::data(const QModelIndex &index, int role) const
 {
     if (!index.isValid()) {
         return false;
@@ -44,10 +44,10 @@ QVariant WithdrawalVoteTableModel::data(const QModelIndex &index, int role) cons
     int row = index.row();
     int col = index.column();
 
-    if (!model.at(row).canConvert<WithdrawalVoteTableObject>())
+    if (!model.at(row).canConvert<VoteTableObject>())
         return QVariant();
 
-    WithdrawalVoteTableObject object = model.at(row).value<WithdrawalVoteTableObject>();
+    VoteTableObject object = model.at(row).value<VoteTableObject>();
 
     switch (role) {
     case Qt::DisplayRole:
@@ -78,7 +78,7 @@ QVariant WithdrawalVoteTableModel::data(const QModelIndex &index, int role) cons
     return QVariant();
 }
 
-QVariant WithdrawalVoteTableModel::headerData(int section, Qt::Orientation orientation, int role) const
+QVariant SidechainWithdrawalVoteTableModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
     if (role == Qt::DisplayRole) {
         if (orientation == Qt::Horizontal) {
@@ -95,16 +95,14 @@ QVariant WithdrawalVoteTableModel::headerData(int section, Qt::Orientation orien
     return QVariant();
 }
 
-void WithdrawalVoteTableModel::UpdateModel()
+void SidechainWithdrawalVoteTableModel::UpdateModel()
 {
-    // TODO there are many ways to improve the efficiency of this
-
     // Get all of the current Withdrawal(s) into one vector
     std::vector<Sidechain> vSidechain = scdb.GetActiveSidechains();
-    std::vector<SidechainWithdrawalState> vState;
+    std::vector<SidechainWithdrawalState> vWithdrawal;
     for (const Sidechain& s : vSidechain) {
         std::vector<SidechainWithdrawalState> vState = scdb.GetState(s.nSidechain);
-        vState.insert(vState.end(), vState.begin(), vState.end());
+        vWithdrawal.insert(vWithdrawal.end(), vState.begin(), vState.end());
     }
 
     // Get users votes
@@ -127,18 +125,18 @@ void WithdrawalVoteTableModel::UpdateModel()
     //
     // Also look for Withdrawal(s) which have been removed, and remove them from our
     // model / view.
-    std::vector<WithdrawalVoteTableObject> vRemoved;
+    std::vector<VoteTableObject> vRemoved;
     for (int i = 0; i < model.size(); i++) {
-        if (!model[i].canConvert<WithdrawalVoteTableObject>())
+        if (!model[i].canConvert<VoteTableObject>())
             return;
 
-        WithdrawalVoteTableObject object = model[i].value<WithdrawalVoteTableObject>();
+        VoteTableObject object = model[i].value<VoteTableObject>();
 
         bool fFound = false;
 
         // Check if the Withdrawal should still be in the table and make sure we set
         // it with the current vote
-        for (const SidechainWithdrawalState& s : vState) {
+        for (const SidechainWithdrawalState& s : vWithdrawal) {
             // Check if we need to update the vote type
             if (s.hash == uint256S(object.hash.toStdString())
                         && s.nSidechain == object.nSidechain) {
@@ -183,12 +181,12 @@ void WithdrawalVoteTableModel::UpdateModel()
 
     // Loop through the model and remove deleted votes
     for (int i = 0; i < model.size(); i++) {
-        if (!model[i].canConvert<WithdrawalVoteTableObject>())
+        if (!model[i].canConvert<VoteTableObject>())
             return;
 
-        WithdrawalVoteTableObject object = model[i].value<WithdrawalVoteTableObject>();
+        VoteTableObject object = model[i].value<VoteTableObject>();
 
-        for (const WithdrawalVoteTableObject& v : vRemoved) {
+        for (const VoteTableObject& v : vRemoved) {
             if (v.hash == object.hash && v.nSidechain == object.nSidechain) {
                 beginRemoveRows(QModelIndex(), i, i);
                 model[i] = model.back();
@@ -200,14 +198,14 @@ void WithdrawalVoteTableModel::UpdateModel()
 
     // Check for new Withdrawal(s)
     std::vector<SidechainWithdrawalState> vNew;
-    for (const SidechainWithdrawalState& s : vState) {
+    for (const SidechainWithdrawalState& s : vWithdrawal) {
         bool fFound = false;
 
         for (const QVariant& qv : model) {
-            if (!qv.canConvert<WithdrawalVoteTableObject>())
+            if (!qv.canConvert<VoteTableObject>())
                 return;
 
-            WithdrawalVoteTableObject object = qv.value<WithdrawalVoteTableObject>();
+            VoteTableObject object = qv.value<VoteTableObject>();
 
             if (s.hash == uint256S(object.hash.toStdString())
                     && s.nSidechain == object.nSidechain)
@@ -223,7 +221,7 @@ void WithdrawalVoteTableModel::UpdateModel()
     // Add new Withdrawal(s) if we need to - with correct vote type
     beginInsertRows(QModelIndex(), model.size(), model.size() + vNew.size() - 1);
     for (const SidechainWithdrawalState& s : vNew) {
-        WithdrawalVoteTableObject object;
+        VoteTableObject object;
 
         // If custom votes are set, check to see if one is set for this Withdrawal and
         // if not set SCDB_ABSTAIN. If custom votes are not set, use the current
@@ -249,15 +247,15 @@ void WithdrawalVoteTableModel::UpdateModel()
     endInsertRows();
 }
 
-bool WithdrawalVoteTableModel::GetWithdrawalInfoAtRow(int row, uint256& hash, unsigned int& nSidechain) const
+bool SidechainWithdrawalVoteTableModel::GetWithdrawalInfoAtRow(int row, uint256& hash, unsigned int& nSidechain) const
 {
     if (row >= model.size())
         return false;
 
-    if (!model[row].canConvert<WithdrawalVoteTableObject>())
+    if (!model[row].canConvert<VoteTableObject>())
         return false;
 
-    WithdrawalVoteTableObject object = model[row].value<WithdrawalVoteTableObject>();
+    VoteTableObject object = model[row].value<VoteTableObject>();
 
     hash = uint256S(object.hash.toStdString());
     nSidechain = object.nSidechain;

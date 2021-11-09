@@ -6,7 +6,7 @@
 #include <qt/forms/ui_sidechainwithdrawaldialog.h>
 
 #include <qt/platformstyle.h>
-#include <qt/withdrawalvotetablemodel.h>
+#include <qt/sidechainwithdrawalvotetablemodel.h>
 
 #include <QMessageBox>
 #include <QScrollBar>
@@ -30,7 +30,7 @@ SidechainWithdrawalDialog::SidechainWithdrawalDialog(const PlatformStyle *_platf
 {
     ui->setupUi(this);
 
-    withdrawalVoteModel = new WithdrawalVoteTableModel(this);
+    withdrawalVoteModel = new SidechainWithdrawalVoteTableModel(this);
 
     ui->tableViewWithdrawalVote->setModel(withdrawalVoteModel);
 

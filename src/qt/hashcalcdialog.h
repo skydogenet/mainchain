@@ -28,11 +28,6 @@ public Q_SLOTS:
     void on_pushButtonPaste_clicked();
     void on_pushButtonHelp_clicked();
     void on_pushButtonHelpInvalidHex_clicked();
-    void on_pushButtonCopySHA256D_clicked();
-    void on_pushButtonCopyHash160_clicked();
-    void on_pushButtonCopyRIPEMD160_clicked();
-    void on_pushButtonCopySHA256_clicked();
-    void on_pushButtonCopyHex_clicked();
     void on_radioButtonHex_toggled(bool fChecked);
     void on_pushButtonFlip_clicked();
 

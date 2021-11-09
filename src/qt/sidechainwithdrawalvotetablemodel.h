@@ -1,5 +1,5 @@
-#ifndef WITHDRAWALVOTETABLEMODEL_H
-#define WITHDRAWALVOTETABLEMODEL_H
+#ifndef SIDECHAINWITHDRAWALVOTETABLEMODEL_H
+#define SIDECHAINWITHDRAWALVOTETABLEMODEL_H
 
 #include <uint256.h>
 
@@ -10,19 +10,19 @@ QT_BEGIN_NAMESPACE
 class QTimer;
 QT_END_NAMESPACE
 
-struct WithdrawalVoteTableObject
+struct VoteTableObject
 {
     unsigned int nSidechain;
     QString hash;
     char vote;
 };
 
-class WithdrawalVoteTableModel : public QAbstractTableModel
+class SidechainWithdrawalVoteTableModel : public QAbstractTableModel
 {
     Q_OBJECT
 
 public:
-    explicit WithdrawalVoteTableModel(QObject *parent = 0);
+    explicit SidechainWithdrawalVoteTableModel(QObject *parent = 0);
     int rowCount(const QModelIndex &parent = QModelIndex()) const;
     int columnCount(const QModelIndex &parent = QModelIndex()) const;
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
@@ -38,4 +38,4 @@ private:
     QTimer *pollTimer;
 };
 
-#endif // WITHDRAWALVOTETABLEMODEL_H
+#endif // SIDECHAINWITHDRAWALVOTETABLEMODEL_H

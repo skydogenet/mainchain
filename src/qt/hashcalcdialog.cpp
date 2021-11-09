@@ -93,31 +93,6 @@ void HashCalcDialog::on_pushButtonHelpInvalidHex_clicked()
         QMessageBox::Ok);
 }
 
-void HashCalcDialog::on_pushButtonCopySHA256D_clicked()
-{
-    GUIUtil::setClipboard(ui->labelSHA256D->text());
-}
-
-void HashCalcDialog::on_pushButtonCopyHash160_clicked()
-{
-    GUIUtil::setClipboard(ui->labelHash160->text());
-}
-
-void HashCalcDialog::on_pushButtonCopyRIPEMD160_clicked()
-{
-    GUIUtil::setClipboard(ui->labelRIPEMD160->text());
-}
-
-void HashCalcDialog::on_pushButtonCopySHA256_clicked()
-{
-    GUIUtil::setClipboard(ui->labelSHA256->text());
-}
-
-void HashCalcDialog::on_pushButtonCopyHex_clicked()
-{
-    GUIUtil::setClipboard(ui->textBrowserHex->toPlainText());
-}
-
 void HashCalcDialog::on_radioButtonHex_toggled(bool fChecked)
 {
     const std::string str = ui->plainTextEdit->toPlainText().toStdString();

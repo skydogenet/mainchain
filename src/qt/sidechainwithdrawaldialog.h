@@ -8,7 +8,7 @@
 #include <QDialog>
 
 class PlatformStyle;
-class WithdrawalVoteTableModel;
+class SidechainWithdrawalVoteTableModel;
 
 namespace Ui {
 class SidechainWithdrawalDialog;
@@ -42,7 +42,7 @@ public Q_SLOTS:
 private:
     Ui::SidechainWithdrawalDialog *ui;
 
-    WithdrawalVoteTableModel *withdrawalVoteModel = nullptr;
+    SidechainWithdrawalVoteTableModel *withdrawalVoteModel = nullptr;
 
     const PlatformStyle *platformStyle;
 
