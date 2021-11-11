@@ -1,22 +1,23 @@
 Skydoge
 ------------------
 Learn more about Skydoge here:
-http://skydoge.info
+https://skydoge.info
 
 Start helping here:
-https://github.com/skydoge-project/bitcoin/issues
+https://github.com/skydoge-project/mainchain/issues
 
 For an example sidechain implementation, see: https://github.com/skydoge-project/sidechains
 
 
 What is Skydoge?
 --------------------------
-```TODO```
+Skydoge.net is a decentralized messaging platform including it's own crypto currency built on layer 1 blockchain network also including sidechain enabled technologies. This project is a fork of Drivechain (Bitcoin Core 0.16.99 + BIPs 300 and 301) and could be implemented on Bitcoin.
+
 
 License
 -------
 
-Bitcoin Core (and Skydoge) are released under the terms of the MIT license. See [COPYING](COPYING) for more
+Bitcoin Core, Drivechain and Skydoge are released under the terms of the MIT license. See [COPYING](COPYING) for more
 information or see https://opensource.org/licenses/MIT.
 
 Development Process
@@ -32,7 +33,7 @@ The developer [mailing list](https://lists.linuxfoundation.org/mailman/listinfo/
 should be used to discuss complicated or controversial changes before working
 on a patch set.
 
-Developer IRC can be found on Freenode at #bitcoin-core-dev.
+Developer IRC can be found on Freenode at #skydogenet.
 
 Testing
 -------
