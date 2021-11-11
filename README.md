@@ -4,9 +4,9 @@ Learn more about Skydoge here:
 https://skydoge.info
 
 Start helping here:
-https://github.com/skydoge-project/mainchain/issues
+https://github.com/skydogenet/mainchain/issues
 
-For an example sidechain implementation, see: https://github.com/skydoge-project/sidechains
+For an example sidechain implementation, see: https://github.com/skydogenet/sidechains
 
 
 What is Skydoge?
