@@ -662,7 +662,7 @@ public:
     bool IsPayToWitnessScriptHash() const;
     bool IsWitnessProgram(int& version, std::vector<unsigned char>& program) const;
 
-    /** Script formats for Drivechains */
+    /** Script formats for Skydoge */
     bool IsCriticalHashCommit(uint256& hash) const;
     bool IsSCDBHashMerkleRootCommit(uint256& hashMerkleRoot) const;
     bool IsWithdrawalHashCommit(uint256& hash, uint8_t& nSidechain) const;

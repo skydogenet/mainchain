@@ -625,7 +625,7 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
         return state.DoS(0, false, REJECT_NONSTANDARD, "no-witness-yet", true);
     }
 
-    // Reject critical data / Skydoge BMM transactions before Drivechains are activated (override with -prematureskydoges)
+    // Reject critical data / Skydoge BMM transactions before Skydoge are activated (override with -prematureskydoges)
     bool fCriticalData = !tx.criticalData.IsNull();
     bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
     if (!gArgs.GetBoolArg("-prematureskydoges", false) && fCriticalData && !skydogesEnabled) {
@@ -1596,7 +1596,7 @@ bool CheckInputs(const CTransaction& tx, CValidationState &state, const CCoinsVi
                 return true;
             }
 
-            //bool fDrivechainsEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+            //bool fSkydogeEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
 
             for (unsigned int i = 0; i < tx.vin.size(); i++) {
                 const COutPoint &prevout = tx.vin[i].prevout;
@@ -1605,7 +1605,7 @@ bool CheckInputs(const CTransaction& tx, CValidationState &state, const CCoinsVi
 
                 // Check Critical Data tx maturity - Critical Data outputs must
                 // have a block depth greater than CRITICAL_DATA_MATURITY.
-                //if (fDrivechainsEnabled) {
+                //if (fSkydogeEnabled) {
                 //    if (coin.IsCriticalData()) {
                 //        if ((chainActive.Height() - coin.nHeight) < CRITICAL_DATA_MATURITY) {
                 //        LogPrintf("KYLO: %u\n", chainActive.Height() - coin.nHeight);
@@ -3472,7 +3472,7 @@ bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& pa
 bool IsDrivechainEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
     LOCK(cs_main);
-    return (VersionBitsState(pindexPrev, params, Consensus::DEPLOYMENT_DRIVECHAINS, versionbitscache) == THRESHOLD_ACTIVE);
+    return (VersionBitsState(pindexPrev, params, Consensus::DEPLOYMENT_SKYDOGE, versionbitscache) == THRESHOLD_ACTIVE);
 }
 
 // Compute at which vout of the block's coinbase transaction the witness
@@ -3541,7 +3541,7 @@ void GenerateCriticalHashCommitments(CBlock& block, const Consensus::Params& con
     if (block.vtx.size() < 2)
         return;
 
-    // Check for activation of Drivechains
+    // Check for activation of Skydoge
     if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
         return;
 
@@ -3583,7 +3583,7 @@ void GenerateLNCriticalHashCommitment(CBlock& block, const Consensus::Params& co
      * BIP: 300 & 301
      */
 
-    // Check for activation of Drivechains
+    // Check for activation of Skydoge
     if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
         return;
 
@@ -3632,7 +3632,7 @@ void GenerateSCDBHashMerkleRootCommitment(CBlock& block, const uint256& hashSCDB
      * BIP: 300 & 301
      */
 
-    // Check for activation of Drivechains
+    // Check for activation of Skydoge
     if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
         return;
 
@@ -3665,7 +3665,7 @@ void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const 
      * BIP: 300 & 301
      */
 
-    // Check for activation of Drivechains
+    // Check for activation of Skydoge
     if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
         return;
 
@@ -3694,7 +3694,7 @@ void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const 
 
 void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidechain, const Consensus::Params& consensusParams)
 {
-    // Check for activation of Drivechains
+    // Check for activation of Skydoge
     if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
         return;
 
@@ -3712,7 +3712,7 @@ void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidecha
 
 void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash, const Consensus::Params& consensusParams)
 {
-    // Check for activation of Drivechains
+    // Check for activation of Skydoge
     if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
         return;
 
@@ -3738,7 +3738,7 @@ void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash, c
 
 void GenerateSCDBUpdateScript(CBlock& block, CScript& script, const std::vector<std::vector<SidechainWithdrawalState>>& vScores, const std::vector<SidechainCustomVote>& vUserVotes, const Consensus::Params& consensusParams)
 {
-    // Check for activation of Drivechains
+    // Check for activation of Skydoge
     if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
         return;
 
@@ -3821,7 +3821,7 @@ std::vector<CCriticalData> GetCriticalDataRequests(const CBlock& block, const Co
 {
     std::vector<CCriticalData> vCriticalData;
 
-    // Check for activation of Drivechains
+    // Check for activation of Skydoge
     if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
         return vCriticalData;
 

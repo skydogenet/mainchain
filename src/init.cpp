@@ -1714,7 +1714,7 @@ bool AppInitMain()
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
     }
 
-    if (chainparams.GetConsensus().vDeployments[Consensus::DEPLOYMENT_DRIVECHAINS].nTimeout != 0) {
+    if (chainparams.GetConsensus().vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout != 0) {
         nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN);
     }
 

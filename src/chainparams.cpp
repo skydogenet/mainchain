@@ -90,10 +90,10 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
-        // Deployment of Drivechains (BIPX hashrate escrow, BIPY BMM)
-        consensus.vDeployments[Consensus::DEPLOYMENT_DRIVECHAINS].bit = 4;
-        consensus.vDeployments[Consensus::DEPLOYMENT_DRIVECHAINS].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
-        consensus.vDeployments[Consensus::DEPLOYMENT_DRIVECHAINS].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
+        // Deployment of Skydoge (BIPX hashrate escrow, BIPY BMM)
+        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].bit = 4;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000000000001d5fffff");
@@ -200,10 +200,10 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
-        // Deployment of Drivechains (BIPX hashrate escrow, BIPY BMM)
-        consensus.vDeployments[Consensus::DEPLOYMENT_DRIVECHAINS].bit = 4;
-        consensus.vDeployments[Consensus::DEPLOYMENT_DRIVECHAINS].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
-        consensus.vDeployments[Consensus::DEPLOYMENT_DRIVECHAINS].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
+        // Deployment of Skydoge (BIPX hashrate escrow, BIPY BMM)
+        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].bit = 4;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000000000001d5fffff");
@@ -291,9 +291,9 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
-        consensus.vDeployments[Consensus::DEPLOYMENT_DRIVECHAINS].bit = 4;
-        consensus.vDeployments[Consensus::DEPLOYMENT_DRIVECHAINS].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
-        consensus.vDeployments[Consensus::DEPLOYMENT_DRIVECHAINS].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].bit = 4;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S("0x00");

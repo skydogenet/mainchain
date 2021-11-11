@@ -1,6 +1,6 @@
 Skydoge
 ------------------
-Learn more about Drivechains here:
+Learn more about Skydoge here:
 http://skydoge.info
 
 Start helping here:
