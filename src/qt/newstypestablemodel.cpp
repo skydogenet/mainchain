@@ -17,8 +17,8 @@ Q_DECLARE_METATYPE(NewsTypesTableObject)
 
 std::vector<NewsTypesTableObject> vDefaultType
 {
-    NewsTypesTableObject("US Daily", "a1a1a1a1", 1, "1{a1a1a1a1}US Daily"),
-    NewsTypesTableObject("Japan Daily", "a2a2a2a2", 1, "1{a2a2a2a2}Japan Daily")
+    NewsTypesTableObject("Daily Doge", "a1a1a1a1", 1, "1{a1a1a1a1}Daily Doge"),
+    NewsTypesTableObject("Doge Extra", "a2a2a2a2", 1, "1{a2a2a2a2}Doge Extra")
 };
 
 NewsTypesTableModel::NewsTypesTableModel(QObject *parent) :

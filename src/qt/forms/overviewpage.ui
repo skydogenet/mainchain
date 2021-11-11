@@ -440,7 +440,7 @@
         <item>
          <widget class="QLabel" name="label_3">
           <property name="text">
-           <string>Coin News:</string>
+           <string>Skydoge News:</string>
           </property>
          </widget>
         </item>
