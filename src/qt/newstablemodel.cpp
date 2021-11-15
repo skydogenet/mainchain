@@ -177,7 +177,7 @@ void NewsTableModel::UpdateModel()
     if (!newsTypesModel->GetType(nFilter, type))
         return;
 
-    QDateTime tipTime = QDateTime::fromSecsSinceEpoch(chainActive.Tip()->GetBlockTime());
+    QDateTime tipTime = QDateTime::fromMSecsSinceEpoch(chainActive.Tip()->GetBlockTime());
     QDateTime targetTime = tipTime.addDays(-type.nDays);
 
     // Loop backwards from chainTip until we reach target time or genesis block.
