@@ -16,6 +16,8 @@
 
 Q_DECLARE_METATYPE(MemPoolTableObject)
 
+static const int nEntriesToDisplay = 21;
+
 MemPoolTableModel::MemPoolTableModel(QObject *parent) :
     QAbstractTableModel(parent)
 {
@@ -117,15 +119,34 @@ QVariant MemPoolTableModel::headerData(int section, Qt::Orientation orientation,
 
 void MemPoolTableModel::updateModel()
 {
-    // Clear old data
+    // Get recent mempool entries
+    std::vector<TxMempoolInfo> vInfo = mempool.InfoRecent(10);
+
+    // Check if there is a transaction that we already know.
+    // If we find one then cut down vInfo to only new transactions.
+    if (model.size() && model.front().canConvert<MemPoolTableObject>()) {
+        MemPoolTableObject old = model.front().value<MemPoolTableObject>();
+
+        for (auto it = vInfo.begin(); it != vInfo.end(); it++) {
+            if (!it->tx)
+                continue;
+
+            if (it->tx->GetHash() == old.txid) {
+                vInfo = std::vector<TxMempoolInfo>(vInfo.begin(), it/*(it == vInfo.begin() ? it : it - 1)*/);
+                break;
+            }
+        }
+    }
+
+    // Copy and then clear old data
+    QList<QVariant> oldModel = model;
+
     beginResetModel();
     model.clear();
     endResetModel();
 
-    // Get 6 most recent mempool entries
-    std::vector<TxMempoolInfo> vInfo = mempool.InfoRecent(6);
-
-    beginInsertRows(QModelIndex(), model.size(), model.size() + vInfo.size());
+    // Add new data then old data to table
+    beginInsertRows(QModelIndex(), 0, oldModel.size() + vInfo.size() - 1);
     for (const TxMempoolInfo& i : vInfo) {
         if (!i.tx)
             continue;
@@ -138,7 +159,19 @@ void MemPoolTableModel::updateModel()
 
         model.append(QVariant::fromValue(object));
     }
+    for (const QVariant& v : oldModel) {
+        model.append(v);
+    }
     endInsertRows();
+
+    // Remove extra entries
+    if (model.size() > nEntriesToDisplay)
+    {
+        beginRemoveRows(QModelIndex(), model.size() - 1, nEntriesToDisplay);
+        while (model.size() > nEntriesToDisplay)
+            model.pop_back();
+        endRemoveRows();
+    }
 }
 
 void MemPoolTableModel::memPoolSizeChanged(long nTxIn, size_t nBytesIn)

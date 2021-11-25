@@ -3684,7 +3684,7 @@ UniValue createopreturntransaction(const JSONRPCRequest& request)
             "\nCreate a transaction with OP_RETURN data.\n"
             + HelpRequiringPassphrase(pwallet) +
             "\nArguments:\n"
-            "1. \"text\"        (string, required) The amount in " + CURRENCY_UNIT + " to send. eg 0.1\n"
+            "1. \"text\"        (string, required) Data to be encoded in the Tx\n"
             "2. \"fee\"         (numeric or string, required) The fee in " + CURRENCY_UNIT + "\n"
             "\nResult:\n"
             "\"txid\"           (string) The transaction id.\n"
@@ -3724,6 +3724,83 @@ UniValue createopreturntransaction(const JSONRPCRequest& request)
     std::vector<unsigned char> vBytes = ParseHex(strHex);
 
     CScript script = CScript() << OP_RETURN << vBytes;
+
+    CTransactionRef tx;
+    std::string strFail = "";
+    if (!pwallet->CreateOPReturnTransaction(tx, strFail, nFee, script))
+    {
+        LogPrintf("%s: %s\n", __func__, strFail);
+        throw JSONRPCError(RPC_MISC_ERROR, strFail);
+    }
+
+    return tx->GetHash().GetHex();
+}
+
+UniValue broadcastnews(const JSONRPCRequest& request)
+{
+    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+        return NullUniValue;
+    }
+
+    if (request.fHelp || request.params.size() != 3)
+        throw std::runtime_error(
+            "broadcastnews \"header\" \"text\" \"fee\"\n"
+            "\nCreate a transaction with Coin News OP_RETURN data.\n"
+            + HelpRequiringPassphrase(pwallet) +
+            "\nArguments:\n"
+            "1. \"header bytes\"    (string, required) The header bytes for the news type (ex: a1a1a1a1)\n"
+            "2. \"text\"            (string, required) The news to broadcast\n"
+            "3. \"fee\"             (numeric or string, required) The fee in " + CURRENCY_UNIT + "\n"
+            "\nResult:\n"
+            "\"txid\"           (string) The transaction id.\n"
+            "\nExamples:\n"
+            + HelpExampleCli("broadcastnews", "a1a1a1a1, hello world, 0.1")
+            + HelpExampleRpc("broadcastnews", "a1a1a1a1, hello world, 0.1")
+        );
+
+    ObserveSafeMode();
+
+    // Header
+    std::string header = request.params[0].get_str();
+    if (header.empty() || header.size() != 8) {
+        std::string strError = "Invalid header bytes";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+
+    // text
+    std::string text = request.params[1].get_str();
+    if (text.empty()) {
+        std::string strError = "Invalid text";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+
+    // Fee
+    CAmount nFee = AmountFromValue(request.params[2]);
+    if (nFee <= 0) {
+        std::string strError = "Invalid fee amount";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+
+    // Make sure the results are valid at least up to the most recent block
+    // the user could have gotten from another RPC command prior to now
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    LOCK2(cs_main, pwallet->cs_wallet);
+
+    EnsureWalletIsUnlocked(pwallet);
+
+    std::string strHex = header + HexStr(text.begin(), text.end());
+    std::vector<unsigned char> vBytes = ParseHex(strHex);
+
+    // Create news OP_RETURN script
+    CScript script;
+    script.resize(vBytes.size() + 1);
+    script[0] = OP_RETURN;
+    memcpy(&script[1], vBytes.data(), vBytes.size());
 
     CTransactionRef tx;
     std::string strFail = "";
@@ -4039,6 +4116,7 @@ static const CRPCCommand commands[] =
     { "DriveChain",         "createbmmcriticaldatatx",    &createbmmcriticaldatatx,    {"amount", "height", "criticalhash", "nsidechain", "ndag"}},
 
     { "CoinNews",           "createopreturntransaction",  &createopreturntransaction,  {"text", "fee"} },
+    { "CoinNews",           "broadcastnews",              &broadcastnews,              {"header", "text", "fee"} },
 
 };
 

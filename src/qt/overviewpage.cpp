@@ -9,6 +9,7 @@
 #include <qt/clientmodel.h>
 #include <qt/createnewsdialog.h>
 #include <qt/skydogeunits.h>
+#include <qt/decodeviewdialog.h>
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
 #include <qt/latestblocktablemodel.h>
@@ -32,7 +33,7 @@
 #include <txdb.h>
 #include <validation.h>
 
-OverviewPage::OverviewPage(const PlatformStyle *platformStyle, QWidget *parent) :
+OverviewPage::OverviewPage(const PlatformStyle *platformStyleIn, QWidget *parent) :
     QWidget(parent),
     ui(new Ui::OverviewPage),
     clientModel(0),
@@ -45,6 +46,8 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyle, QWidget *parent) 
     currentWatchImmatureBalance(-1)
 {
     ui->setupUi(this);
+
+    platformStyle = platformStyleIn;
 
     // use a SingleColorIcon for the "out of sync warning" icon
     QIcon icon = platformStyle->SingleColorIcon(":/icons/warning");
@@ -68,8 +71,6 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyle, QWidget *parent) 
 
     latestBlockModel = new LatestBlockTableModel(this);
     ui->tableViewBlocks->setModel(latestBlockModel);
-
-
 
     newsModel1 = new NewsTableModel(this);
     newsModel1->setNewsTypesModel(newsTypesTableModel);
@@ -160,15 +161,26 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyle, QWidget *parent) 
 
     // News table 1 context menu
     QAction *showDetailsNewsAction1 = new QAction(tr("Show full data decode"), this);
+    QAction *copyNewsAction1 = new QAction(tr("Copy decode"), this);
+    QAction *copyNewsHexAction1 = new QAction(tr("Copy hex"), this);
+
     contextMenuNews1 = new QMenu(this);
     contextMenuNews1->setObjectName("contextMenuNews1");
     contextMenuNews1->addAction(showDetailsNewsAction1);
+    contextMenuNews1->addAction(copyNewsAction1);
+    contextMenuNews1->addAction(copyNewsHexAction1);
+
 
     // News table 2 context menu
     QAction *showDetailsNewsAction2 = new QAction(tr("Show full data decode"), this);
+    QAction *copyNewsAction2 = new QAction(tr("Copy decode"), this);
+    QAction *copyNewsHexAction2 = new QAction(tr("Copy hex"), this);
+
     contextMenuNews2 = new QMenu(this);
     contextMenuNews2->setObjectName("contextMenuNews2");
     contextMenuNews2->addAction(showDetailsNewsAction2);
+    contextMenuNews2->addAction(copyNewsAction2);
+    contextMenuNews2->addAction(copyNewsHexAction2);
 
     // Recent txns (mempool) table context menu
     QAction *showDetailsMempoolAction = new QAction(tr("Show transaction details from mempool"), this);
@@ -190,6 +202,10 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyle, QWidget *parent) 
 
     connect(showDetailsNewsAction1, SIGNAL(triggered()), this, SLOT(showDetailsNews1()));
     connect(showDetailsNewsAction2, SIGNAL(triggered()), this, SLOT(showDetailsNews2()));
+    connect(copyNewsAction1, SIGNAL(triggered()), this, SLOT(copyNews1()));
+    connect(copyNewsAction2, SIGNAL(triggered()), this, SLOT(copyNews2()));
+    connect(copyNewsHexAction1, SIGNAL(triggered()), this, SLOT(copyNewsHex1()));
+    connect(copyNewsHexAction2, SIGNAL(triggered()), this, SLOT(copyNewsHex2()));
     connect(showDetailsMempoolAction, SIGNAL(triggered()), this, SLOT(showDetailsMempool()));
     connect(showDetailsBlockAction, SIGNAL(triggered()), this, SLOT(showDetailsBlock()));
 
@@ -397,7 +413,7 @@ void OverviewPage::on_tableViewMempool_doubleClicked(const QModelIndex& index)
     CTransactionRef txRef;
     if (!memPoolModel->GetTx(hash, txRef)) {
         messageBox.setWindowTitle("Error - not found in mempool!");
-        messageBox.setText("Transaction is not in your memory pool!\n");
+        messageBox.setText("Sorry, this transaction is no longer in your memory pool!\n");
         messageBox.exec();
         return;
     }
@@ -417,12 +433,16 @@ void OverviewPage::on_tableViewNews1_doubleClicked(const QModelIndex& index)
     if (!index.isValid())
         return;
 
-    QString strNews = index.data(NewsTableModel::NewsRole).toString();
+    if (!platformStyle)
+        return;
 
-    QMessageBox messageBox;
-    messageBox.setWindowTitle("News");
-    messageBox.setText(strNews);
-    messageBox.exec();
+    QString strNews = index.data(NewsTableModel::NewsRole).toString();
+    QString strHex = index.data(NewsTableModel::NewsHexRole).toString();
+
+    DecodeViewDialog dialog;
+    dialog.SetPlatformStyle(platformStyle);
+    dialog.SetData(strNews, strHex, "Coin News: ");
+    dialog.exec();
 }
 
 void OverviewPage::on_comboBoxNewsType1_currentIndexChanged(int index)
@@ -442,12 +462,16 @@ void OverviewPage::on_tableViewNews2_doubleClicked(const QModelIndex& index)
     if (!index.isValid())
         return;
 
-    QString strNews = index.data(NewsTableModel::NewsRole).toString();
+    if (!platformStyle)
+        return;
 
-    QMessageBox messageBox;
-    messageBox.setWindowTitle("News");
-    messageBox.setText(strNews);
-    messageBox.exec();
+    QString strNews = index.data(NewsTableModel::NewsRole).toString();
+    QString strHex = index.data(NewsTableModel::NewsHexRole).toString();
+
+    DecodeViewDialog dialog;
+    dialog.SetPlatformStyle(platformStyle);
+    dialog.SetData(strNews, strHex, "Coin News: ");
+    dialog.exec();
 }
 
 void OverviewPage::on_comboBoxNewsType2_currentIndexChanged(int index)
@@ -494,6 +518,78 @@ void OverviewPage::showDetailsNews2()
     QModelIndexList selection = ui->tableViewNews2->selectionModel()->selectedRows();
     if (!selection.isEmpty())
         on_tableViewNews2_doubleClicked(selection.front());
+}
+
+void OverviewPage::copyNews1()
+{
+    if (!ui->tableViewNews1->selectionModel())
+        return;
+
+    QModelIndexList selection = ui->tableViewNews1->selectionModel()->selectedRows();
+    if (selection.isEmpty())
+        return;
+
+    QModelIndex index = selection.front();
+    if (!index.isValid())
+        return;
+
+    QString strNews = index.data(NewsTableModel::NewsRole).toString();
+
+    GUIUtil::setClipboard(strNews);
+}
+
+void OverviewPage::copyNews2()
+{
+    if (!ui->tableViewNews2->selectionModel())
+        return;
+
+    QModelIndexList selection = ui->tableViewNews2->selectionModel()->selectedRows();
+    if (selection.isEmpty())
+        return;
+
+    QModelIndex index = selection.front();
+    if (!index.isValid())
+        return;
+
+    QString strNews = index.data(NewsTableModel::NewsRole).toString();
+
+    GUIUtil::setClipboard(strNews);
+}
+
+void OverviewPage::copyNewsHex1()
+{
+    if (!ui->tableViewNews1->selectionModel())
+        return;
+
+    QModelIndexList selection = ui->tableViewNews1->selectionModel()->selectedRows();
+    if (selection.isEmpty())
+        return;
+
+    QModelIndex index = selection.front();
+    if (!index.isValid())
+        return;
+
+    QString strHex = index.data(NewsTableModel::NewsHexRole).toString();
+
+    GUIUtil::setClipboard(strHex);
+}
+
+void OverviewPage::copyNewsHex2()
+{
+    if (!ui->tableViewNews2->selectionModel())
+        return;
+
+    QModelIndexList selection = ui->tableViewNews2->selectionModel()->selectedRows();
+    if (selection.isEmpty())
+        return;
+
+    QModelIndex index = selection.front();
+    if (!index.isValid())
+        return;
+
+    QString strHex = index.data(NewsTableModel::NewsHexRole).toString();
+
+    GUIUtil::setClipboard(strHex);
 }
 
 void OverviewPage::showDetailsMempool()

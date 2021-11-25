@@ -1722,11 +1722,11 @@ UniValue listwithdrawalstatus(const JSONRPCRequest& request)
     return ret;
 }
 
-UniValue listcachedwithdrawaltransactions(const JSONRPCRequest& request)
+UniValue listcachedwithdrawaltx(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 1)
         throw std::runtime_error(
-            "listcachedwithdrawaltransactions\n"
+            "listcachedwithdrawaltx\n"
             "List my cached Withdrawal(s) for nSidechain\n"
             "\nArguments:\n"
             "1. nsidechain     (numeric, required) Sidechain number to list Withdrawal(s) of\n"
@@ -2013,10 +2013,11 @@ UniValue getopreturndata(const JSONRPCRequest& request)
             "Print OP_RETURN data for block.\n"
             "\nResult:\n"
             "{\n"
-            "  \"txid\" : (string) transaction id\n"
-            "  \"script\" : (string) scriptPubKey.\n"
-            "  \"size\" : (numeric) transaction size.\n"
-            "  \"fees\" : (numeric) transaction fees.\n"
+            "  \"txid\"   : (string) transaction id\n"
+            "  \"size\"   : (numeric) transaction size.\n"
+            "  \"fees\"   : (numeric) transaction fees.\n"
+            "  \"hex\"    : (string) hex from output.\n"
+            "  \"decode\" : (string) decoded hex.\n"
             "}\n"
             "\n"
             "\nExample:\n"
@@ -2047,9 +2048,9 @@ UniValue getopreturndata(const JSONRPCRequest& request)
     for (const OPReturnData& d : vData) {
         UniValue obj(UniValue::VOBJ);
         obj.push_back(Pair("txid", d.txid.ToString()));
-        obj.push_back(Pair("script", ScriptToAsmStr(d.script)));
         obj.push_back(Pair("size", (uint64_t)d.nSize));
         obj.push_back(Pair("fees", FormatMoney(d.fees)));
+        obj.push_back(Pair("hex", HexStr(d.script.begin(), d.script.end(), false)));
 
         std::string strDecode;
         for (const unsigned char& c : d.script) {
@@ -2106,36 +2107,37 @@ static const CRPCCommand commands[] =
 
     // TODO improve & shorten name. Sort alphabetically
     /* DriveChain rpc commands (mainly used by sidechains) */
-    { "DriveChain",  "createcriticaldatatx",          &createcriticaldatatx,         {"amount", "height", "criticalhash"}},
-    { "DriveChain",  "listsidechainctip",             &listsidechainctip,            {"nsidechain"}},
-    { "DriveChain",  "listsidechaindeposits",         &listsidechaindeposits,        {"addressbytes"}},
-    { "DriveChain",  "countsidechaindeposits",        &countsidechaindeposits,       {"nsidechain"}},
-    { "DriveChain",  "receivewithdrawalbundle",       &receivewithdrawalbundle,      {"nsidechain","rawtx"}},
-    { "DriveChain",  "verifybmm",                     &verifybmm,                    {"blockhash", "bmmhash"}},
-    { "DriveChain",  "verifydeposit",                 &verifydeposit,                {"blockhash", "txid", "ntx"}},
-    { "DriveChain",  "listpreviousblockhashes",       &listpreviousblockhashes,      {}},
-    { "DriveChain",  "listactivesidechains",          &listactivesidechains,         {}},
-    { "DriveChain",  "listsidechainactivationstatus", &listsidechainactivationstatus,{}},
-    { "DriveChain",  "listsidechainproposals",        &listsidechainproposals,       {}},
-    { "DriveChain",  "getsidechainactivationstatus",  &getsidechainactivationstatus, {}},
-    { "DriveChain",  "createsidechainproposal",       &createsidechainproposal,      {"nsidechain", "title", "description", "keyhash", "nversion", "hashid1", "hashid2"}},
+    { "DriveChain",  "createcriticaldatatx",          &createcriticaldatatx,            {"amount", "height", "criticalhash"}},
+    { "DriveChain",  "listsidechainctip",             &listsidechainctip,               {"nsidechain"}},
+    { "DriveChain",  "listsidechaindeposits",         &listsidechaindeposits,           {"addressbytes"}},
+    { "DriveChain",  "countsidechaindeposits",        &countsidechaindeposits,          {"nsidechain"}},
+    { "DriveChain",  "receivewithdrawalbundle",       &receivewithdrawalbundle,         {"nsidechain","rawtx"}},
+    { "DriveChain",  "verifybmm",                     &verifybmm,                       {"blockhash", "bmmhash"}},
+    { "DriveChain",  "verifydeposit",                 &verifydeposit,                   {"blockhash", "txid", "ntx"}},
+    { "DriveChain",  "listpreviousblockhashes",       &listpreviousblockhashes,         {}},
+    { "DriveChain",  "listactivesidechains",          &listactivesidechains,            {}},
+    { "DriveChain",  "listsidechainactivationstatus", &listsidechainactivationstatus,   {}},
+    { "DriveChain",  "listsidechainproposals",        &listsidechainproposals,          {}},
+    { "DriveChain",  "getsidechainactivationstatus",  &getsidechainactivationstatus,    {}},
+    { "DriveChain",  "createsidechainproposal",       &createsidechainproposal,         {"nsidechain", "title", "description", "keyhash", "nversion", "hashid1", "hashid2"}},
     { "DriveChain",  "clearwithdrawalvotes",          &clearwithdrawalvotes,            {}},
     { "DriveChain",  "setwithdrawalvote",             &setwithdrawalvote,               {"vote", "nsidechain", "hashwithdrawal"}},
     { "DriveChain",  "listwithdrawalvotes",           &listwithdrawalvotes,             {}},
-    { "DriveChain",  "getaveragefee",                 &getaveragefee,                {"numblocks", "startheight"}},
-    { "DriveChain",  "getworkscore",                  &getworkscore,                 {"nsidechain", "hashwithdrawal"}},
-    { "DriveChain",  "havespentwithdrawal",              &havespentwithdrawal,              {"hashwithdrawal", "nsidechain"}},
-    { "DriveChain",  "havefailedwithdrawal",             &havefailedwithdrawal,             {"hashwithdrawal", "nsidechain"}},
-    { "DriveChain",  "listcachedwithdrawaltransactions", &listcachedwithdrawaltransactions, {"nsidechain"}},
-    { "DriveChain",  "listwithdrawalstatus",             &listwithdrawalstatus,             {"nsidechain"}},
-    { "DriveChain",  "listspentwithdrawals",             &listspentwithdrawals,             {}},
-    { "DriveChain",  "listfailedwithdrawals",            &listfailedwithdrawals,            {}},
-    { "DriveChain",  "getscdbhash",                   &getscdbhash,                  {}},
-    { "DriveChain",  "gettotalscdbhash",              &gettotalscdbhash,             {}},
-    { "DriveChain",  "getscdbdataforblock",           &getscdbdataforblock,          {"blockhash"}},
-    { "DriveChain",  "listfailedbmm",                 &listfailedbmm,                {}},
+    { "DriveChain",  "getaveragefee",                 &getaveragefee,                   {"numblocks", "startheight"}},
+    { "DriveChain",  "getworkscore",                  &getworkscore,                    {"nsidechain", "hashwithdrawal"}},
+    { "DriveChain",  "havespentwithdrawal",           &havespentwithdrawal,             {"hashwithdrawal", "nsidechain"}},
+    { "DriveChain",  "havefailedwithdrawal",          &havefailedwithdrawal,            {"hashwithdrawal", "nsidechain"}},
+    { "DriveChain",  "listcachedwithdrawaltx",        &listcachedwithdrawaltx,          {"nsidechain"}},
+    { "DriveChain",  "listwithdrawalstatus",          &listwithdrawalstatus,            {"nsidechain"}},
+    { "DriveChain",  "listspentwithdrawals",          &listspentwithdrawals,            {}},
+    { "DriveChain",  "listfailedwithdrawals",         &listfailedwithdrawals,           {}},
+    { "DriveChain",  "getscdbhash",                   &getscdbhash,                     {}},
+    { "DriveChain",  "gettotalscdbhash",              &gettotalscdbhash,                {}},
+    { "DriveChain",  "getscdbdataforblock",           &getscdbdataforblock,             {"blockhash"}},
+    { "DriveChain",  "listfailedbmm",                 &listfailedbmm,                   {}},
 
-    { "CoinNews",    "getopreturndata",               &getopreturndata,              {"blockhash"}},
+    /* Coin News RPC */
+    { "CoinNews",    "getopreturndata",               &getopreturndata,                 {"blockhash"}},
 
 };
 

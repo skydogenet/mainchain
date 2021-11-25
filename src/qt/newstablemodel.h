@@ -24,6 +24,7 @@ struct NewsTableObject
     int nTime;
     std::string decode;
     std::string fees;
+    std::string hex;
     int feeAmount;
 };
 
@@ -46,6 +47,7 @@ public:
 
     enum RoleIndex {
         NewsRole = Qt::UserRole,
+        NewsHexRole,
     };
 
 public Q_SLOTS:

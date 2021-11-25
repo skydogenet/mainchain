@@ -23,6 +23,7 @@ struct OPReturnTableObject
     int nTime;
     std::string decode;
     std::string fees;
+    std::string hex;
     int feeAmount;
 };
 
@@ -41,7 +42,8 @@ public:
     void setDays(int nDays);
 
     enum RoleIndex {
-        OPReturnRole = Qt::UserRole,
+        DecodeRole = Qt::UserRole,
+        HexRole,
     };
 
 public Q_SLOTS:

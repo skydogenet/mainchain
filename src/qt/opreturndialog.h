@@ -45,6 +45,8 @@ private Q_SLOTS:
     void on_tableView_doubleClicked(const QModelIndex& index);
     void contextualMenu(const QPoint &);
     void showDetails();
+    void copyDecode();
+    void copyHex();
     void on_pushButtonCreate_clicked();
     void on_spinBoxDays_valueChanged(int nDays);
 };

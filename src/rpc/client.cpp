@@ -154,7 +154,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "getworkscore", 0, "nsidechain" },
     { "setwithdrawalvote", 1, "nsidechain" },
     { "listwithdrawalstatus", 0, "nsidechain" },
-    { "listcachedwithdrawaltransactions", 0, "nsidechain" },
+    { "listcachedwithdrawaltx", 0, "nsidechain" },
     { "verifydeposit", 2, "nTx" },
     // Echo with conversion (For testing only)
     { "echojson", 0, "arg0" },

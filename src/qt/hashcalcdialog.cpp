@@ -201,11 +201,11 @@ void HashCalcDialog::UpdateOutput()
     ui->labelSHA256->setText(QString::fromStdString(HexStr(vch256.begin(), vch256.end())));
 
     // Hex
-    std::string strHex = HexStr(str.begin(), str.end());
     if (fHexChecked) {
         ui->textBrowserHex->setText(QString::fromStdString(str));
     }
     else {
+        std::string strHex = HexStr(str.begin(), str.end());
         ui->textBrowserHex->setText(QString::fromStdString(strHex));
     }
 

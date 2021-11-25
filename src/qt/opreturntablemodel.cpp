@@ -51,13 +51,13 @@ QVariant OPReturnTableModel::data(const QModelIndex &index, int role) const
     switch (role) {
     case Qt::DisplayRole:
     {
-        // Fees
-        if (col == 0) {
-            return QString::fromStdString(object.fees);
-        }
         // Time
-        if (col == 1) {
+        if (col == 0) {
             return QDateTime::fromTime_t((int64_t)object.nTime).toString("hh:mm MMMM dd");
+        }
+        // Fees
+        if (col == 1) {
+            return QString::fromStdString(object.fees);
         }
         // Decode
         if (col == 2) {
@@ -66,11 +66,11 @@ QVariant OPReturnTableModel::data(const QModelIndex &index, int role) const
     }
     case Qt::TextAlignmentRole:
     {
-        // Fees
+        // Time
         if (col == 0) {
             return int(Qt::AlignRight | Qt::AlignVCenter);
         }
-        // Time
+        // Fees
         if (col == 1) {
             return int(Qt::AlignRight | Qt::AlignVCenter);
         }
@@ -81,22 +81,26 @@ QVariant OPReturnTableModel::data(const QModelIndex &index, int role) const
     }
     case Qt::EditRole:
     {
-        // Fees
-        if (col == 0) {
-            return object.feeAmount;
-        }
         // Time
-        if (col == 1) {
+        if (col == 0) {
             return object.nTime;
+        }
+        // Fees
+        if (col == 1) {
+            return object.feeAmount;
         }
         // Decode
         if (col == 2) {
             return QString::fromStdString(object.decode);
         }
     }
-    case OPReturnRole:
+    case DecodeRole:
     {
         return QString::fromStdString(object.decode);
+    }
+    case HexRole:
+    {
+        return QString::fromStdString(object.hex);
     }
     }
     return QVariant();
@@ -108,9 +112,9 @@ QVariant OPReturnTableModel::headerData(int section, Qt::Orientation orientation
         if (orientation == Qt::Horizontal) {
             switch (section) {
             case 0:
-                return QString("Fees");
-            case 1:
                 return QString("Time");
+            case 1:
+                return QString("Fees");
             case 2:
                 return QString("Decode");
             }
@@ -185,6 +189,7 @@ void OPReturnTableModel::UpdateModel()
             object.decode = strDecode;
             object.fees = FormatMoney(d.fees);
             object.feeAmount = d.fees;
+            object.hex = HexStr(d.script.begin(), d.script.end(), false);
 
             vObj.push_back(object);
         }

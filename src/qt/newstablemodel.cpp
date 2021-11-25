@@ -58,12 +58,12 @@ QVariant NewsTableModel::data(const QModelIndex &index, int role) const
         }
         // Time
         if (col == 1) {
-            return QDateTime::fromTime_t((int64_t)object.nTime).toString("hh:mm MMMM dd");
+            return QDateTime::fromTime_t((int64_t)object.nTime).toString("hh:mm MMM dd");
         }
         // Decode
         if (col == 2) {
             // Display up to NEWS_HEADLINE_CHARS or until newline
-            QString str = "";
+            std::string str = "";
             bool fNewline = false;
             for (size_t x = 0; x < object.decode.size(); x++) {
                 if (x == NEWS_HEADLINE_CHARS)
@@ -80,7 +80,7 @@ QVariant NewsTableModel::data(const QModelIndex &index, int role) const
             if (fNewline || object.decode.size() > NEWS_HEADLINE_CHARS)
                 str += "...";
 
-            return str;
+            return QString::fromStdString(str);
         }
     }
     case Qt::TextAlignmentRole:
@@ -116,6 +116,10 @@ QVariant NewsTableModel::data(const QModelIndex &index, int role) const
     case NewsRole:
     {
         return QString::fromStdString(object.decode);
+    }
+    case NewsHexRole:
+    {
+        return QString::fromStdString(object.hex);
     }
     }
     return QVariant();
@@ -177,7 +181,7 @@ void NewsTableModel::UpdateModel()
     if (!newsTypesModel->GetType(nFilter, type))
         return;
 
-    QDateTime tipTime = QDateTime::fromMSecsSinceEpoch(chainActive.Tip()->GetBlockTime());
+    QDateTime tipTime = QDateTime::fromMSecsSinceEpoch(chainActive.Tip()->GetBlockTime() * 1000);
     QDateTime targetTime = tipTime.addDays(-type.nDays);
 
     // Loop backwards from chainTip until we reach target time or genesis block.
@@ -225,6 +229,7 @@ void NewsTableModel::UpdateModel()
             object.decode = strDecode;
             object.fees = FormatMoney(d.fees);
             object.feeAmount = d.fees;
+            object.hex = HexStr(d.script.begin(), d.script.end(), false);
 
             vNews.push_back(object);
         }

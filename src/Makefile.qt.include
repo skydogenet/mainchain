@@ -103,6 +103,7 @@ QT_FORMS_UI = \
   qt/forms/coinsplitconfirmationdialog.ui \
   qt/forms/createnewsdialog.ui \
   qt/forms/createopreturndialog.ui \
+  qt/forms/decodeviewdialog.ui \
   qt/forms/editaddressdialog.ui \
   qt/forms/hashcalcdialog.ui \
   qt/forms/helpmessagedialog.ui \
@@ -153,6 +154,7 @@ QT_MOC_CPP = \
   qt/moc_createnewsdialog.cpp \
   qt/moc_createopreturndialog.cpp \
   qt/moc_csvmodelwriter.cpp \
+  qt/moc_decodeviewdialog.cpp \
   qt/moc_editaddressdialog.cpp \
   qt/moc_guiutil.cpp \
   qt/moc_hashcalcdialog.cpp \
@@ -252,6 +254,7 @@ DRIVENET_QT_H = \
   qt/createnewsdialog.h \
   qt/createopreturndialog.h \
   qt/csvmodelwriter.h \
+  qt/decodeviewdialog.h \
   qt/editaddressdialog.h \
   qt/guiconstants.h \
   qt/guiutil.h \
@@ -472,6 +475,7 @@ DRIVENET_QT_WALLET_CPP = \
   qt/coinsplitconfirmationdialog.cpp \
   qt/createnewsdialog.cpp \
   qt/createopreturndialog.cpp \
+  qt/decodeviewdialog.cpp \
   qt/editaddressdialog.cpp \
   qt/latestblocktablemodel.cpp \
   qt/managenewsdialog.cpp \

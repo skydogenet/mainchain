@@ -43,7 +43,7 @@ class OverviewPage : public QWidget
     Q_OBJECT
 
 public:
-    explicit OverviewPage(const PlatformStyle *platformStyle, QWidget *parent = 0);
+    explicit OverviewPage(const PlatformStyle *platformStyleIn, QWidget *parent = 0);
     ~OverviewPage();
 
     void setClientModel(ClientModel *clientModel);
@@ -61,7 +61,7 @@ Q_SIGNALS:
 private:
     Ui::OverviewPage *ui;
     BlockIndexDetailsDialog* blockIndexDialog = nullptr;
-    ClientModel *clientModel;
+    ClientModel *clientModel = nullptr;
     CreateNewsDialog *createNewsDialog = nullptr;
     LatestBlockTableModel *latestBlockModel = nullptr;
     MemPoolTableModel *memPoolModel = nullptr;
@@ -70,19 +70,20 @@ private:
     NewsTableModel *newsModel2 = nullptr;
     NewsTypesTableModel *newsTypesTableModel = nullptr;
     OPReturnDialog *opReturnDialog = nullptr;
-    WalletModel *walletModel;
+    WalletModel *walletModel = nullptr;
     CAmount currentBalance;
     CAmount currentUnconfirmedBalance;
     CAmount currentImmatureBalance;
     CAmount currentWatchOnlyBalance;
     CAmount currentWatchUnconfBalance;
     CAmount currentWatchImmatureBalance;
-    QMenu *contextMenuNews1;
-    QMenu *contextMenuNews2;
-    QMenu *contextMenuMempool;
-    QMenu *contextMenuBlocks;
-    QSortFilterProxyModel *proxyModelNews1;
-    QSortFilterProxyModel *proxyModelNews2;
+    QMenu *contextMenuNews1 = nullptr;
+    QMenu *contextMenuNews2 = nullptr;
+    QMenu *contextMenuMempool = nullptr;
+    QMenu *contextMenuBlocks = nullptr;
+    QSortFilterProxyModel *proxyModelNews1 = nullptr;
+    QSortFilterProxyModel *proxyModelNews2 = nullptr;
+    const PlatformStyle *platformStyle;
 
 private Q_SLOTS:
     void updateDisplayUnit();
@@ -106,6 +107,10 @@ private Q_SLOTS:
 
     void showDetailsNews1();
     void showDetailsNews2();
+    void copyNews1();
+    void copyNews2();
+    void copyNewsHex1();
+    void copyNewsHex2();
     void showDetailsMempool();
     void showDetailsBlock();
 };
