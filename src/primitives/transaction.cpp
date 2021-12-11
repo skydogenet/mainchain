@@ -165,20 +165,19 @@ std::string CTransaction::ToString() const
 bool CCriticalData::IsBMMRequest() const
 {
     uint8_t nSidechain;
-    uint16_t nPrevBlockRef;
     std::string strPrevBytes = "";
 
-    return IsBMMRequest(nSidechain, nPrevBlockRef, strPrevBytes);
+    return IsBMMRequest(nSidechain, strPrevBytes);
 }
 
-bool CCriticalData::IsBMMRequest(uint8_t& nSidechain, uint16_t& nPrevBlockRef, std::string& strPrevBlock) const
+bool CCriticalData::IsBMMRequest(uint8_t& nSidechain, std::string& strPrevBlock) const
 {
     // Check for h* commit flag in critical data bytes
     if (IsNull())
         return false;
     if (hashCritical.IsNull())
         return false;
-    if (bytes.size() < 14)
+    if (bytes.size() < 13)
         return false;
 
     if (bytes[0] != 0x00 || bytes[1] != 0xbf || bytes[2] != 0x00)
@@ -215,47 +214,9 @@ bool CCriticalData::IsBMMRequest(uint8_t& nSidechain, uint16_t& nPrevBlockRef, s
 
     nSidechain = (uint8_t)intSidechain;
 
-    // Read prevblockref
-
-    int intDAG = -1;
-    size_t nDAGBytes = 0;
-    size_t nDagPos = 4 + nSideBytes;
-    if (bytes[nDagPos] == 0)
-    {
-        intDAG = 0;
-        nDAGBytes = 0;
-    }
-    else
-    if (bytes[nDagPos] == 1)
-    {
-        intDAG = CScriptNum(std::vector<unsigned char>{bytes[nDagPos + 1]}, false).getint();
-        nDAGBytes = 1;
-    }
-    else
-    if (bytes[nDagPos] == 2)
-    {
-        intDAG = CScriptNum(std::vector<unsigned char>{bytes[nDagPos + 1], bytes[nDagPos + 2]}, false).getint();
-        nDAGBytes = 2;
-    }
-    else
-    if (bytes[nDagPos] == 3)
-    {
-        intDAG = CScriptNum(std::vector<unsigned char>{bytes[nDagPos + 1], bytes[nDagPos + 2], bytes[nDagPos + 3]}, false).getint();
-        nDAGBytes = 3;
-    }
-    else
-    {
-        return false;
-    }
-
-    if (intDAG < 0 || intDAG > 65535)
-        return false;
-
-    nPrevBlockRef = (uint16_t)intDAG;
-
     // Read prev block bytes
 
-    size_t nBytes = 5 + nSideBytes + nDAGBytes;
+    size_t nBytes = 4 + nSideBytes;
     std::vector<unsigned char> prevBytes;
     if (bytes[nBytes] == 0x08) {
         prevBytes = std::vector<unsigned char>(bytes.begin() + nBytes + 1, bytes.end());

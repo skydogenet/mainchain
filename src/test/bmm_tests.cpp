@@ -28,8 +28,7 @@ BOOST_AUTO_TEST_CASE(bmm_commit)
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
 
-    bytes << CScriptNum(0 /* dummy sidechain number */);
-    bytes << CScriptNum(0 /* dummy prevblockref */);
+    bytes << CScriptNum(0); // nSidechain
 
     CCriticalData criticalData;
     criticalData.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
@@ -72,7 +71,6 @@ BOOST_AUTO_TEST_CASE(bmm_commit)
     BOOST_CHECK(hashCritical == criticalData.hashCritical);
 }
 
-
 BOOST_AUTO_TEST_CASE(bmm_commit_format)
 {
     // Test the IsBMMCommitment function with many different BMM requests
@@ -94,7 +92,7 @@ BOOST_AUTO_TEST_CASE(bmm_commit_format)
     bmm.hashCritical = GetRandHash();
     BOOST_CHECK(!bmm.IsBMMRequest());
 
-    // With invalid h*, valid bytes
+    // Null h*, valid bytes
     bmm.hashCritical.SetNull();
 
     CScript bytes;
@@ -102,8 +100,7 @@ BOOST_AUTO_TEST_CASE(bmm_commit_format)
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
-    bytes << CScriptNum(0 /* nSidechain */);
-    bytes << CScriptNum(0 /* nPrevBlockRef */);
+    bytes << CScriptNum(0); // nSidechain
     bytes << ToByteVector(HexStr(std::string("fd3s")));
 
     bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
@@ -122,74 +119,17 @@ BOOST_AUTO_TEST_CASE(bmm_commit_format)
         bytes[0] = 0x00;
         bytes[1] = 0xbf;
         bytes[2] = 0x00;
-        bytes << CScriptNum(i /* nSidechain */);
-        bytes << CScriptNum(0 /* nPrevBlockRef */);
+        bytes << CScriptNum(i); // nSidechain
         bytes << ToByteVector(HexStr(std::string("fd3s")));
 
         bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
 
         uint8_t nSidechain;
-        uint16_t nPrevBlockRef;
         std::string strPrevBlock = "";
-        BOOST_CHECK(bmm.IsBMMRequest(nSidechain, nPrevBlockRef, strPrevBlock));
+        BOOST_CHECK(bmm.IsBMMRequest(nSidechain, strPrevBlock));
 
         BOOST_CHECK(nSidechain == i);
-        BOOST_CHECK(nPrevBlockRef == 0);
         BOOST_CHECK(strPrevBlock == "fd3s");
-    }
-
-    // Valid prevBlockRef 0 - 65535 with one sidechain number
-    for (unsigned int y = 0; y < 65536; y++) {
-        bytes.clear();
-
-        bytes.resize(3);
-        bytes[0] = 0x00;
-        bytes[1] = 0xbf;
-        bytes[2] = 0x00;
-        bytes << CScriptNum(128 /* nSidechain */);
-        bytes << CScriptNum(y /* nPrevBlockRef */);
-        bytes << ToByteVector(HexStr(std::string("ella")));
-
-        bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
-
-        uint8_t nSidechain;
-        uint16_t nPrevBlockRef;
-        std::string strPrevBlock = "";
-        BOOST_CHECK(bmm.IsBMMRequest(nSidechain, nPrevBlockRef, strPrevBlock));
-
-        BOOST_CHECK(nSidechain == 128);
-        BOOST_CHECK(nPrevBlockRef == y);
-        BOOST_CHECK(strPrevBlock == "ella");
-    }
-
-    // Valid prevBlockRef 0 - 65535 with different sidechain numbers
-    int x = 0;
-    for (unsigned int y = 0; y < 65536; y++) {
-        bytes.clear();
-
-        bytes.resize(3);
-        bytes[0] = 0x00;
-        bytes[1] = 0xbf;
-        bytes[2] = 0x00;
-        bytes << CScriptNum(x /* nSidechain */);
-        bytes << CScriptNum(y /* nPrevBlockRef */);
-        bytes << ToByteVector(HexStr(std::string("fd3s")));
-
-        bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
-
-        uint8_t nSidechain;
-        uint16_t nPrevBlockRef;
-        std::string strPrevBlock = "";
-        BOOST_CHECK(bmm.IsBMMRequest(nSidechain, nPrevBlockRef, strPrevBlock));
-
-        BOOST_CHECK(nSidechain == x);
-        BOOST_CHECK(nPrevBlockRef == y);
-        BOOST_CHECK(strPrevBlock == "fd3s");
-
-        // Loop through possible nSidechain numbers as we test the prevBlockRef
-        x++;
-        if (x == 256)
-            x = 0;
     }
 
     // Invalid nSidechain
@@ -199,23 +139,7 @@ BOOST_AUTO_TEST_CASE(bmm_commit_format)
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
-    bytes << CScriptNum(1337 /* nSidechain */);
-    bytes << CScriptNum(0 /* nPrevBlockRef */);
-    bytes << ToByteVector(HexStr(std::string("fd3s")));
-
-    bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
-
-    BOOST_CHECK(!bmm.IsBMMRequest());
-
-    // Invalid prevBlockRef
-    bytes.clear();
-
-    bytes.resize(3);
-    bytes[0] = 0x00;
-    bytes[1] = 0xbf;
-    bytes[2] = 0x00;
-    bytes << CScriptNum(86 /* nSidechain */);
-    bytes << CScriptNum(888888 /* nPrevBlockRef */);
+    bytes << CScriptNum(1337); // nSidechain
     bytes << ToByteVector(HexStr(std::string("fd3s")));
 
     bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
@@ -229,8 +153,7 @@ BOOST_AUTO_TEST_CASE(bmm_commit_format)
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
-    bytes << CScriptNum(0 /* nSidechain */);
-    bytes << CScriptNum(86 /* nPrevBlockRef */);
+    bytes << CScriptNum(0); // nSidechain
     bytes << ToByteVector(HexStr(std::string("btc")));
 
     bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
@@ -244,8 +167,7 @@ BOOST_AUTO_TEST_CASE(bmm_commit_format)
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
-    bytes << CScriptNum(255 /* nSidechain */);
-    bytes << CScriptNum(0 /* nPrevBlockRef */);
+    bytes << CScriptNum(255); // nSidechain
     bytes << ToByteVector(HexStr(std::string("The Times 03/Jan/2009 Chancellor on brink of second bailout for banks")));
 
     bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
@@ -255,8 +177,7 @@ BOOST_AUTO_TEST_CASE(bmm_commit_format)
 
 BOOST_AUTO_TEST_SUITE_END()
 
-
-/* BMM tests that require a blockchain, wallet, mempool */
+// BMM tests that require a blockchain, wallet, mempool
 
 
 BOOST_FIXTURE_TEST_SUITE(bmm_chain_mempool_tests, TestChain100Setup)
@@ -280,8 +201,7 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
     std::string strPrevHash = chainActive.Tip()->GetBlockHash().ToString();
     strPrevHash = strPrevHash.substr(strPrevHash.size() - 4, strPrevHash.size() - 1);
 
-    bytes << CScriptNum(0 /* dummy sidechain number */);
-    bytes << CScriptNum(0 /* dummy prevblockref */);
+    bytes << CScriptNum(0); // nSidechain
     bytes << ToByteVector(HexStr(std::string(strPrevHash)));
 
     CCriticalData criticalData;
@@ -329,8 +249,7 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
     {
         LOCK(cs_main);
         BOOST_CHECK(AcceptToMemoryPool(mempool, state, MakeTransactionRef(mtx),
-                    nullptr /* pfMissingInputs */, nullptr /* plTxnReplaced */,
-                    false /* bypass_limits */, 0 /* nAbsurdFee */));
+                    nullptr, nullptr, false, 0));
     }
     BOOST_CHECK(state.IsValid());
 
@@ -373,8 +292,7 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
     {
         LOCK(cs_main);
         BOOST_CHECK(!AcceptToMemoryPool(mempool, state2, MakeTransactionRef(mtx),
-                    nullptr /* pfMissingInputs */, nullptr /* plTxnReplaced */,
-                    false /* bypass_limits */, 0 /* nAbsurdFee */));
+                    nullptr, nullptr, false, 0));
     }
     BOOST_CHECK(!state2.IsValid());
 
@@ -398,8 +316,7 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
 
-    bytes << CScriptNum(0 /* dummy sidechain number */);
-    bytes << CScriptNum(0 /* dummy prevblockref */);
+    bytes << CScriptNum(0); // nSidechain
     bytes << ToByteVector(HexStr(std::string("trueno")));
 
     criticalData.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
@@ -428,8 +345,7 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
     {
         LOCK(cs_main);
         BOOST_CHECK(!AcceptToMemoryPool(mempool, state3, MakeTransactionRef(mtx),
-                    nullptr /* pfMissingInputs */, nullptr /* plTxnReplaced */,
-                    false /* bypass_limits */, 0 /* nAbsurdFee */));
+                    nullptr, nullptr, false, 0));
     }
     BOOST_CHECK(!state3.IsValid());
 
@@ -454,8 +370,7 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
 
-    bytes << CScriptNum(0 /* dummy sidechain number */);
-    bytes << CScriptNum(0 /* dummy prevblockref */);
+    bytes << CScriptNum(0); // nSidechain
 
     criticalData.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
 
@@ -483,8 +398,7 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
     {
         LOCK(cs_main);
         BOOST_CHECK(!AcceptToMemoryPool(mempool, state4, MakeTransactionRef(mtx),
-                    nullptr /* pfMissingInputs */, nullptr /* plTxnReplaced */,
-                    false /* bypass_limits */, 0 /* nAbsurdFee */));
+                    nullptr, nullptr, false, 0));
     }
     BOOST_CHECK(!state4.IsValid());
 

@@ -3821,7 +3821,7 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
     }
 
     // TODO handle optional height better
-    if (request.fHelp || request.params.size() != 6)
+    if (request.fHelp || request.params.size() != 5)
         throw std::runtime_error(
             "createbmmcriticaldatatx\n"
             "Create a BMM request critical data transaction\n"
@@ -3831,15 +3831,13 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
             "Note: If 0 is passed in for height, current block height will be used"
             "3. \"criticalhash\"   (string, required) h* you want added to a coinbase\n"
             "4. \"nsidechain\"     (numeric, required) Sidechain requesting BMM\n"
-            "5. \"nprevblockref\"  (numeric, required) prevBlockRef\n"
-            "6. \"prevbytes\"      (string, required) a portion of the previous block hash\n"
+            "5. \"prevbytes\"      (string, required) a portion of the previous block hash\n"
             "\nExamples:\n"
-            + HelpExampleCli("createbmmcriticaldatatx", "\"amount\", \"height\", \"criticalhash\", \"nsidechain\", \"nprevblockref\", \"prevbytes\"")
-            + HelpExampleRpc("createbmmcriticaldatatx", "\"amount\", \"height\", \"criticalhash\", \"nsidechain\", \"nprevblockref\", \"prevbytes\"")
+            + HelpExampleCli("createbmmcriticaldatatx", "\"amount\", \"height\", \"criticalhash\", \"nsidechain\", \"prevbytes\"")
+            + HelpExampleRpc("createbmmcriticaldatatx", "\"amount\", \"height\", \"criticalhash\", \"nsidechain\", \"prevbytes\"")
             );
 
     ObserveSafeMode();
-
 
     // Amount
     CAmount nAmount = AmountFromValue(request.params[0]);
@@ -3874,11 +3872,8 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_TYPE_ERROR, strError);
     }
 
-    // nDAG
-    int nDAG = request.params[4].get_int();
-
     // prevBlockHash bytes
-    std::string strPrevBlock = request.params[5].get_str();
+    std::string strPrevBlock = request.params[4].get_str();
     if (strPrevBlock.size() != 4) {
         std::string strError = "Invalid prevBlockHash bytes size";
         LogPrintf("%s: %s\n", __func__, strError);
@@ -3903,7 +3898,6 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
     bytes[2] = 0x00;
 
     bytes << CScriptNum(nSidechain);
-    bytes << CScriptNum(nDAG);
     bytes << ToByteVector(HexStr(strPrevBlock));
 
     CCriticalData criticalData;
@@ -4113,7 +4107,7 @@ static const CRPCCommand commands[] =
     { "generating",         "generate",                   &generate,                   {"nblocks","maxtries"} },
 
     { "DriveChain",         "createsidechaindeposit",     &createsidechaindeposit,     {"nSidechain", "depositaddress", "amount", "fee"} },
-    { "DriveChain",         "createbmmcriticaldatatx",    &createbmmcriticaldatatx,    {"amount", "height", "criticalhash", "nsidechain", "ndag"}},
+    { "DriveChain",         "createbmmcriticaldatatx",    &createbmmcriticaldatatx,    {"amount", "height", "criticalhash", "nsidechain"}},
 
     { "CoinNews",           "createopreturntransaction",  &createopreturntransaction,  {"text", "fee"} },
     { "CoinNews",           "broadcastnews",              &broadcastnews,              {"header", "text", "fee"} },

@@ -1116,9 +1116,8 @@ void CTxMemPool::SelectBMMRequests(std::vector<uint256>& vHashRemoved)
         for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
             if (!it->GetTx().criticalData.IsNull()) {
                 uint8_t nSidechain;
-                uint16_t nPrevBlockRef;
                 std::string strPrevBlock = "";
-                if (it->GetTx().criticalData.IsBMMRequest(nSidechain, nPrevBlockRef, strPrevBlock)) {
+                if (it->GetTx().criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
                     if (!scdb.IsSidechainActive(nSidechain)) {
                         // A BMM request for an invalid sidechain shouldn't be
                         // accepted, but a sidechain can be deactivated so if we

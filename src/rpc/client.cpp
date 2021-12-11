@@ -136,7 +136,6 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "createbmmcriticaldatatx", 0, "amount" },
     { "createbmmcriticaldatatx", 1, "height" },
     { "createbmmcriticaldatatx", 3, "nsidechain" },
-    { "createbmmcriticaldatatx", 4, "nprevblockref" },
     { "createsidechainproposal", 0, "nsidechain" },
     { "createsidechainproposal", 4, "nversion" },
     { "havespentwithdrawal", 1, "nsidechain" },

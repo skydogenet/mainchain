@@ -635,9 +635,8 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
     // Reject BMM requests with invalid prevBytes
     if (skydogesEnabled && fCriticalData) {
         uint8_t nSidechain;
-        uint16_t nPrevBlockRef;
         std::string strPrevBlock = "";
-        if (tx.criticalData.IsBMMRequest(nSidechain, nPrevBlockRef, strPrevBlock)) {
+        if (tx.criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
             std::string strTip = chainActive.Tip()->GetBlockHash().ToString();
             strTip = strTip.substr(strTip.size() - 4, strTip.size() - 1);
             if (strPrevBlock != strTip)
@@ -3998,9 +3997,8 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
                 // When loading a block from disk we skip this step as we may be
                 // reindexing and SCDB will not be up to date yet.
                 uint8_t nSidechain;
-                uint16_t nPrevBlockRef;
                 std::string strPrevBlock = "";
-                if (!fFromDisk && tx->criticalData.IsBMMRequest(nSidechain, nPrevBlockRef, strPrevBlock)) {
+                if (!fFromDisk && tx->criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
                     if (nSidechain >= vSidechainBMM.size()) {
                         return state.DoS(100, false, REJECT_INVALID,
                                 "bad-critical-bmm-nsidechain-invalid", true,
