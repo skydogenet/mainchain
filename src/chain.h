@@ -17,6 +17,12 @@
 #include <vector>
 
 /**
+ * Fork birthday.
+ * Height of special one-time difficulty reset to the minimum
+ */
+static const int DRIVECHAIN_DA_HEIGHT = 77100;
+
+/**
  * Maximum amount of time that a block timestamp is allowed to exceed the
  * current network-adjusted time before the block will be accepted.
  */
