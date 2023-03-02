@@ -3,12 +3,12 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#ifndef DRIVENET_DRIVENETCONSENSUS_H
-#define DRIVENET_DRIVENETCONSENSUS_H
+#ifndef SKYDOGE_SKYDOGECONSENSUS_H
+#define SKYDOGE_SKYDOGECONSENSUS_H
 
 #include <stdint.h>
 
-#if defined(BUILD_DRIVENET_INTERNAL) && defined(HAVE_CONFIG_H)
+#if defined(BUILD_SKYDOGE_INTERNAL) && defined(HAVE_CONFIG_H)
 #include <config/skydoge-config.h>
   #if defined(_WIN32)
     #if defined(DLL_EXPORT)
@@ -21,7 +21,7 @@
   #elif defined(HAVE_FUNC_ATTRIBUTE_VISIBILITY)
     #define EXPORT_SYMBOL __attribute__ ((visibility ("default")))
   #endif
-#elif defined(MSC_VER) && !defined(STATIC_LIBDRIVENETCONSENSUS)
+#elif defined(MSC_VER) && !defined(STATIC_LIBSKYDOGECONSENSUS)
   #define EXPORT_SYMBOL __declspec(dllimport)
 #endif
 
@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-#define DRIVENETCONSENSUS_API_VER 1
+#define SKYDOGECONSENSUS_API_VER 1
 
 typedef enum skydogeconsensus_error_t
 {
@@ -80,4 +80,4 @@ EXPORT_SYMBOL unsigned int skydogeconsensus_version();
 
 #undef EXPORT_SYMBOL
 
-#endif // DRIVENET_DRIVENETCONSENSUS_H
+#endif // SKYDOGE_SKYDOGECONSENSUS_H
