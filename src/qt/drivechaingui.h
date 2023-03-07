@@ -31,7 +31,7 @@ class SidechainPage;
 class SidechainWithdrawalTableModel;
 class MemPoolTableModel;
 class MiningDialog;
-class MultisigDialog;
+class MultisigLoungeDialog;
 class PaperWalletDialog;
 class WalletFrame;
 class WalletModel;
@@ -128,13 +128,31 @@ private:
     QAction *showSidechainTableDialogAction;
     QAction *showMiningDialogAction;
     QAction *showPaperWalletDialogAction;
+    QAction *showPaperCheckDialogAction;
     QAction *showCreateWalletDialogAction;
     QAction *showRestoreWalletDialogAction;
     QAction *showHashCalcDialogAction;
     QAction *showBlockExplorerDialogAction;
     QAction *showSCDBDialogAction;
     QAction *showDenialDialogAction;
-    QAction *showMultisigDialogAction;
+    QAction *showBip47AddrDialogAction;
+    QAction *showProofOfFundsDialogAction;
+    QAction *showMerkleTreeDialogAction;
+    QAction *showMultisigLoungeDialogAction;
+    QAction *showSignaturesDialogAction;
+    QAction *showBase58DialogAction;
+    QAction *showGraffitiDialogAction;
+    QAction *showMerchantsDialogAction;
+    QAction *showTimestampDialogAction;
+    QAction *showStorageDialogAction;
+    QAction *showCoinNewsDialogAction;
+    QAction *showMiningPoolsDialogAction;
+    QAction *showNetworkDialogAction;
+    QAction *showAddRemoveSidechainDialogAction;
+    QAction *showFileBroadcastDialogAction;
+    QAction *showSidechainTransferAction;
+    QAction *showSendMoneyAction;
+    QAction *showReceiveMoneyAction;
 
     QSystemTrayIcon *trayIcon;
     QMenu *trayIconMenu;
@@ -160,8 +178,8 @@ private:
     BlockExplorer *blockExplorerDialog;
     /** Denial dialog */
     DenialDialog *denialDialog;
-    /** Multisig dialog */
-    MultisigDialog *multisigDialog;
+    /** Multisig Lounge dialog */
+    MultisigLoungeDialog *multisigLoungeDialog;
 #endif
 
     /** Keep track of previous number of blocks, to detect progress */
@@ -259,11 +277,11 @@ private Q_SLOTS:
     /** Show mining dialog */
     void showMiningDialog();
 
-    /** Show multisig dialog */
-    void showMultisigDialog();
-
     /** Show paper wallet dialog */
     void showPaperWalletDialog();
+
+    /** Show paper check dialog */
+    void showPaperCheckDialog();
 
     /** Show create wallet dialog */
     void showCreateWalletDialog();
@@ -283,8 +301,53 @@ private Q_SLOTS:
     /** Show denial dialog */
     void showDenialDialog();
 
+    /** Show Bip47Addr dialog */
+    void showBip47AddrDialog();
+
+    /** Show Proof Of Funds dialog */
+    void showProofOfFundsDialog();
+
+    /** Show MultisigLounge dialog */
+    void showMultisigLoungeDialog();
+
+    /** Show Merkle tree dialog */
+    void showMerkleTreeDialog();
+
+    /** Show Signatures dialog */
+    void showSignaturesDialog();
+
+    /** Show Base58 dialog */
+    void showBase58Dialog();
+
+    /** Show Graffiti dialog */
+    void showGraffitiDialog();
+
+    /** Show Merchants dialog */
+    void showMerchantsDialog();
+
+    /** Show Timestamp dialog */
+    void showTimestampDialog();
+
+    /** Show Storage dialog */
+    void showStorageDialog();
+
+    /** Show Coin News dialog */
+    void showCoinNewsDialog();
+
     /** Go to the send coins page & click on use available balance */
     void gotoSendAllCoins();
+
+    /** Show mining pool dialog */
+    void showMiningPoolsDialog();
+
+    /** Show network stats dialog */
+    void showNetworkDialog();
+
+    /** Show add / remove sidechain dialog */
+    void showAddRemoveSidechainDialog();
+
+    /** Show file broadcast dialog */
+    void showFileBroadcastDialog();
 
 #endif // ENABLE_WALLET
     /** Show configuration dialog */

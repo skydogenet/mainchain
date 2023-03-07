@@ -105,6 +105,8 @@ public Q_SLOTS:
 
     void showSidechainActivationDialog();
     void showSCDBDialog();
+    void showGraffitiDialog();
+    void showCoinNewsDialog();
 };
 
 #endif // BITCOIN_QT_WALLETFRAME_H

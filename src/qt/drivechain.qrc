@@ -80,6 +80,13 @@
         <file alias="dots4">res/icons/dots4.png</file>
         <file alias="dots5">res/icons/dots5.png</file>
         <file alias="crosseye">res/icons/crosseye.png</file>
+        <file alias="timer">res/icons/timer.png</file>
+        <file alias="safe">res/icons/safe.png</file>
+        <file alias="scale">res/icons/scale.png</file>
+        <file alias="check">res/icons/check.png</file>
+        <file alias="pool">res/icons/pool.png</file>
+        <file alias="network">res/icons/network.png</file>
+        <file alias="tree">res/icons/tree.png</file>
         <file alias="paperwallet">res/doc/wallet.pdf</file>
     </qresource>
     <qresource prefix="/movies">

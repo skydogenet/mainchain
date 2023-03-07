@@ -75,6 +75,7 @@ endif
 .PHONY: FORCE check-symbols check-security
 # drivechain core #
 DRIVECHAIN_CORE_H = \
+  addressbook.h \
   addrdb.h \
   addrman.h \
   apiclient.h \
@@ -191,6 +192,7 @@ libdrivechain_util_a-clientversion.$(OBJEXT): obj/build.h
 libdrivechain_server_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
 libdrivechain_server_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 libdrivechain_server_a_SOURCES = \
+  addressbook.cpp \
   addrdb.cpp \
   addrman.cpp \
   apiclient.cpp \

@@ -17,7 +17,6 @@ class CreateWalletDialog;
 
 QT_BEGIN_NAMESPACE
 class QString;
-class QListWidgetItem;
 class QTableWidgetItem;
 QT_END_NAMESPACE
 

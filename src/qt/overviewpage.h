@@ -50,6 +50,8 @@ public:
     void setWalletModel(WalletModel *walletModel);
     void setMemPoolModel(MemPoolTableModel *model);
     void showOutOfSyncWarning(bool fShow);
+    void showGraffitiDialog();
+    void showCoinNewsDialog();
 
 public Q_SLOTS:
     void setBalance(const CAmount& balance, const CAmount& unconfirmedBalance, const CAmount& immatureBalance,

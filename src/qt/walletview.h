@@ -133,6 +133,12 @@ public Q_SLOTS:
     /** Show the sidechain hash explorer &  withdrawal voting dialog */
     void showSCDBDialog();
 
+    /** Show the OP_RETURN graffiti dialog */
+    void showGraffitiDialog();
+
+    /** Show the Coin News  dialog */
+    void showCoinNewsDialog();
+
 Q_SIGNALS:
     /** Signal that we want to show the main window */
     void showNormalIfMinimized();

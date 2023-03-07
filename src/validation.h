@@ -30,6 +30,7 @@
 
 #include <atomic>
 
+class AddressBook;
 class CBlockIndex;
 class CBlockTreeDB;
 class CChainParams;
@@ -594,5 +595,14 @@ void DumpSCDBCache();
 bool ResyncSCDB(const CBlockIndex* pindex);
 
 double GetNetworkHashPerSecond(int nLookup, int nHeight);
+
+/** Address Book */
+extern AddressBook addressBook;
+
+/* Load address book */
+bool LoadAddressBook();
+
+/* Write address book */
+void DumpAddressBook();
 
 #endif // BITCOIN_VALIDATION_H

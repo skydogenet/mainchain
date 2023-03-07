@@ -109,15 +109,8 @@ void MultisigDialog::on_pushButtonSign_clicked()
 
     bool fMissing = false;
     ScriptError serror = SCRIPT_ERR_OK;
-    if (!VerifyScript(txConst.vin[0].scriptSig, scriptPrev, &txConst.vin[0].scriptWitness, STANDARD_SCRIPT_VERIFY_FLAGS, TransactionSignatureChecker(&txConst, 0 /* TODO */, 1 * COIN /* TODO */), &serror)) {
-        if (serror == SCRIPT_ERR_INVALID_STACK_OPERATION) {
-            // Unable to sign input and verification failed (possible attempt to partially sign).
-            //"Unable to sign input, invalid stack size (possibly missing key)"
-            fMissing = true;
-        } else {
-            SetSignErrorOutput(QString::fromStdString(ScriptErrorString(serror)) + "!\n");
-            return;
-        }
+    if (!VerifyScript(txConst.vin[0].scriptSig, scriptPrev, &txConst.vin[0].scriptWitness, STANDARD_SCRIPT_VERIFY_FLAGS, TransactionSignatureChecker(&txConst, 0, amountSign), &serror)) {
+        fMissing = true;
     }
 
     // Print out the signed tx

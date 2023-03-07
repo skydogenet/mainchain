@@ -354,6 +354,18 @@ void WalletView::showSCDBDialog()
         sidechainPage->ShowSCDBDialog();
 }
 
+void WalletView::showGraffitiDialog()
+{
+    if (overviewPage)
+        overviewPage->showGraffitiDialog();
+}
+
+void WalletView::showCoinNewsDialog()
+{
+    if (overviewPage)
+        overviewPage->showCoinNewsDialog();
+}
+
 void WalletView::requestUseAvailable()
 {
     if (sendCoinsPage)

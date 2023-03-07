@@ -215,6 +215,8 @@ void Shutdown()
 
     DumpSCDBCache();
 
+    DumpAddressBook();
+
     if (fDumpMempoolLater && gArgs.GetArg("-persistmempool", DEFAULT_PERSIST_MEMPOOL)) {
         DumpMempool();
     }
@@ -1623,6 +1625,9 @@ bool AppInitMain()
                         LogPrintf("Error reading custom vote cache.\n");
                     }
                 }
+                // Load address book
+                if (!LoadAddressBook())
+                    LogPrintf("Failed to load address book!\n");
             } catch (const std::exception& e) {
                 LogPrintf("%s\n", e.what());
                 strLoadError = _("Error opening block database");
@@ -1670,7 +1675,6 @@ bool AppInitMain()
     if (!est_filein.IsNull())
         ::feeEstimator.Read(est_filein);
     fFeeEstimatesInitialized = true;
-
 
     // ********************************************************* Step 9: load wallet
 #ifdef ENABLE_WALLET

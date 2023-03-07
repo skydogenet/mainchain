@@ -239,6 +239,20 @@ void WalletFrame::showSCDBDialog()
         walletView->showSCDBDialog();
 }
 
+void WalletFrame::showGraffitiDialog()
+{
+    WalletView *walletView = currentWalletView();
+    if (walletView)
+        walletView->showGraffitiDialog();
+}
+
+void WalletFrame::showCoinNewsDialog()
+{
+    WalletView *walletView = currentWalletView();
+    if (walletView)
+        walletView->showCoinNewsDialog();
+}
+
 void WalletFrame::requestUseAvailable()
 {
     WalletView *walletView = currentWalletView();

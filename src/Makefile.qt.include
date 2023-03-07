@@ -122,6 +122,8 @@ QT_FORMS_UI = \
   qt/forms/merkletreedialog.ui \
   qt/forms/miningdialog.ui \
   qt/forms/multisigdialog.ui \
+  qt/forms/multisigdetailsdialog.ui \
+  qt/forms/multisigloungedialog.ui \
   qt/forms/opreturndialog.ui \
   qt/forms/overviewpage.ui \
   qt/forms/paperwalletdialog.ui \
@@ -178,9 +180,11 @@ QT_MOC_CPP = \
   qt/moc_managenewsdialog.cpp \
   qt/moc_mempooltablemodel.cpp \
   qt/moc_miningdialog.cpp \
-  qt/moc_multisigdialog.cpp \
   qt/moc_merkletreedialog.cpp \
   qt/moc_modaloverlay.cpp \
+  qt/moc_multisigdialog.cpp \
+  qt/moc_multisigdetailsdialog.cpp \
+  qt/moc_multisigloungedialog.cpp \
   qt/moc_newstablemodel.cpp \
   qt/moc_newstypestablemodel.cpp \
   qt/moc_newsqrdialog.cpp \
@@ -287,9 +291,11 @@ DRIVECHAIN_QT_H = \
   qt/managenewsdialog.h \
   qt/mempooltablemodel.h \
   qt/miningdialog.h \
-  qt/multisigdialog.h \
   qt/merkletreedialog.h \
   qt/modaloverlay.h \
+  qt/multisigdialog.h \
+  qt/multisigdetailsdialog.h \
+  qt/multisigloungedialog.h \
   qt/newstablemodel.h \
   qt/newstypestablemodel.h \
   qt/newsqrdialog.h \
@@ -427,6 +433,13 @@ RES_ICONS = \
   qt/res/icons/dots4.png \
   qt/res/icons/dots5.png \
   qt/res/icons/crosseye.png \
+  qt/res/icons/safe.png \
+  qt/res/icons/scale.png \
+  qt/res/icons/check.png \
+  qt/res/icons/pool.png \
+  qt/res/icons/network.png \
+  qt/res/icons/timer.png \
+  qt/res/icons/tree.png \
   qt/res/qdarkstyle/rc/up_arrow_disabled.png \
   qt/res/qdarkstyle/rc/Hmovetoolbar.png \
   qt/res/qdarkstyle/rc/stylesheet-branch-end.png \
@@ -522,8 +535,10 @@ DRIVECHAIN_QT_WALLET_CPP = \
   qt/managenewsdialog.cpp \
   qt/merkletreedialog.cpp \
   qt/miningdialog.cpp \
-  qt/multisigdialog.cpp \
   qt/modaloverlay.cpp \
+  qt/multisigdialog.cpp \
+  qt/multisigdetailsdialog.cpp \
+  qt/multisigloungedialog.cpp \
   qt/newstablemodel.cpp \
   qt/newstypestablemodel.cpp \
   qt/newsqrdialog.cpp \

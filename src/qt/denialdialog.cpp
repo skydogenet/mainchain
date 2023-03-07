@@ -155,7 +155,6 @@ void DenialDialog::automaticDenial()
         if ((int) i >= ui->tableWidgetCoins->rowCount())
             return;
 
-        QTableWidgetItem *itemCheck = ui->tableWidgetCoins->item(i, COLUMN_CHECKBOX);
         bool fChecked = ui->tableWidgetCoins->item(i, COLUMN_CHECKBOX)->checkState() == Qt::Checked;
         if (!fChecked)
             continue;

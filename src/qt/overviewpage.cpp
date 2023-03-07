@@ -244,7 +244,7 @@ void OverviewPage::handleOutOfSyncWarningClicks()
 
 void OverviewPage::on_pushButtonCreateNews_clicked()
 {
-    createNewsDialog->show();
+    showCoinNewsDialog();
 }
 
 void OverviewPage::on_pushButtonManageNews_clicked()
@@ -254,8 +254,7 @@ void OverviewPage::on_pushButtonManageNews_clicked()
 
 void OverviewPage::on_pushButtonGraffiti_clicked()
 {
-    opReturnDialog->updateOnShow();
-    opReturnDialog->show();
+    showGraffitiDialog();
 }
 
 void OverviewPage::on_pushButtonSetUSDBTC_clicked()
@@ -383,6 +382,18 @@ void OverviewPage::updateAlerts(const QString &warnings)
 void OverviewPage::showOutOfSyncWarning(bool fShow)
 {
     ui->labelWalletStatus->setVisible(fShow);
+}
+
+void OverviewPage::showGraffitiDialog()
+{
+    opReturnDialog->updateOnShow();
+    opReturnDialog->show();
+}
+
+void OverviewPage::showCoinNewsDialog()
+{
+    createNewsDialog->show();
+
 }
 
 void OverviewPage::on_tableViewBlocks_doubleClicked(const QModelIndex& index)

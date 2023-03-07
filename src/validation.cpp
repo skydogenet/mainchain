@@ -5,6 +5,7 @@
 
 #include <validation.h>
 
+#include <addressbook.h>
 #include <arith_uint256.h>
 #include <chain.h>
 #include <chainparams.h>
@@ -237,6 +238,8 @@ CAmount maxTxFee = DEFAULT_TRANSACTION_MAXFEE;
 
 CBlockPolicyEstimator feeEstimator;
 CTxMemPool mempool(&feeEstimator);
+
+AddressBook addressBook;
 
 SidechainDB scdb;
 
@@ -6076,6 +6079,78 @@ double GetNetworkHashPerSecond(int nLookup, int nHeight)
     int64_t timeDiff = maxTime - minTime;
 
     return workDiff.getdouble() / timeDiff;
+}
+
+bool LoadAddressBook()
+{
+    fs::path path = GetDataDir() / "addressbook" / "addressbook.dat";
+    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
+    if (filein.IsNull()) {
+        return true;
+    }
+
+    std::vector<MultisigPartner> vPartner;
+    try {
+        uint64_t nVersion;
+        filein >> nVersion;
+        // TODO ADDRESS_BOOK_DUMP_VERSION
+        if (nVersion != SCDB_DUMP_VERSION) {
+            return false;
+        }
+
+        int count = 0;
+        filein >> count;
+        for (int i = 0; i < count; i++) {
+            MultisigPartner partner;
+            filein >> partner;
+            vPartner.push_back(partner);
+        }
+    }
+    catch (const std::exception& e) {
+        LogPrintf("%s: Exception: %s\n", __func__, e.what());
+        return false;
+    }
+
+    // Add to address book
+    for (const MultisigPartner& p : vPartner)
+        addressBook.AddMultisigPartner(p);
+
+    return true;
+}
+
+void DumpAddressBook()
+{
+    // Create ~/.drivechain/addressbook
+    TryCreateDirectories(GetDataDir() / "addressbook");
+
+    std::vector<MultisigPartner> vPartner = addressBook.GetMultisigPartners();
+
+    int count = vPartner.size();
+
+    // Write the address book
+    fs::path path = GetDataDir() / "addressbook" / "addressbook.dat.new";
+    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    if (fileout.IsNull()) {
+        return;
+    }
+
+    try {
+        fileout << SCDB_DUMP_VERSION; // version required to read
+        fileout << count;
+
+        for (const MultisigPartner& p : vPartner) {
+            fileout << p;
+        }
+    }
+    catch (const std::exception& e) {
+        LogPrintf("%s: Exception: %s\n", __func__, e.what());
+    }
+
+    FileCommit(fileout.Get());
+    fileout.fclose();
+    RenameOver(GetDataDir() / "addressbook" / "addressbook.dat.new", GetDataDir() /  "addressbook" / "addressbook.dat");
+
+    LogPrintf("%s: Wrote %u\n", __func__, count);
 }
 
 class CMainCleanup
