@@ -12,12 +12,14 @@
 
 uint256 CBlockHeader::GetHash() const
 {
-    return SerializeHash(*this);
+    //return SerializeHash(*this);
+	return skydoge_hash(BEGIN(nVersion), END(nNonce));
 }
 
 uint256 CBlockHeader::GetPoWHash() const
 {
-    return SerializeSHAndwichHash(*this);
+//    return SerializeSHAndwichHash(*this);
+    return skydoge_hash(BEGIN(nVersion), END(nNonce));
 }
 
 std::string CBlock::ToString() const

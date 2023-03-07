@@ -16,10 +16,55 @@
 
 #include <chainparamsseeds.h>
 
+static void MineGenesis(CBlockHeader& genesisBlock, const uint256& powLimit, bool noProduction)
+{
+    if(noProduction)
+        genesisBlock.nTime = std::time(0);
+    genesisBlock.nNonce = 1;
+
+    printf("NOTE: Genesis nTime = %u \n", genesisBlock.nTime);
+    printf("WARN: Genesis nNonce (BLANK!) = %u \n", genesisBlock.nNonce);
+
+    bool fNegative;
+    bool fOverflow;
+    arith_uint256 bnTarget;
+
+    bnTarget.SetCompact(genesisBlock.nBits, &fNegative, &fOverflow);
+    arith_uint256 besthash;
+    memset(&besthash,0xFF,32);
+    arith_uint256 hashTarget = UintToArith256(powLimit);
+    printf("Target: %s\n", hashTarget.GetHex().c_str());
+    arith_uint256 newhash = UintToArith256(genesisBlock.GetPoWHash());
+    while (newhash > bnTarget) {
+        genesisBlock.nNonce++;
+        if (genesisBlock.nNonce == 0) {
+            printf("NONCE WRAPPED, incrementing time\n");
+            ++genesisBlock.nTime;
+        }
+        // If nothing found after trying for a while, print status
+        if ((genesisBlock.nNonce & 0xfff) == 0)
+            printf("nonce %08X: hash = %s (target = %s)\n",
+                   genesisBlock.nNonce, newhash.ToString().c_str(),
+                   hashTarget.ToString().c_str());
+
+        if(newhash < besthash) {
+            besthash = newhash;
+            printf("New best: %s\n", newhash.GetHex().c_str());
+        }
+        newhash = UintToArith256(genesisBlock.GetPoWHash());
+    }
+
+    printf("Genesis nTime = %u \n", genesisBlock.nTime);
+    printf("Genesis nNonce = %u \n", genesisBlock.nNonce);
+    printf("Genesis nBits: %08x\n", genesisBlock.nBits);
+    printf("Genesis Hash = %s\n", newhash.ToString().c_str());
+    printf("Genesis Hash Merkle Root = %s\n", genesisBlock.hashMerkleRoot.ToString().c_str());
+}
+
 static CBlock CreateGenesisBlock(const char* pszTimestamp, const CScript& genesisOutputScript, uint32_t nTime, uint32_t nNonce, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
 {
     CMutableTransaction txNew;
-    txNew.nVersion = 1;
+    txNew.nVersion = 9;
     txNew.vin.resize(1);
     txNew.vout.resize(1);
     txNew.vin[0].scriptSig = CScript() << 486604799 << CScriptNum(4) << std::vector<unsigned char>((const unsigned char*)pszTimestamp, (const unsigned char*)pszTimestamp + strlen(pszTimestamp));
@@ -61,6 +106,9 @@ void CChainParams::UpdateVersionBitsParameters(Consensus::DeploymentPos d, int64
 class CMainParams : public CChainParams {
 public:
     CMainParams() {
+
+
+
         strNetworkID = "main";
         consensus.nSubsidyHalvingInterval = 2100000;
         consensus.BIP16Height = 0; // P2SH
@@ -69,7 +117,7 @@ public:
         consensus.BIP65Height = 0; // CLTV
         consensus.BIP66Height = 0; // Strict DER signatures
         consensus.nPowTargetTimespan = 60 * 60; // one hour
-        consensus.nPowTargetSpacing = 60; 
+        consensus.nPowTargetSpacing = 60;
         consensus.powLimit = uint256S("0000005fffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.fPowAllowMinDifficultyBlocks = false;
         consensus.fPowNoRetargeting = false;
@@ -110,20 +158,16 @@ public:
         pchMessageStart[1] = 0xd8;
         pchMessageStart[2] = 0xef;
         pchMessageStart[3] = 0x81;
-        nDefaultPort = 9324;
+        nDefaultPort = 12345;//9324;
         nPruneAfterHeight = 100000;
 
-
-        genesis = CreateGenesisBlock(1634874057, 331438930, 0x1d5fffff, 1, 50000 * COIN);
+        genesis = CreateGenesisBlock(1670198450, 16757179, 0x1d5fffff, 1, 50000 * COIN);
+        //MineGenesis(genesis,consensus.powLimit,false);
         consensus.hashGenesisBlock = genesis.GetHash();
 
-
-
-
-
         // PoW: 0000001f96ca6bf561489eee7630a3e8e002e4aebf46ef9f235f0469676a239f
-        assert(consensus.hashGenesisBlock == uint256S("0x5a86f07cf871fb4d8125aa6f8701e3ba3e876bddfcb6d11754cfb459eedf2e8c"));
-        assert(genesis.hashMerkleRoot == uint256S("0x8aba3957957cfa6dba16b9d707432b796dc998713020a794b546163148ea94f5"));
+        assert(consensus.hashGenesisBlock == uint256S("0x000000204da4f2092d957aa155339b91892c9e35de481c0a8efe099986936695"));
+        assert(genesis.hashMerkleRoot == uint256S("0x160ace8d7230cd2879c999e1262333cca48d2fb87b67c06a6556d474f224fa80"));
 
         // Note that of those which support the service bits prefix, most only support a subset of
         // possible options.
@@ -152,7 +196,7 @@ public:
 
         checkpointData = {
             {
-                { 0, uint256S("0x5a86f07cf871fb4d8125aa6f8701e3ba3e876bddfcb6d11754cfb459eedf2e8c")},
+                { 0, uint256S("0x0000000b2b10496bb3520722e9e197377d22671e39f1def14ed3455b473e9afa")},
             }
         };
 
@@ -218,13 +262,15 @@ public:
 
         nDefaultPort = 19243;
         nPruneAfterHeight = 1000;
-        genesis = CreateGenesisBlock(1636272591, 204247539, 0x1d5fffff, 1, 50 * COIN);
+        genesis = CreateGenesisBlock(1670198460, 59539747, 0x1d5fffff, 1, 50 * COIN);
+
+        //MineGenesis(genesis,consensus.powLimit,false);
         consensus.hashGenesisBlock = genesis.GetHash();
 
 
         // PoW: 000000007f35a199e3bd12f099078aa9ec69ce56b4e7d425303370633ba08c87
-        assert(consensus.hashGenesisBlock == uint256S("0x0738a06a8f21f36a14e071ce389d612d6ff487ed481e6c42a9e863f92c657868"));
-        assert(genesis.hashMerkleRoot == uint256S("0x9e7a1ce7ae956db546e90f4d54f1182837753c1e256efe49e9b2e612a4f9a038"));
+        assert(consensus.hashGenesisBlock == uint256S("0x00000005e65ea5a412b10fce8e3e4b740c71ce00552efa492856d923a2e357c0"));
+        assert(genesis.hashMerkleRoot == uint256S("0xb04ef21971d8356eb6c8a3ed14eb84a8fafca3ecc8f103cb88e90778ef9b5e86"));
 
         vFixedSeeds.clear();
         vSeeds.clear();
@@ -247,7 +293,7 @@ public:
 
         checkpointData = {
             {
-                { 0, uint256S("0x0738a06a8f21f36a14e071ce389d612d6ff487ed481e6c42a9e863f92c657868")},              
+                { 0, uint256S("0x00000005e65ea5a412b10fce8e3e4b740c71ce00552efa492856d923a2e357c0")},
             }
         };
 
@@ -301,7 +347,7 @@ public:
         // By default assume that the signatures in ancestors of this block are valid.
         consensus.defaultAssumeValid = uint256S("0x00");
 
-        pchMessageStart[0] = 0xa0; 
+        pchMessageStart[0] = 0xa0;
         pchMessageStart[1] = 0x9d;
         pchMessageStart[2] = 0xed;
         pchMessageStart[3] = 0x83;
@@ -309,12 +355,13 @@ public:
         nDefaultPort = 19334;
         nPruneAfterHeight = 1000;
 
-        genesis = CreateGenesisBlock(1538245548, 44, 0x207fffff, 1, 50 * COIN);
+        genesis = CreateGenesisBlock(1670198470, 22806025, 0x1d5fffff, 1, 50000 * COIN);
+        //MineGenesis(genesis,consensus.powLimit,false);
         consensus.hashGenesisBlock = genesis.GetHash();
 
-        // PoW: 5f7b23e5c858849788406fd2e18dabaff85afdd7d6efbcdff4bc91550ecff6d9
-        assert(consensus.hashGenesisBlock == uint256S("0x800270728d0a4bc737ae5858c45de5b7d41a571a4ff508010b7389ccd91bed3a"));
-        assert(genesis.hashMerkleRoot == uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"));
+        // PoW: 0000001f96ca6bf561489eee7630a3e8e002e4aebf46ef9f235f0469676a239f
+        assert(consensus.hashGenesisBlock == uint256S("0x0000002da261eb84458c88f65c2a9769f9a2e7da821ea54e21db2d64101fb882"));
+        assert(genesis.hashMerkleRoot == uint256S("0x160ace8d7230cd2879c999e1262333cca48d2fb87b67c06a6556d474f224fa80"));
 
         vFixedSeeds.clear(); //!< Regtest mode doesn't have any fixed seeds.
         vSeeds.clear();      //!< Regtest mode doesn't have any DNS seeds.
@@ -325,7 +372,7 @@ public:
 
         checkpointData = {
             {
-                {0, uint256S("800270728d0a4bc737ae5858c45de5b7d41a571a4ff508010b7389ccd91bed3a")},
+                {0, uint256S("0x0000002da261eb84458c88f65c2a9769f9a2e7da821ea54e21db2d64101fb882")},
             }
         };
 
