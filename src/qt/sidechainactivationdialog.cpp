@@ -110,7 +110,7 @@ void SidechainActivationDialog::on_pushButtonReject_clicked()
 void SidechainActivationDialog::on_pushButtonHelp_clicked()
 {
     // TODO move text into static const
-    QMessageBox::information(this, tr("Skydoge - information"),
+    QMessageBox::information(this, tr("Drivechain - information"),
         tr("Sidechain activation signalling:\n\n"
            "Use this page to ACK (acknowledgement) or NACK "
            "(negative-acknowledgement) sidechains.\n\n"

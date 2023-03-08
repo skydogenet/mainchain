@@ -5,7 +5,7 @@
 #include <qt/denialamountdialog.h>
 #include <qt/forms/ui_denialamountdialog.h>
 
-#include <qt/drivechainamountfield.h>
+#include <qt/skydogeamountfield.h>
 
 #include <QMessageBox>
 

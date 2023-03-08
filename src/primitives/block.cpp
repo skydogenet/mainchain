@@ -16,11 +16,6 @@ uint256 CBlockHeader::GetHash() const
 	return skydoge_hash(BEGIN(nVersion), END(nNonce));
 }
 
-uint256 CBlockHeader::GetPoWHash() const
-{
-//    return SerializeSHAndwichHash(*this);
-    return skydoge_hash(BEGIN(nVersion), END(nNonce));
-}
 
 std::string CBlock::ToString() const
 {

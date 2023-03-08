@@ -256,6 +256,76 @@ public:
 uint64_t SipHashUint256(uint64_t k0, uint64_t k1, const uint256& val);
 uint64_t SipHashUint256Extra(uint64_t k0, uint64_t k1, const uint256& val, uint32_t extra);
 
+/** A hasher class for SHAndwich (SHA-256 + ? + SHA-256). */
+class SHAndwich256 {
+private:
+    CSHA256 sha;
+public:
+    static const size_t OUTPUT_SIZE = CSHA256::OUTPUT_SIZE;
+
+    void Finalize(unsigned char hash[OUTPUT_SIZE]) {
+        unsigned char buf256[CSHA256::OUTPUT_SIZE];
+        sha.Finalize(buf256);
+
+        unsigned char buf512[CSHA512::OUTPUT_SIZE];
+        CSHA512().Write(buf256, CSHA256::OUTPUT_SIZE).Finalize(buf512);
+
+        sha.Reset().Write(buf512, CSHA512::OUTPUT_SIZE).Finalize(hash);
+    }
+
+    SHAndwich256& Write(const unsigned char *data, size_t len) {
+        sha.Write(data, len);
+        return *this;
+    }
+
+    SHAndwich256& Reset() {
+        sha.Reset();
+        return *this;
+    }
+};
+
+/** A writer stream (for serialization) - computes a 256-bit hash. */
+class SHAndwichHashWriter
+{
+private:
+    SHAndwich256 ctx;
+
+    const int nType;
+    const int nVersion;
+public:
+    SHAndwichHashWriter(int nTypeIn, int nVersionIn) : nType(nTypeIn), nVersion(nVersionIn) {}
+
+    int GetType() const { return nType; }
+    int GetVersion() const { return nVersion; }
+
+    void write(const char *pch, size_t size) {
+        ctx.Write((const unsigned char*)pch, size);
+    }
+
+    // invalidates the object
+    uint256 GetHash() {
+        uint256 result;
+        ctx.Finalize((unsigned char*)&result);
+        return result;
+    }
+
+    template<typename T>
+    SHAndwichHashWriter& operator<<(const T& obj) {
+        // Serialize to this stream
+        ::Serialize(*this, obj);
+        return (*this);
+    }
+};
+
+/** Compute the 256-bit SHAndwich hash of an object's serialization. */
+template<typename T>
+uint256 SerializeSHAndwichHash(const T& obj, int nType=SER_GETHASH, int nVersion=PROTOCOL_VERSION)
+{
+    SHAndwichHashWriter ss(nType, nVersion);
+    ss << obj;
+    return ss.GetHash();
+}
+
 template<typename T1>
 inline uint256 skydoge_hash(const T1 pbegin, const T1 pend)
 {

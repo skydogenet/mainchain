@@ -1708,16 +1708,14 @@ bool AppInitMain()
         // doing so is that after activation, no upgraded nodes will fetch from you.
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
     }
-
-if (nHeight < DrivechainHeight) {
+// old DC
     if (chainparams.GetConsensus().vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout != 0) {
         nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN);
     }
-} else {
 
     // Show NODE_DRIVECHAIN after fork height
     if (drivechainsEnabled)
-        nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN); }
+        nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN); 
 
     // ********************************************************* Step 11: import blocks
 
@@ -1763,12 +1761,12 @@ if (nHeight < DrivechainHeight) {
         return false;
     }
 
-#ifdef ENABLE_WALLET
-    StartWallets(scheduler);
+//#ifdef ENABLE_WALLET
+    //StartWallets(scheduler);
 
     // ********************************************************* Step 12: load coins
 
-    bool fReadLoadedCoins = gArgs.GetBoolArg("-loadedcoins", true);
+    //bool fReadLoadedCoins = gArgs.GetBoolArg("-loadedcoins", true);
 
     // TODO loaded coins are disabled for this release. Setting fReadLoadedCoins
     // to false no matter what settings are applied means that loaded coins will
@@ -1777,7 +1775,7 @@ if (nHeight < DrivechainHeight) {
     //
     // If loaded coins are to be removed entirely the code should be deleted.
     // Or if loaded coins are to be re-enabled the next line can be deleted.
-    fReadLoadedCoins = false;
+    //fReadLoadedCoins = false;
 
     // TODO improve this check... Right now we're just checking if the last
     // loaded coin that will be written can currently be looked up by pcoinsTip.
@@ -1790,26 +1788,26 @@ if (nHeight < DrivechainHeight) {
     // Note that we only load coins for main network.
     //
     // Check if we have already imported loaded coins, try to load them if not
-    if (chainparams.NetworkIDString() == "main" && fReadLoadedCoins &&
-            !pcoinsTip->HaveCoin(COutPoint(uint256S(LAST_LOADED_OUTPOINT), LAST_LOADED_N)))
-    {
-        uiInterface.InitMessage(_("Importing UTXO set. First time only (~10 minutes)."));
+    //if (chainparams.NetworkIDString() == "main" && fReadLoadedCoins &&
+    //        !pcoinsTip->HaveCoin(COutPoint(uint256S(LAST_LOADED_OUTPOINT), LAST_LOADED_N)))
+    //{
+    //    uiInterface.InitMessage(_("Importing UTXO set. First time only (~10 minutes)."));
 
         // Try to read loaded coins
-        if (!pcoinsTip->ReadLoadedCoins()) {
+    //    if (!pcoinsTip->ReadLoadedCoins()) {
             // Failed to read loaded coins, abort
             // TODO add link to website with setup guide
-            std::string strError = "Error reading loading coins!\n\n";
-            strError += "Skydoge needs to import a UTXO set (loaded coins) before starting for the first time.";
-            strError += "\n\n";
-            strError += "You must move loaded_coins.dat to your Skydoge datadir.";
-            strError += "\n\n";
-            strError += "Shutting down.";
-            uiInterface.ThreadSafeMessageBox(_(strError.c_str()), "", CClientUIInterface::MSG_ERROR);
-            LogPrintf("Error reading loaded coins, aborting init");
-            return false;
-        }
-    }
+    //        std::string strError = "Error reading loading coins!\n\n";
+    //        strError += "Skydoge needs to import a UTXO set (loaded coins) before starting for the first time.";
+    //        strError += "\n\n";
+    //        strError += "You must move loaded_coins.dat to your Skydoge datadir.";
+    //        strError += "\n\n";
+    //        strError += "Shutting down.";
+    //        uiInterface.ThreadSafeMessageBox(_(strError.c_str()), "", CClientUIInterface::MSG_ERROR);
+    //        LogPrintf("Error reading loaded coins, aborting init");
+    //        return false;
+    //    }
+    //}
 
     //
     // TODO
@@ -1825,7 +1823,7 @@ if (nHeight < DrivechainHeight) {
         pwallet->AddLoadedCoins(vLoadedCoin);
     }
     */
-#endif
+//#endif
 
     // ********************************************************* Step 12: start node
     uiInterface.InitMessage(_("Starting node..."));

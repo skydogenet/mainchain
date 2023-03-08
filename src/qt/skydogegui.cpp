@@ -6,9 +6,9 @@
 
 #include <qt/blockexplorer.h>
 #include <qt/clientmodel.h>
-#include <qt/skydogeunits.h>
 #include <qt/createwalletdialog.h>
 #include <qt/denialdialog.h>
+#include <qt/skydogeunits.h>
 #include <qt/hashcalcdialog.h>
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
@@ -85,10 +85,6 @@ using namespace boost::placeholders;
 /** Display name for default wallet name. Uses tilde to avoid name
  * collisions in the future with additional wallets */
 const QString BitcoinGUI::DEFAULT_WALLET = "~Default";
-
-//old DC
-//! The required delta of headers to the estimated number of available headers until we show the IBD progress
-static constexpr int HEADER_HEIGHT_DELTA_SYNC = 24;
 
 BitcoinGUI::BitcoinGUI(const PlatformStyle *_platformStyle, const NetworkStyle *networkStyle, QWidget *parent) :
     QMainWindow(parent),
@@ -227,7 +223,6 @@ BitcoinGUI::BitcoinGUI(const PlatformStyle *_platformStyle, const NetworkStyle *
                 walletFrame, SLOT(showSidechainActivationDialog()));
 
         connect(miningDialog, SIGNAL(WithdrawalDialogRequested()),
-                walletFrame, SLOT(showSidechainWithdrawalDialog()));
                 walletFrame, SLOT(showSCDBDialog()));
 
         connect(walletFrame, SIGNAL(requestedSyncWarningInfo()), this, SLOT(showModalOverlay()));
@@ -628,15 +623,7 @@ void BitcoinGUI::createMenuBar()
 
         menuWallet->addAction(encryptWalletAction);
         menuWallet->addAction(changePassphraseAction);
-// old DC
-        file->addAction(openAction);
-        file->addAction(backupWalletAction);
-        file->addSeparator();
-        file->addAction(usedSendingAddressesAction);
-        file->addAction(usedReceivingAddressesAction);
-        file->addSeparator();
     }
-    file->addAction(quitAction);
 
     QMenu *menuBanking = appMenuBar->addMenu(tr("&Banking"));
     if (walletFrame)
@@ -677,11 +664,6 @@ void BitcoinGUI::createMenuBar()
 
         menuBitcoin->addAction(showMerchantsDialogAction);
         menuBitcoin->addAction(showSidechainTransferAction);
-// old DC
-        tools->addAction(showMiningDialogAction);
-        tools->addAction(showHashCalcDialogAction);
-        tools->addAction(showBlockExplorerDialogAction);
-        tools->addAction(signVerifyMessageAction);
     }
 
     QMenu *menuWork = appMenuBar->addMenu(tr("&Work for Bitcoin"));
@@ -692,12 +674,7 @@ void BitcoinGUI::createMenuBar()
         menuWork->addAction(showNetworkDialogAction);
         menuWork->addAction(showAddRemoveSidechainDialogAction);
         menuWork->addAction(showSCDBDialogAction); // m4 explorer
-// old DC
-        settings->addAction(encryptWalletAction);
-        settings->addAction(changePassphraseAction);
-        settings->addSeparator();
     }
-    settings->addAction(optionsAction);
 
     QMenu *menuTools = appMenuBar->addMenu(tr("&Crypto Tools"));
     if(walletFrame)
@@ -724,14 +701,7 @@ void BitcoinGUI::createMenuBar()
         menuNode->addSeparator();
 
         menuNode->addAction(quitAction);
-// old DC
-        help->addAction(openRPCConsoleAction);
-        help->addAction(showSidechainTableDialogAction);
     }
-    help->addAction(showHelpMessageAction);
-    help->addSeparator();
-    help->addAction(aboutAction);
-    help->addAction(aboutQtAction);
 }
 
 void BitcoinGUI::createToolBars()

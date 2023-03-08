@@ -604,7 +604,6 @@ qt_libskydogeqt_a_SOURCES = $(DRIVECHAIN_QT_CPP) $(DRIVECHAIN_QT_H) $(QT_FORMS_U
   $(QT_QRC) $(QT_QRC_LOCALE) $(QT_TS) $(PROTOBUF_PROTO) $(RES_ICONS) $(RES_QSS) $(RES_IMAGES) $(RES_MOVIES)
 
 nodist_qt_libskydogeqt_a_SOURCES = $(QT_MOC_CPP) $(QT_MOC) $(PROTOBUF_CC) \
->>>>>>> master
   $(PROTOBUF_H) $(QT_QRC_CPP) $(QT_QRC_LOCALE_CPP)
 
 # forms/foo.h -> forms/ui_foo.h
@@ -654,7 +653,7 @@ $(srcdir)/qt/skydogestrings.cpp: $(libskydoge_server_a_SOURCES) $(libskydoge_wal
 	@test -n $(XGETTEXT) || echo "xgettext is required for updating translations"
 	$(AM_V_GEN) cd $(srcdir); XGETTEXT=$(XGETTEXT) PACKAGE_NAME="$(PACKAGE_NAME)" COPYRIGHT_HOLDERS="$(COPYRIGHT_HOLDERS)" COPYRIGHT_HOLDERS_SUBSTITUTION="$(COPYRIGHT_HOLDERS_SUBSTITUTION)" $(PYTHON) ../share/qt/extract_strings_qt.py $^
 
-translate: $(srcdir)/qt/skydogestrings.cpp $(QT_FORMS_UI) $(QT_FORMS_UI) $(DRIVECHAIN_QT_BASE_CPP) qt/drivechain.cpp $(DRIVECHAIN_QT_WINDOWS_CPP) $(DRIVECHAIN_QT_WALLET_CPP) $(DRIVECHAIN_QT_H) $(DRIVECHAIN_MM)
+translate: $(srcdir)/qt/skydogestrings.cpp $(QT_FORMS_UI) $(QT_FORMS_UI) $(DRIVECHAIN_QT_BASE_CPP) qt/skydoge.cpp $(DRIVECHAIN_QT_WINDOWS_CPP) $(DRIVECHAIN_QT_WALLET_CPP) $(DRIVECHAIN_QT_H) $(DRIVECHAIN_MM)
 	@test -n $(LUPDATE) || echo "lupdate is required for updating translations"
 	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(LUPDATE) $^ -locations relative -no-obsolete -ts $(srcdir)/qt/locale/bitcoin_en.ts
 
@@ -667,7 +666,6 @@ $(QT_QRC_LOCALE_CPP): $(QT_QRC_LOCALE) $(QT_QM)
 
 $(QT_QRC_CPP): $(QT_QRC) $(QT_FORMS_H) $(RES_ICONS) $(RES_QSS) $(RES_IMAGES) $(RES_MOVIES) $(PROTOBUF_H)
 	@test -f $(RCC)
-
 	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(RCC) -name skydoge $< | \
 	  $(SED) -e '/^\*\*.*Created:/d' -e '/^\*\*.*by:/d' > $@
 
@@ -676,10 +674,9 @@ CLEAN_QT = $(nodist_qt_libskydogeqt_a_SOURCES) $(QT_QM) $(QT_FORMS_H) qt/*.gcda 
 CLEANFILES += $(CLEAN_QT)
 
 skydoge_qt_clean: FORCE
-	rm -f $(CLEAN_QT) $(qt_libskydogeqt_a_OBJECTS) $(qt_skydoge_qt_OBJECTS) qt/skydoge-qt$(EXEEXT) $(LIBDRIVECHAINQT)
+	rm -f $(CLEAN_QT) $(qt_libskydogeqt_a_OBJECTS) $(qt_skydoge_qt_OBJECTS) qt/skydoge-qt$(EXEEXT) $(LIBskydogeQT)
 
 skydoge_qt : qt/skydoge-qt$(EXEEXT)
-
 
 ui_%.h: %.ui
 	@test -f $(UIC)

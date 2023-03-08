@@ -125,5 +125,5 @@ int skydogeconsensus_verify_script(const unsigned char *scriptPubKey, unsigned i
 unsigned int skydogeconsensus_version()
 {
     // Just use the API version for now
-    return DRIVECHAINCONSENSUS_API_VER;
+    return DRIVENETCONSENSUS_API_VER;
 }

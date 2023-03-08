@@ -34,7 +34,7 @@ static void MineGenesis(CBlockHeader& genesisBlock, const uint256& powLimit, boo
     memset(&besthash,0xFF,32);
     arith_uint256 hashTarget = UintToArith256(powLimit);
     printf("Target: %s\n", hashTarget.GetHex().c_str());
-    arith_uint256 newhash = UintToArith256(genesisBlock.GetPoWHash());
+    arith_uint256 newhash = UintToArith256(genesisBlock.GetHash());
     while (newhash > bnTarget) {
         genesisBlock.nNonce++;
         if (genesisBlock.nNonce == 0) {
@@ -51,7 +51,7 @@ static void MineGenesis(CBlockHeader& genesisBlock, const uint256& powLimit, boo
             besthash = newhash;
             printf("New best: %s\n", newhash.GetHex().c_str());
         }
-        newhash = UintToArith256(genesisBlock.GetPoWHash());
+        newhash = UintToArith256(genesisBlock.GetHash());
     }
 
     printf("Genesis nTime = %u \n", genesisBlock.nTime);

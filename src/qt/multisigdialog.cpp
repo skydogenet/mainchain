@@ -5,7 +5,7 @@
 #include <qt/multisigdialog.h>
 #include <qt/forms/ui_multisigdialog.h>
 
-#include <qt/drivechainamountfield.h>
+#include <qt/skydogeamountfield.h>
 #include <qt/guiutil.h>
 #include <qt/platformstyle.h>
 

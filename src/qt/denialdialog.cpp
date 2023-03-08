@@ -9,7 +9,7 @@
 #include <qt/denialamountdialog.h>
 #include <qt/denialscheduledialog.h>
 #include <qt/denyallconfirmationdialog.h>
-#include <qt/drivechainunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/platformstyle.h>
 #include <qt/scheduledtransactiontablemodel.h>
 
@@ -453,7 +453,7 @@ void DenialDialog::updateCoins()
         // Amount
         QTableWidgetItem *itemAmount = new QTableWidgetItem();
         itemAmount->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        itemAmount->setText(BitcoinUnits::format(BitcoinUnits::BTC, out.tx->tx->vout[out.i].nValue, false, BitcoinUnits::separatorNever));
+        itemAmount->setText(BitcoinUnits::format(BitcoinUnits::SKYDOGE, out.tx->tx->vout[out.i].nValue, false, BitcoinUnits::separatorNever));
         itemAmount->setFlags(itemAmount->flags() & ~Qt::ItemIsEditable);
         ui->tableWidgetCoins->setItem(nRow, COLUMN_AMOUNT, itemAmount);
 
@@ -585,12 +585,12 @@ void DenialDialog::Deny(const QModelIndex& index)
     if (!scheduleDialog.GetScheduled())
         return;
 
-    QString strAmount = BitcoinUnits::format(BitcoinUnits::BTC, coin.tx->tx->vout[coin.i].nValue, false, BitcoinUnits::separatorNever);
+    QString strAmount = BitcoinUnits::format(BitcoinUnits::SKYDOGE, coin.tx->tx->vout[coin.i].nValue, false, BitcoinUnits::separatorNever);
 
     QString confirm = "This will schedule a transaction which moves the coin you have selected to one or more new addresses!\n\n";
     confirm += "Amount to deny: " + strAmount + "\n\n";
     confirm += "Are you sure?\n";
-    int nRes = QMessageBox::question(this, tr("Drivechain - confirm denial"),
+    int nRes = QMessageBox::question(this, tr("Skydoge - confirm denial"),
                                      confirm,
                                      QMessageBox::Ok, QMessageBox::Cancel);
     if (nRes == QMessageBox::Cancel)

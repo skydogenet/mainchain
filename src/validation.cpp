@@ -917,18 +917,6 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
             }
         }
 
-        if (nHeight < DrivechainHeight) {
-            bool fSpendsCriticalData = false;
-            if (skydogesEnabled) {
-                for (const CTxIn& txin : tx.vin) {
-                    const Coin &coin = view.AccessCoin(txin.prevout);
-                    if (coin.IsCriticalData()) {
-                        fSpendsCriticalData = true;
-                        break;
-                    }
-                }
-            }
-        }
 
         CTxMemPoolEntry entry(ptx, nFees, nAcceptTime, chainActive.Height(),
                               fSpendsCoinbase, fBurnFound, nSidechain,
@@ -2230,11 +2218,9 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
 
 
             // Set fSidechainInputs & nSidechain
-            if (nHeight < DrivechainHeight) {
                 if (skydogesEnabled) {
                     std::vector<CScript> vScript; }
-            } else {
-                if (drivechainsEnabled) {
+                if (IsDrivechainEnabled) {
             
                     for (const CTxIn& in : tx.vin) {
                         Coin coin = view.AccessCoin(in.prevout);
@@ -2244,7 +2230,6 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                         }
                     }
                 }
-            }
 
             // Check that transaction is BIP68 final
             // BIP68 lock checks (as opposed to nLockTime checks) must
@@ -3497,12 +3482,8 @@ bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& pa
 
 bool IsDrivechainEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
-    if (nHeight < DrivechainHeight) {
         LOCK(cs_main);
-        return (VersionBitsState(pindexPrev, params, Consensus::DEPLOYMENT_SKYDOGE, versionbitscache) == THRESHOLD_ACTIVE);
-    } else {
     return (pindexPrev && pindexPrev->nHeight + 1 >= params.DrivechainHeight);
-    }
 }
 
 // Compute at which vout of the block's coinbase transaction the witness
@@ -3571,15 +3552,8 @@ void GenerateCriticalHashCommitments(CBlock& block)
     if (block.vtx.size() < 2)
         return;
 
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
 
-        std::vector<CCriticalData> vCriticalData = GetCriticalDataRequests(block, consensusParams);
-    } else {
     std::vector<CCriticalData> vCriticalData = GetCriticalDataRequests(block);
-    }
     std::vector<CTxOut> vout;
     for (const CCriticalData& d : vCriticalData) {
         CTxOut out;
@@ -3617,11 +3591,6 @@ void GenerateLNCriticalHashCommitment(CBlock& block)
      * BIP: 300 & 301
      */
 
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
-    }
     // TODO
     std::vector<CCriticalData> vCriticalData; // = GetLNBMMRequests();
     std::vector<CTxOut> vout;
@@ -3702,11 +3671,6 @@ void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const 
      * BIP: 300 & 301
      */
 
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
-    }
 
     CTxOut out;
     out.nValue = 0;
@@ -3733,11 +3697,6 @@ void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const 
 
 void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidechain)
 {
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
-    }
     CTxOut out;
     out.nValue = 0;
 
@@ -3752,11 +3711,6 @@ void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidecha
 
 void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash)
 {
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
-    }
 
     CTxOut out;
     out.nValue = 0;
@@ -3778,14 +3732,9 @@ void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash)
 
 bool GenerateSCDBByteCommitment(CBlock& block, CScript& scriptOut, const std::vector<std::vector<SidechainWithdrawalState>>& vScores, const std::vector<std::string>& vVote)
 {
-    if (nHeight < DrivechainHeight) {
         // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
-    } else {
     if (vVote.size() != SIDECHAIN_ACTIVATION_MAX_ACTIVE)
         return false;
-    }
 
     // Create output that bytes will be added to
     CTxOut out;
@@ -3884,11 +3833,6 @@ std::vector<CCriticalData> GetCriticalDataRequests(const CBlock& block)
 {
     std::vector<CCriticalData> vCriticalData;
 
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return vCriticalData;
-    }
     if (block.vtx.size() < 2)
         return vCriticalData;
 

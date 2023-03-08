@@ -1,0 +1,11 @@
+prefix=/depends/x86_64-linux
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: skydoge consensus library
+Description: Library for the Skydoge consensus protocol.
+Version: 0.44.00
+Libs: -L${libdir} -lskydogeconsensus
+Cflags: -I${includedir}
+Requires.private: libcrypto

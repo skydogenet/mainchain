@@ -115,7 +115,7 @@ test_test_skydoge_LDADD += $(LIBDRIVECHAIN_CONSENSUS) $(BDB_LIBS) $(SSL_LIBS) $(
 test_test_skydoge_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) -static
 
 if ENABLE_ZMQ
-test_test_dskydoge_LDADD += $(ZMQ_LIBS)
+test_test_skydoge_LDADD += $(ZMQ_LIBS)
 endif
 #
 
