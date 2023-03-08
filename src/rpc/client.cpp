@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -131,16 +131,18 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "logging", 1, "exclude" },
     { "disconnectnode", 1, "nodeid" },
     { "addwitnessaddress", 1, "p2sh" },
+    { "addwithdrawal", 0, "nsidechain" },
     { "createcriticaldatatx", 0, "amount" },
     { "createcriticaldatatx", 1, "height" },
     { "createbmmcriticaldatatx", 0, "amount" },
     { "createbmmcriticaldatatx", 1, "height" },
     { "createbmmcriticaldatatx", 3, "nsidechain" },
     { "createsidechainproposal", 0, "nsidechain" },
-    { "createsidechainproposal", 4, "nversion" },
+    { "createsidechainproposal", 3, "nversion" },
     { "havespentwithdrawal", 1, "nsidechain" },
     { "havefailedwithdrawal", 1, "nsidechain" },
     { "listsidechainctip", 0, "nsidechain" },
+    { "listsidechaindeposits", 0, "nsidechain" },
     { "listsidechaindeposits", 2, "n" },
     { "listsidechaindeposits", 3, "count" },
     { "countsidechaindeposits", 0, "nsidechain" },
@@ -155,6 +157,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "listwithdrawalstatus", 0, "nsidechain" },
     { "listcachedwithdrawaltx", 0, "nsidechain" },
     { "verifydeposit", 2, "nTx" },
+    { "verifybmm", 2, "nsidechain" },
     // Echo with conversion (For testing only)
     { "echojson", 0, "arg0" },
     { "echojson", 1, "arg1" },

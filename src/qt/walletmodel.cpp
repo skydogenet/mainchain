@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -36,6 +36,9 @@
 #include <QSet>
 #include <QTimer>
 
+#include <boost/bind/placeholders.hpp>
+
+using namespace boost::placeholders;
 
 WalletModel::WalletModel(const PlatformStyle *platformStyle, CWallet *_wallet, OptionsModel *_optionsModel, QObject *parent) :
     QObject(parent), wallet(_wallet), optionsModel(_optionsModel), addressTableModel(0),
@@ -598,12 +601,6 @@ void WalletModel::listCoins(std::map<QString, std::vector<COutput> >& mapCoins) 
             resultGroup.emplace_back(std::move(coin));
         }
     }
-}
-
-std::vector<LoadedCoin> WalletModel::getMyLoadedCoins() const
-{
-    LOCK2(cs_main, wallet->cs_wallet);
-    return wallet->GetMyLoadedCoins();
 }
 
 bool WalletModel::isLockedCoin(uint256 hash, unsigned int n) const

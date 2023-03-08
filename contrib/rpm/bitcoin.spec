@@ -365,6 +365,7 @@ if [ $1 -eq 0 ]; then
 	%{_sbindir}/fixfiles -R skydoge-server restore &> /dev/null || :
 	[ -d %{_localstatedir}/lib/skydoge ] && \
 		%{_sbindir}/restorecon -R %{_localstatedir}/lib/skydoge &> /dev/null || :
+
 	fi
 fi
 
@@ -379,6 +380,7 @@ rm -rf %{buildroot}
 %attr(0755,root,root) %{_bindir}/skydoge-qt
 %attr(0644,root,root) %{_datadir}/applications/skydoge-core.desktop
 %attr(0644,root,root) %{_datadir}/kde4/services/skydoge-core.protocol
+
 %attr(0644,root,root) %{_datadir}/pixmaps/*.ico
 %attr(0644,root,root) %{_datadir}/pixmaps/*.bmp
 %attr(0644,root,root) %{_datadir}/pixmaps/*.svg
@@ -429,7 +431,7 @@ rm -rf %{buildroot}
 
 %changelog
 * Fri Feb 26 2016 Alice Wonder <buildmaster@librelamp.com> - 0.12.0-2
-- Rename Qt package from skydoge to skydoge-core
+- Rename Qt package from drivechain to drivechain-core
 - Make building of the Qt package optional
 - When building the Qt package, default to Qt5 but allow building
 -  against Qt4
@@ -439,4 +441,4 @@ rm -rf %{buildroot}
 - Initial spec file for 0.12.0 release
 
 # This spec file is written from scratch but a lot of the packaging decisions are directly
-# based upon the 0.11.2 package spec file from https://www.ringingliberty.com/skydoge/
+# based upon the 0.11.2 package spec file from https://www.ringingliberty.com/drivechain/

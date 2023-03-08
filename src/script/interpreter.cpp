@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -423,8 +423,8 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                     break;
                 }
 
-                case OP_NOP1: case OP_NOP4: case OP_NOP5: case OP_NOP6:
-                case OP_NOP7: case OP_NOP8: case OP_NOP9: case OP_NOP10:
+                case OP_NOP1: case OP_NOP4: case OP_NOP6: case OP_NOP7:
+                case OP_NOP8: case OP_NOP9: case OP_NOP10:
                 {
                     if (flags & SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_NOPS)
                         return set_error(serror, SCRIPT_ERR_DISCOURAGE_UPGRADABLE_NOPS);
@@ -1019,6 +1019,20 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                         else
                             return set_error(serror, SCRIPT_ERR_CHECKMULTISIGVERIFY);
                     }
+                }
+                break;
+
+                case OP_DRIVECHAIN:
+                {
+                    if (script.size() != 2)
+                        return set_error(serror, SCRIPT_ERR_DRIVECHAIN_SIZE);
+
+                    if (script[0] != OP_DRIVECHAIN)
+                        return set_error(serror, SCRIPT_ERR_DRIVECHAIN_FORMAT);
+
+                    stack.push_back(std::vector<unsigned char> {0xDC});
+
+                    pc += 2;
                 }
                 break;
 

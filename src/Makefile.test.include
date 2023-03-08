@@ -22,7 +22,7 @@ RAW_TEST_FILES =
 GENERATED_TEST_FILES = $(JSON_TEST_FILES:.json=.json.h) $(RAW_TEST_FILES:.raw=.raw.h)
 
 # test_skydoge binary #
-DRIVENET_TESTS =\
+DRIVECHAIN_TESTS =\
   test/arith_uint256_tests.cpp \
   test/scriptnum10.h \
   test/addrman_tests.cpp \
@@ -93,7 +93,7 @@ DRIVENET_TESTS =\
   test/util_tests.cpp
 
 if ENABLE_WALLET
-DRIVENET_TESTS += \
+DRIVECHAIN_TESTS += \
   wallet/test/wallet_test_fixture.cpp \
   wallet/test/wallet_test_fixture.h \
   wallet/test/accounting_tests.cpp \
@@ -101,37 +101,37 @@ DRIVENET_TESTS += \
   wallet/test/crypto_tests.cpp
 endif
 
-test_test_skydoge_SOURCES = $(DRIVENET_TESTS) $(JSON_TEST_FILES) $(RAW_TEST_FILES)
-test_test_skydoge_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES) $(TESTDEFS) $(EVENT_CFLAGS)
+test_test_skydoge_SOURCES = $(DRIVECHAIN_TESTS) $(JSON_TEST_FILES) $(RAW_TEST_FILES)
+test_test_skydoge_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(TESTDEFS) $(EVENT_CFLAGS)
 test_test_skydoge_LDADD =
 if ENABLE_WALLET
-test_test_skydoge_LDADD += $(LIBDRIVENET_WALLET)
+test_test_skydoge_LDADD += $(LIBDRIVECHAIN_WALLET)
 endif
-test_test_skydoge_LDADD += $(LIBDRIVENET_SERVER) $(LIBDRIVENET_CLI) $(LIBDRIVENET_COMMON) $(LIBDRIVENET_UTIL) $(LIBDRIVENET_CONSENSUS) $(LIBDRIVENET_CRYPTO) $(LIBUNIVALUE) \
+test_test_skydoge_LDADD += $(LIBDRIVECHAIN_SERVER) $(LIBDRIVECHAIN_CLI) $(LIBDRIVECHAIN_COMMON) $(LIBDRIVECHAIN_UTIL) $(LIBDRIVECHAIN_CONSENSUS) $(LIBDRIVECHAIN_CRYPTO) $(LIBUNIVALUE) \
   $(LIBLEVELDB) $(LIBLEVELDB_SSE42) $(LIBMEMENV) $(BOOST_LIBS) $(BOOST_UNIT_TEST_FRAMEWORK_LIB) $(LIBSECP256K1) $(EVENT_LIBS) $(EVENT_PTHREADS_LIBS)
 test_test_skydoge_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 
-test_test_skydoge_LDADD += $(LIBDRIVENET_CONSENSUS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS)
+test_test_skydoge_LDADD += $(LIBDRIVECHAIN_CONSENSUS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS)
 test_test_skydoge_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) -static
 
 if ENABLE_ZMQ
-test_test_skydoge_LDADD += $(ZMQ_LIBS)
+test_test_dskydoge_LDADD += $(ZMQ_LIBS)
 endif
 #
 
 # test_skydoge_fuzzy binary #
 test_test_skydoge_fuzzy_SOURCES = test/test_skydoge_fuzzy.cpp
-test_test_skydoge_fuzzy_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVENET_INCLUDES)
+test_test_skydoge_fuzzy_CPPFLAGS = $(AM_CPPFLAGS) $(skydoge_INCLUDES)
 test_test_skydoge_fuzzy_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 test_test_skydoge_fuzzy_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 test_test_skydoge_fuzzy_LDADD = \
   $(LIBUNIVALUE) \
-  $(LIBDRIVENET_SERVER) \
-  $(LIBDRIVENET_COMMON) \
-  $(LIBDRIVENET_UTIL) \
-  $(LIBDRIVENET_CONSENSUS) \
-  $(LIBDRIVENET_CRYPTO) \
+  $(LIBDRIVECHAIN_SERVER) \
+  $(LIBDRIVECHAIN_COMMON) \
+  $(LIBDRIVECHAIN_UTIL) \
+  $(LIBDRIVECHAIN_CONSENSUS) \
+  $(LIBDRIVECHAIN_CRYPTO) \
   $(LIBSECP256K1)
 
 test_test_skydoge_fuzzy_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
@@ -139,11 +139,11 @@ test_test_skydoge_fuzzy_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
 
 nodist_test_test_skydoge_SOURCES = $(GENERATED_TEST_FILES)
 
-$(DRIVENET_TESTS): $(GENERATED_TEST_FILES)
+$(DRIVECHAIN_TESTS): $(GENERATED_TEST_FILES)
 
-CLEAN_DRIVENET_TEST = test/*.gcda test/*.gcno $(GENERATED_TEST_FILES)
+CLEAN_DRIVECHAIN_TEST = test/*.gcda test/*.gcno $(GENERATED_TEST_FILES)
 
-CLEANFILES += $(CLEAN_DRIVENET_TEST)
+CLEANFILES += $(CLEAN_DRIVECHAIN_TEST)
 
 skydoge_test: $(TEST_BINARY)
 
@@ -151,10 +151,10 @@ skydoge_test_check: $(TEST_BINARY) FORCE
 	$(MAKE) check-TESTS TESTS=$^
 
 skydoge_test_clean : FORCE
-	rm -f $(CLEAN_DRIVENET_TEST) $(test_test_skydoge_OBJECTS) $(TEST_BINARY)
+	rm -f $(CLEAN_DRIVECHAIN_TEST) $(test_test_drivechain_OBJECTS) $(TEST_BINARY)
 
 check-local:
-if BUILD_DRIVENET_UTILS
+if BUILD_DRIVECHAIN_UTILS
 	@echo "Running test/util/skydoge-util-test.py..."
 	$(PYTHON) $(top_builddir)/test/util/skydoge-util-test.py
 endif

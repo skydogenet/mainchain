@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -495,6 +495,8 @@ void BitcoinApplication::initializeResult(bool success)
 
         connect(clientModel, SIGNAL(mempoolSizeChanged(long, size_t)),
                         memPoolModel, SLOT(memPoolSizeChanged(long, size_t)));
+
+        memPoolModel->setClientModel(clientModel);
 
 #ifdef ENABLE_WALLET
         // TODO: Expose secondary wallets

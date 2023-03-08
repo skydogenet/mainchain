@@ -1,12 +1,15 @@
-// Copyright (c) 2017 The Bitcoin Core developers
+// Copyright (c) 2017-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <sidechain.h>
 
+#include <base58.h>
 #include <clientversion.h>
 #include <core_io.h>
+#include <crypto/sha256.h>
 #include <hash.h>
+#include <key.h>
 #include <script/script.h>
 #include <streams.h>
 #include <utilstrencodings.h>
@@ -15,10 +18,7 @@
 
 bool Sidechain::operator==(const Sidechain& s) const
 {
-    return (strPrivKey == s.strPrivKey &&
-            scriptPubKey == s.scriptPubKey &&
-            strKeyID == s.strKeyID &&
-            title == s.title &&
+    return (title == s.title &&
             description == s.description &&
             hashID1 == s.hashID1 &&
             hashID2 == s.hashID2 &&
@@ -37,9 +37,6 @@ std::string Sidechain::ToString() const
     ss << "fActive=" << fActive << std::endl;
     ss << "nSidechain=" << (unsigned int)nSidechain << std::endl;
     ss << "nVersion=" << nVersion << std::endl;
-    ss << "strPrivKey=" << strPrivKey << std::endl;
-    ss << "scriptPubKey=" << ScriptToAsmStr(scriptPubKey) << std::endl;
-    ss << "strKeyID=" << strKeyID << std::endl;
     ss << "title=" << title << std::endl;
     ss << "description=" << description << std::endl;
     ss << "hashID1=" << hashID1.ToString() << std::endl;
@@ -77,21 +74,16 @@ std::string SidechainCTIP::ToString() const
     return ss.str();
 }
 
-bool SidechainWithdrawalState::IsNull() const
-{
-    return (hash.IsNull());
-}
-
 bool SidechainWithdrawalState::operator==(const SidechainWithdrawalState& a) const
 {
     return (a.nSidechain == nSidechain &&
-            a.hash== hash);
+            a.hash == hash);
 }
 
 std::string SidechainWithdrawalState::ToString() const
 {
     std::stringstream ss;
-    ss << "hash=" << GetHash().ToString() << std::endl;
+    ss << "serhash=" << GetSerHash().ToString() << std::endl;
     ss << "nsidechain=" << (unsigned int)nSidechain << std::endl;
     ss << "nBlocksLeft=" << (unsigned int)nBlocksLeft << std::endl;
     ss << "nWorkScore=" << (unsigned int)nWorkScore << std::endl;
@@ -113,6 +105,8 @@ bool Sidechain::DeserializeFromProposalScript(const CScript& script)
     if (vch.empty())
         return false;
 
+    // Deserialize proposal
+
     const char *vch0 = (const char *) &vch.begin()[0];
     CDataStream ds(vch0, vch0+vch.size(), SER_DISK, CLIENT_VERSION);
 
@@ -124,36 +118,38 @@ bool Sidechain::DeserializeFromProposalScript(const CScript& script)
     nVersion = sidechain.nVersion;
     title = sidechain.title;
     description = sidechain.description;
-    strKeyID = sidechain.strKeyID;
-    scriptPubKey = sidechain.scriptPubKey;
-    strPrivKey = sidechain.strPrivKey;
     hashID1 = sidechain.hashID1;
     hashID2 = sidechain.hashID2;
 
     return true;
 }
 
-uint256 SidechainActivationStatus::GetHash() const
+uint256 SidechainActivationStatus::GetSerHash() const
 {
     return SerializeHash(*this);
 }
 
-uint256 SidechainDeposit::GetHash() const
+uint256 SidechainDeposit::GetSerHash() const
 {
     return SerializeHash(*this);
 }
 
-uint256 Sidechain::GetHash() const
+uint256 Sidechain::GetSerHash() const
 {
     return SerializeHash(*this);
 }
 
-uint256 SidechainWithdrawalState::GetHash() const
+uint256 SidechainWithdrawalState::GetSerHash() const
 {
     return SerializeHash(*this);
 }
 
-uint256 SidechainCTIP::GetHash() const
+uint256 SidechainCTIP::GetSerHash() const
+{
+    return SerializeHash(*this);
+}
+
+uint256 SidechainBlockData::GetSerHash() const
 {
     return SerializeHash(*this);
 }
@@ -176,24 +172,13 @@ CScript Sidechain::GetProposalScript() const
     return script;
 }
 
-uint256 SidechainObj::GetHash(void) const
+uint256 SidechainObj::GetSerHash(void) const
 {
     uint256 ret;
     if (sidechainop == DB_SIDECHAIN_BLOCK_OP)
         ret = SerializeHash(*(SidechainBlockData *) this);
 
     return ret;
-}
-
-CScript SidechainObj::GetScript(void) const
-{
-    CDataStream ds (SER_DISK, CLIENT_VERSION);
-    if (sidechainop == DB_SIDECHAIN_BLOCK_OP)
-        ((SidechainBlockData *) this)->Serialize(ds);
-
-    CScript script;
-    script << std::vector<unsigned char>(ds.begin(), ds.end()) << OP_SIDECHAIN;
-    return script;
 }
 
 std::string SidechainObj::ToString(void) const

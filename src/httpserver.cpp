@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2017 The Bitcoin Core developers
+// Copyright (c) 2015-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,6 +6,7 @@
 
 #include <chainparamsbase.h>
 #include <compat.h>
+#include <deque>
 #include <util.h>
 #include <utilstrencodings.h>
 #include <netbase.h>

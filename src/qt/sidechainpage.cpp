@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Bitcoin Core developers
+﻿// Copyright (c) 2016-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -14,7 +14,7 @@
 #include <qt/sidechainactivationdialog.h>
 #include <qt/sidechaindetailsdialog.h>
 #include <qt/sidechaindepositconfirmationdialog.h>
-#include <qt/sidechainwithdrawaldialog.h>
+#include <qt/scdbdialog.h>
 #include <qt/sidechainwithdrawaltablemodel.h>
 #include <qt/txdetails.h>
 #include <qt/walletmodel.h>
@@ -57,18 +57,13 @@ SidechainPage::SidechainPage(const PlatformStyle *_platformStyle, QWidget *paren
     std::vector<Sidechain> vSidechain = scdb.GetSidechains();
     SetupSidechainList(vSidechain);
 
-    // Initialize deposit confirmation dialog
     depositConfirmationDialog = new SidechainDepositConfirmationDialog(this);
-
-    // Initialize Withdrawal & sidechain miner configuration dialogs. Any widget that
-    // wants to show them can call ShowActivationDialog() / showWithdrawalDialog()
-    // instead of creating a new instance.
 
     activationDialog = new SidechainActivationDialog(platformStyle);
     activationDialog->setParent(this, Qt::Window);
 
-    withdrawalDialog = new SidechainWithdrawalDialog(platformStyle);
-    withdrawalDialog->setParent(this, Qt::Window);
+    scdbDialog = new SCDBDialog(platformStyle);
+    scdbDialog->setParent(this, Qt::Window);
 
     // Setup recent deposits table
     ui->tableWidgetRecentDeposits->setColumnCount(COLUMN_STATUS + 1);
@@ -126,6 +121,8 @@ void SidechainPage::setClientModel(ClientModel *model)
 
         connect(model, SIGNAL(numBlocksChanged(int,QDateTime,double,bool)),
                 this, SLOT(numBlocksChanged()));
+
+        scdbDialog->setClientModel(model);
     }
 }
 
@@ -519,7 +516,7 @@ void SidechainPage::on_pushButtonAddRemove_clicked()
 
 void SidechainPage::on_pushButtonWithdrawalVote_clicked()
 {
-    ShowWithdrawalDialog();
+    ShowSCDBDialog();
 }
 
 void SidechainPage::on_pushButtonWTDoubleClickHelp_clicked()
@@ -582,9 +579,10 @@ void SidechainPage::ShowActivationDialog()
     activationDialog->show();
 }
 
-void SidechainPage::ShowWithdrawalDialog()
+void SidechainPage::ShowSCDBDialog()
 {
-    withdrawalDialog->show();
+    scdbDialog->show();
+    scdbDialog->UpdateOnShow();
 }
 
 void SidechainPage::UpdateRecentDeposits()

@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -80,7 +80,6 @@ class CTxMemPool;
 class CBlockPolicyEstimator;
 class CWalletTx;
 class CriticalData;
-class LoadedCoin;
 struct FeeCalculation;
 enum class FeeEstimateMode;
 
@@ -118,7 +117,6 @@ enum ReplayStatus : int
 {
     REPLAY_UNKNOWN,
     REPLAY_FALSE,
-    REPLAY_LOADED,
     REPLAY_TRUE,
     REPLAY_SPLIT
 };
@@ -277,7 +275,6 @@ public:
 
     const uint256& GetHash() const { return tx->GetHash(); }
     bool IsCoinBase() const { return tx->IsCoinBase(); }
-    bool IsCriticalData() const { return !tx->criticalData.IsNull(); }
 };
 
 /**
@@ -341,6 +338,9 @@ public:
     // Transaction replay status
     int nReplayStatus;
 
+    // Transaction denial status
+    unsigned int nDenial;
+
     // memory only
     mutable bool fDebitCached;
     mutable bool fCreditCached;
@@ -403,6 +403,7 @@ public:
         nChangeCached = 0;
         nOrderPos = -1;
         nReplayStatus = REPLAY_UNKNOWN;
+        nDenial = 0;
     }
 
     ADD_SERIALIZE_METHODS;
@@ -433,6 +434,7 @@ public:
         READWRITE(fFromMe);
         READWRITE(fSpent);
         READWRITE(nReplayStatus);
+        READWRITE(nDenial);
 
         if (ser_action.ForRead())
         {
@@ -689,6 +691,26 @@ private:
     std::vector<char> _ssExtra;
 };
 
+static const std::string SCHEDULED_TX_TIME_FORMAT = "ddd MMMM d yyyy h:mm a";
+static const uint64_t SCHEDULED_TX_DUMP_VERSION = 0;
+struct ScheduledTransaction
+{
+    // TODO I would prefer unix time, which requires updating Qt dep
+    // The date time in SCHEULED_TX_TIME_FORMAT to broadcast the TX
+    std::string strTime;
+
+    // The scheduled transaction
+    uint256 wtxid; // WTX hash in mapWallet
+
+    ADD_SERIALIZE_METHODS
+
+    template<typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(strTime);
+        READWRITE(wtxid);
+    }
+};
+
 class WalletRescanReserver; //forward declarations for ScanForWalletTransactions/RescanFromTime
 /**
  * A CWallet is an extension of a keystore, which also maintains a set of transactions and balances,
@@ -780,10 +802,13 @@ private:
      */
     const CBlockIndex* m_last_block_processed;
 
-    // TODO improve persistence and caching method of loaded coins tracked by
-    // wallet.
-    // Cache of loaded coins owned by this wallet
-    std::vector<LoadedCoin> vLoadedCoinCache;
+    /* Load list of scheduled transactions */
+    bool LoadScheduledTransactions();
+
+    /* Write list of scheduled transactions */
+    void WriteScheduledTransactions();
+
+    std::vector<ScheduledTransaction> vScheduled;
 
 public:
     /*
@@ -1019,6 +1044,8 @@ public:
 
     bool CreateOPReturnTransaction(CTransactionRef& tx, std::string& strFail, const CAmount& nFee, const CScript& script);
 
+    bool DenyCoin(CWalletTx& wtx, std::string& strFail, const COutput& coin, bool fBroadcast = true, const CAmount& amountRequired = CAmount(0), const CTxDestination& destRequired = CNoDestination());
+
     bool CommitTransaction(CWalletTx& wtxNew, CReserveKey& reservekey, CConnman* connman, CValidationState& state, bool fRemoveIfFail = false, CAmount nAbsurdFee = CAmount(0));
 
     void ListAccountCreditDebit(const std::string& strAccount, std::list<CAccountingEntry>& entries);
@@ -1026,9 +1053,6 @@ public:
     bool AddAccountingEntry(const CAccountingEntry&, CWalletDB *pwalletdb);
     template <typename ContainerType>
     bool DummySignTx(CMutableTransaction &txNew, const ContainerType &coins) const;
-
-    void AddLoadedCoins(const std::vector<LoadedCoin>& vLoadedCoin);
-    std::vector<LoadedCoin> GetMyLoadedCoins() const;
 
     static CFeeRate minTxFee;
     static CFeeRate fallbackFee;
@@ -1201,10 +1225,22 @@ public:
     CTxDestination AddAndGetDestinationForScript(const CScript& script, OutputType);
 
     /** Return replay status for transaction in wallet */
-    int GetReplayStatus(const uint256& txid);
+    int GetReplayStatus(const uint256& txid) const;
 
     /** Update the replay status of a wallet transaction */
     void UpdateReplayStatus(const uint256& txid, const int nReplayStatus);
+
+    /** Add to scheduled transaction cache */
+    bool ScheduleTransaction(const uint256& wtxid, const std::string& strTime);
+
+    /** Remove / cancel scheduled transaction */
+    void RemoveScheduledTransaction(const ScheduledTransaction& scheduled);
+
+    std::vector<ScheduledTransaction> GetScheduled() const;
+
+    bool IsScheduled(const uint256& wtxid) const;
+
+    bool BroadcastScheduled(const uint256& wtxid);
 };
 
 /** A key allocated from the key pool. */
@@ -1340,6 +1376,5 @@ public:
         }
     }
 };
-
 
 #endif // BITCOIN_WALLET_WALLET_H

@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -30,6 +30,11 @@ std::string FormatMoney(const CAmount& n)
     return str;
 }
 
+double ConvertToFiat(const CAmount& n, int64_t nUSDBTC)
+{
+    int64_t n_abs = (n > 0 ? n : -n);
+    return n_abs * (nUSDBTC * 0.00000001);
+}
 
 bool ParseMoney(const std::string& str, CAmount& nRet)
 {

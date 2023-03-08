@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Bitcoin Core developers
+// Copyright (c) 2016-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -19,7 +19,7 @@ class PlatformStyle;
 class SidechainDepositConfirmationDialog;
 class SidechainWithdrawalTableModel;
 class SidechainActivationDialog;
-class SidechainWithdrawalDialog;
+class SCDBDialog;
 class WalletModel;
 class ClientModel;
 
@@ -77,7 +77,7 @@ public Q_SLOTS:
     void gotoWTPage();
     void numBlocksChanged();
     void ShowActivationDialog();
-    void ShowWithdrawalDialog();
+    void ShowSCDBDialog();
     void UpdateRecentDeposits();
 
 private Q_SLOTS:
@@ -92,7 +92,7 @@ private:
     SidechainDepositConfirmationDialog *depositConfirmationDialog = nullptr;
     SidechainWithdrawalTableModel *withdrawalModel = nullptr;
     SidechainActivationDialog *activationDialog = nullptr;
-    SidechainWithdrawalDialog *withdrawalDialog = nullptr;
+    SCDBDialog *scdbDialog = nullptr;
 
     const PlatformStyle *platformStyle = nullptr;
 

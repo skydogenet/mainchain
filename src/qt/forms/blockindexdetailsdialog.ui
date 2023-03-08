@@ -478,7 +478,7 @@
         </sizepolicy>
        </property>
        <property name="text">
-        <string>11B Median time</string>
+        <string>Median time</string>
        </property>
       </widget>
      </item>

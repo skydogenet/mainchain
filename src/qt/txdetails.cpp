@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Bitcoin Core developers
+// Copyright (c) 2020-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -18,7 +18,6 @@ enum TopLevelIndex {
     INDEX_WITNESS_PROGRAM,
     INDEX_WITNESS_COMMIT,
     INDEX_CRITICAL_HASH,
-    INDEX_SCDB_MT_HASH,
     INDEX_WITHDRAWAL_HASH,
     INDEX_SC_PROPOSAL,
     INDEX_SC_ACK,
@@ -94,8 +93,8 @@ void  TxDetails::SetTransaction(const CMutableTransaction& mtx)
     uint256 hashSidechain = uint256();
     // Critical hash commit
     uint256 hashCritical = uint256();
-    // SCDB hash merkle root
-    uint256 hashMT = uint256();
+    // Critical data bytes
+    std::vector<unsigned char> vBytes;
 
     ui->treeWidgetDecoded->clear();
     // TODO A lot of these output types can only be in the coinbase so we
@@ -112,8 +111,6 @@ void  TxDetails::SetTransaction(const CMutableTransaction& mtx)
         hashSidechain.SetNull();
 
         hashCritical.SetNull();
-
-        hashMT.SetNull();
 
         const CScript scriptPubKey = tx.vout[i].scriptPubKey;
         if (scriptPubKey.empty())
@@ -146,7 +143,7 @@ void  TxDetails::SetTransaction(const CMutableTransaction& mtx)
             AddTreeItem(INDEX_WITNESS_PROGRAM, subItem);
         }
         else
-        if (scriptPubKey.IsCriticalHashCommit(hashCritical)) {
+        if (scriptPubKey.IsCriticalHashCommit(hashCritical, vBytes)) {
             // Create a critical hash commit item
             QTreeWidgetItem *subItem = new QTreeWidgetItem();
             subItem->setText(0, "txout #" + QString::number(i));
@@ -155,15 +152,6 @@ void  TxDetails::SetTransaction(const CMutableTransaction& mtx)
             subItem->setText(1, "BMM h* Commit: " +
                     QString::fromStdString(hashCritical.ToString()));
             AddTreeItem(INDEX_CRITICAL_HASH, subItem);
-        }
-        else
-        if (scriptPubKey.IsSCDBHashMerkleRootCommit(hashMT)) {
-            // Create a SCDB merkle tree hash commit item
-            QTreeWidgetItem *subItem = new QTreeWidgetItem();
-            subItem->setText(0, "txout #" + QString::number(i));
-            subItem->setText(1, "SCDB Merkle Tree Hash Commit: " +
-                    QString::fromStdString(hashMT.ToString()));
-            AddTreeItem(INDEX_SCDB_MT_HASH, subItem);
         }
         else
         if (scriptPubKey.IsWithdrawalHashCommit(hashWithdrawal, nSidechain)) {
@@ -194,7 +182,7 @@ void  TxDetails::SetTransaction(const CMutableTransaction& mtx)
             AddTreeItem(INDEX_SC_ACK, subItem);
         }
         else
-        if (scriptPubKey.IsSCDBUpdate()) {
+        if (scriptPubKey.IsSCDBBytes()) {
             // Create a SCDB update script item
             QTreeWidgetItem *subItem = new QTreeWidgetItem();
             subItem->setText(0, "txout #" + QString::number(i));
@@ -251,9 +239,6 @@ void TxDetails::AddTreeItem(int index, QTreeWidgetItem *item)
         else
         if (index == INDEX_CRITICAL_HASH)
             topItem->setText(0, "BMM / Critical Hash");
-        else
-        if (index == INDEX_SCDB_MT_HASH)
-            topItem->setText(0, "SCDB Merkle Tree Hash");
         else
         if (index == INDEX_WITHDRAWAL_HASH)
             topItem->setText(0, "New Withdrawal Hash");

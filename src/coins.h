@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -38,37 +38,21 @@ public:
     //! whether containing transaction was a coinbase
     unsigned int fCoinBase : 1;
 
-    //! whether containing transaction has critical data
-    bool fCriticalData;
-
-    //! whether coin was loaded from utxo dat file
-    bool fLoaded;
-
     //! construct a Coin from a CTxOut and height/coinbase information.
-    Coin(CTxOut&& outIn, int nHeightIn, bool fCoinBaseIn, bool fCriticalDataIn, bool fLoadedIn) : out(std::move(outIn)), nHeight(nHeightIn), fCoinBase(fCoinBaseIn), fCriticalData(fCriticalDataIn), fLoaded(fLoadedIn) {}
-    Coin(const CTxOut& outIn, int nHeightIn, bool fCoinBaseIn, bool fCriticalDataIn, bool fLoadedIn) : out(outIn), nHeight(nHeightIn), fCoinBase(fCoinBaseIn), fCriticalData(fCriticalDataIn), fLoaded(fLoadedIn) {}
+    Coin(CTxOut&& outIn, int nHeightIn, bool fCoinBaseIn) : out(std::move(outIn)), nHeight(nHeightIn), fCoinBase(fCoinBaseIn) {}
+    Coin(const CTxOut& outIn, int nHeightIn, bool fCoinBaseIn) : out(outIn), nHeight(nHeightIn), fCoinBase(fCoinBaseIn) {}
 
     void Clear() {
         out.SetNull();
         fCoinBase = false;
-        fCriticalData = false;
-        fLoaded = false;
         nHeight = 0;
     }
 
     //! empty constructor
-    Coin() : nHeight(0), fCoinBase(false), fCriticalData(false), fLoaded(false) { }
+    Coin() : nHeight(0), fCoinBase(false) { }
 
     bool IsCoinBase() const {
         return fCoinBase;
-    }
-
-    bool IsCriticalData() const {
-        return fCriticalData;
-    }
-
-    bool IsLoaded() const {
-        return fLoaded;
     }
 
     template<typename Stream>
@@ -76,8 +60,6 @@ public:
         assert(!IsSpent());
         uint32_t code = nHeight * 2 + fCoinBase;
         ::Serialize(s, VARINT(code));
-        ::Serialize(s, fCriticalData);
-        ::Serialize(s, fLoaded);
         ::Serialize(s, CTxOutCompressor(REF(out)));
     }
 
@@ -87,8 +69,6 @@ public:
         ::Unserialize(s, VARINT(code));
         nHeight = code >> 1;
         fCoinBase = code & 1;
-        ::Unserialize(s, fCriticalData);
-        ::Unserialize(s, fLoaded);
         ::Unserialize(s, REF(CTxOutCompressor(out)));
     }
 
@@ -106,50 +86,6 @@ public:
                 && nHeight == coin.nHeight)
             return true;
         return false;
-    }
-};
-
-// Inherhits the Coin class but with the serialization functions as they are
-// in bitcoin core. (for importing loaded coins)
-class CoreCoin : public Coin
-{
-public:
-    template<typename Stream>
-    void Serialize(Stream &s) const {
-        assert(!IsSpent());
-        uint32_t code = nHeight * 2 + fCoinBase;
-        ::Serialize(s, VARINT(code));
-        ::Serialize(s, CTxOutCompressor(REF(out)));
-    }
-
-    template<typename Stream>
-    void Unserialize(Stream &s) {
-        uint32_t code = 0;
-        ::Unserialize(s, VARINT(code));
-        nHeight = code >> 1;
-        fCoinBase = code & 1;
-        ::Unserialize(s, REF(CTxOutCompressor(out)));
-    }
-};
-
-struct LoadedCoin
-{
-    CoreCoin coin;
-    COutPoint out;
-    bool fSpent;
-
-    ADD_SERIALIZE_METHODS;
-
-    std::string ToString() const
-    {
-        return coin.out.ToString();
-    }
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITE(coin);
-        READWRITE(out);
-        READWRITE(fSpent);
     }
 };
 
@@ -213,20 +149,6 @@ private:
     uint256 hashBlock;
 };
 
-/** Cursor for iterating over CoinsView state (loaded coins) */
-class CCoinsViewLoadedCursor
-{
-public:
-    CCoinsViewLoadedCursor() {}
-    virtual ~CCoinsViewLoadedCursor() {}
-
-    virtual bool GetKey(std::pair<char, uint256>& key) const = 0;
-    virtual bool GetValue(LoadedCoin& coin) const = 0;
-
-    virtual bool Valid() const = 0;
-    virtual void Next() = 0;
-};
-
 /** Abstract view on the open txout dataset. */
 class CCoinsView
 {
@@ -253,25 +175,14 @@ public:
     //! The passed mapCoins can be modified.
     virtual bool BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock);
 
-    //! Write to the loaded coin index
-    virtual bool WriteToLoadedCoinIndex(const LoadedCoin& coin);
-    //! Get a loaded coin from the index
-    virtual bool GetLoadedCoin(const uint256& hashOutPoint, LoadedCoin& coinOut) const;
-
     //! Get a cursor to iterate over the whole state
     virtual CCoinsViewCursor *Cursor() const;
-    virtual CCoinsViewLoadedCursor *LoadedCursor() const;
 
     //! As we use CCoinsViews polymorphically, have a virtual destructor
     virtual ~CCoinsView() {}
 
     //! Estimate database size (0 if not implemented)
     virtual size_t EstimateSize() const { return 0; }
-
-    //! Loaded Coin functions
-    virtual bool ReadLoadedCoins();
-    virtual std::vector<LoadedCoin> ReadMyLoadedCoins();
-    virtual void WriteMyLoadedCoins(const std::vector<LoadedCoin>& vLoadedCoin);
 };
 
 
@@ -289,15 +200,8 @@ public:
     std::vector<uint256> GetHeadBlocks() const override;
     void SetBackend(CCoinsView &viewIn);
     bool BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) override;
-    bool WriteToLoadedCoinIndex(const LoadedCoin& coin) override;
-    bool GetLoadedCoin(const uint256& hashOutPoint, LoadedCoin& coinOut) const;
     CCoinsViewCursor *Cursor() const override;
-    CCoinsViewLoadedCursor *LoadedCursor() const override;
     size_t EstimateSize() const override;
-
-    bool ReadLoadedCoins() override;
-    std::vector<LoadedCoin> ReadMyLoadedCoins() override;
-    void WriteMyLoadedCoins(const std::vector<LoadedCoin>& vLoadedCoin) override;
 };
 
 
@@ -332,11 +236,6 @@ public:
     CCoinsViewCursor* Cursor() const override {
         throw std::logic_error("CCoinsViewCache cursor iteration not supported.");
     }
-    CCoinsViewLoadedCursor* LoadedCursor() const override;
-
-    bool ReadLoadedCoins() override;
-    std::vector<LoadedCoin> ReadMyLoadedCoins() override;
-    void WriteMyLoadedCoins(const std::vector<LoadedCoin>& vLoadedCoin) override;
 
     /**
      * Check if we have the given utxo already loaded in this cache.

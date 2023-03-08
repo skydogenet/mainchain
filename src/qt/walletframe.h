@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2016 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -48,6 +48,8 @@ public:
     bool handlePaymentRequest(const SendCoinsRecipient& recipient);
 
     void showOutOfSyncWarning(bool fShow);
+
+    void requestUseAvailable();
 
 Q_SIGNALS:
     /** Notify that the user has requested more information about the out-of-sync warning */
@@ -102,7 +104,9 @@ public Q_SLOTS:
     void outOfSyncWarningClicked();
 
     void showSidechainActivationDialog();
-    void showSidechainWithdrawalDialog();
+    void showSCDBDialog();
+    void showGraffitiDialog();
+    void showCoinNewsDialog();
 };
 
 #endif // BITCOIN_QT_WALLETFRAME_H

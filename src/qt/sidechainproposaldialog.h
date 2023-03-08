@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Bitcoin Core developers
+// Copyright (c) 2020-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -23,14 +23,7 @@ public:
 
 public Q_SLOTS:
     void on_pushButtonCreate_clicked();
-
-    void on_toolButtonKeyHash_clicked();
-
-    void on_toolButtonIDHash1_clicked();
-
-    void on_toolButtonIDHash2_clicked();
-
-    void on_toolButtonSoftwareHashes_clicked();
+    void on_toolButtonHelp_clicked();
 
 private:
     Ui::SidechainProposalDialog *ui;

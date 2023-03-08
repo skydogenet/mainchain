@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,7 +9,6 @@
 #include <hash.h>
 #include <random.h>
 #include <pow.h>
-#include <sidechain.h>
 #include <uint256.h>
 #include <util.h>
 #include <utilstrencodings.h>
@@ -35,8 +34,6 @@ static const char DB_HEAD_BLOCKS = 'H';
 static const char DB_FLAG = 'F';
 static const char DB_REINDEX_FLAG = 'R';
 static const char DB_LAST_BLOCK = 'l';
-
-static const char DB_LOADED_COINS = 'p';
 
 static const char DB_OP_RETURN = 'x';
 static const char DB_OP_RETURN_TYPES = 'X';
@@ -65,7 +62,7 @@ struct CoinEntry {
 
 }
 
-CCoinsViewDB::CCoinsViewDB(size_t nCacheSize, bool fMemory, bool fWipe) : db(GetDataDir() / "chainstate", nCacheSize / 2, fMemory, fWipe, true) , loadedcoindb(GetDataDir() / "loadedcoins", nCacheSize / 2, fMemory, fWipe, true)
+CCoinsViewDB::CCoinsViewDB(size_t nCacheSize, bool fMemory, bool fWipe) : db(GetDataDir() / "chainstate", nCacheSize / 2, fMemory, fWipe, true)
 {
 }
 
@@ -73,21 +70,14 @@ bool CCoinsViewDB::GetCoin(const COutPoint &outpoint, Coin &coin) const {
     if (db.Read(CoinEntry(&outpoint), coin))
         return true;
 
-    LoadedCoin loadedCoin;
-    if (GetLoadedCoin(outpoint.GetHash(), loadedCoin)) {
-        coin = loadedCoin.coin;
-        coin.fLoaded = true;
-        return !loadedCoin.fSpent;
-    }
-
     return false;
 }
 
 bool CCoinsViewDB::HaveCoin(const COutPoint &outpoint) const {
     if (db.Exists(CoinEntry(&outpoint)))
         return true;
-    else
-        return HaveLoadedCoin(outpoint.GetHash());
+
+    return false;
 }
 
 uint256 CCoinsViewDB::GetBestBlock() const {
@@ -131,12 +121,6 @@ bool CCoinsViewDB::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) {
     batch.Write(DB_HEAD_BLOCKS, std::vector<uint256>{hashBlock, old_tip});
 
     for (CCoinsMap::iterator it = mapCoins.begin(); it != mapCoins.end();) {
-        // Skip loaded coins, we don't want them being written to the base
-        if (it->second.coin.fLoaded) {
-            it++;
-            continue;
-        }
-
         if (it->second.flags & CCoinsCacheEntry::DIRTY) {
             CoinEntry entry(&it->first);
             if (it->second.coin.IsSpent())
@@ -175,167 +159,6 @@ bool CCoinsViewDB::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) {
 size_t CCoinsViewDB::EstimateSize() const
 {
     return db.EstimateSize(DB_COIN, (char)(DB_COIN+1));
-}
-
-bool CCoinsViewDB::WriteLoadedCoinIndex(const std::vector<LoadedCoin>& vLoadedCoin)
-{
-    CDBBatch batch(loadedcoindb);
-
-    for (const LoadedCoin& c : vLoadedCoin) {
-        std::pair<char, uint256> key = std::make_pair(DB_LOADED_COINS, c.out.GetHash());
-        batch.Write(key, c);
-    }
-
-    return loadedcoindb.WriteBatch(batch);
-}
-
-bool CCoinsViewDB::WriteToLoadedCoinIndex(const LoadedCoin& coin)
-{
-    return WriteLoadedCoinIndex(std::vector<LoadedCoin>{ coin });
-}
-
-bool CCoinsViewDB::GetLoadedCoin(const uint256& hashOutPoint, LoadedCoin& coinOut) const
-{
-    std::unique_ptr<CDBIterator> pcursor(const_cast<CDBWrapper&>(loadedcoindb).NewIterator());
-    pcursor->Seek(std::make_pair(DB_LOADED_COINS, hashOutPoint));
-    if (pcursor->Valid()) {
-        try {
-            std::pair<char, uint256> key;
-            pcursor->GetKey(key);
-
-            if (key.second == hashOutPoint) {
-                pcursor->GetValue(coinOut);
-                return true;
-            }
-        } catch (const std::exception& e) {
-           error("%s: %s", __func__, e.what());
-        }
-    }
-    return false;
-}
-
-bool CCoinsViewDB::HaveLoadedCoin(const uint256& hashOutPoint) const
-{
-    LoadedCoin coin;
-    return GetLoadedCoin(hashOutPoint, coin);
-}
-
-bool CCoinsViewDB::ReadLoadedCoins()
-{
-    fs::path path = GetDataDir() / "loaded_coins.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
-    if (filein.IsNull()) {
-        return false;
-    }
-
-    // TODO log this
-    //uint64_t fileSize = fs::file_size(path);
-    //uint64_t dataSize = fileSize - (sizeof(int) * 3);
-
-    int read = 0;
-    std::vector<LoadedCoin> vLoadedCoin;
-    try {
-        int nVersionRequired, nVersionThatWrote;
-        filein >> nVersionRequired;
-        filein >> nVersionThatWrote;
-        if (nVersionRequired > CLIENT_VERSION) {
-            LogPrintf("%s: version required greater than client version!\n",  __func__);
-            return false;
-        }
-
-        int count = 0;
-        filein >> count;
-        for (int i = 0; i < count; i++) {
-            if (i % 4000000 == 0) {
-                // Write a batch of loaded coins to the index.
-                // Batches are 4000000 coins each, which is around 400MB.
-                WriteLoadedCoinIndex(vLoadedCoin);
-                vLoadedCoin.clear();
-            }
-
-            LoadedCoin loadedCoin;
-            filein >> loadedCoin;
-            vLoadedCoin.push_back(loadedCoin);
-            read++;
-        }
-        // Write final batch
-        WriteLoadedCoinIndex(vLoadedCoin);
-    }
-    catch (const std::exception& e) {
-        LogPrintf("%s: Exception: %s\n",  __func__, e.what());
-        return false;
-    }
-
-
-    LogPrintf("%s: read: %u loaded coins.\n", __func__, read);
-
-    return true;
-}
-
-std::vector<LoadedCoin> CCoinsViewDB::ReadMyLoadedCoins()
-{
-    std::vector<LoadedCoin> vLoadedCoin;
-
-    fs::path path = GetDataDir() / "my_loaded_coins.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
-    if (filein.IsNull()) {
-        return vLoadedCoin;
-    }
-
-    // TODO log this
-    //uint64_t fileSize = fs::file_size(path);
-    //uint64_t dataSize = fileSize - (sizeof(int) * 3);
-
-    try {
-        int nVersionRequired, nVersionThatWrote;
-        filein >> nVersionRequired;
-        filein >> nVersionThatWrote;
-        if (nVersionRequired > CLIENT_VERSION) {
-            return vLoadedCoin;
-        }
-
-        int count = 0;
-        filein >> count;
-        for (int i = 0; i < count; i++) {
-            LoadedCoin loadedCoin;
-            filein >> loadedCoin;
-            vLoadedCoin.push_back(loadedCoin);
-        }
-    }
-    catch (const std::exception& e) {
-        LogPrintf("%s: Exception: %s\n",  __func__, e.what());
-        return vLoadedCoin;
-    }
-
-    return vLoadedCoin;
-}
-
-void CCoinsViewDB::WriteMyLoadedCoins(const std::vector<LoadedCoin>& vLoadedCoin)
-{
-    if (!vLoadedCoin.size())
-        return;
-    int count = vLoadedCoin.size();
-
-    // Write the coins
-    fs::path path = GetDataDir() / "my_loaded_coins.dat";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
-    if (fileout.IsNull()) {
-        return;
-    }
-
-    try {
-        fileout << 210000; // version required to read: 0.21.00 or later
-        fileout << CLIENT_VERSION; // version that wrote the file
-        fileout << count; // Number of coins in file
-
-        for (const LoadedCoin& c : vLoadedCoin) {
-            fileout << c;
-        }
-    }
-    catch (const std::exception& e) {
-        LogPrintf("%s: Exception: %s\n",  __func__, e.what());
-        return;
-    }
 }
 
 CBlockTreeDB::CBlockTreeDB(size_t nCacheSize, bool fMemory, bool fWipe) : CDBWrapper(GetDataDir() / "blocks" / "index", nCacheSize, fMemory, fWipe) {
@@ -379,13 +202,6 @@ CCoinsViewCursor *CCoinsViewDB::Cursor() const
     return i;
 }
 
-CCoinsViewLoadedCursor *CCoinsViewDB::LoadedCursor() const
-{
-    CCoinsViewLoadedDBCursor *i = new CCoinsViewLoadedDBCursor(const_cast<CDBWrapper&>(loadedcoindb).NewIterator());
-    i->pcursor->Seek(DB_LOADED_COINS);
-    return i;
-}
-
 bool CCoinsViewDBCursor::GetKey(COutPoint &key) const
 {
     // Return cached key
@@ -420,26 +236,6 @@ void CCoinsViewDBCursor::Next()
     } else {
         keyTmp.first = entry.key;
     }
-}
-
-bool CCoinsViewLoadedDBCursor::GetKey(std::pair<char, uint256>& key) const
-{
-    return pcursor->GetKey(key);
-}
-
-bool CCoinsViewLoadedDBCursor::GetValue(LoadedCoin &coin) const
-{
-    return pcursor->GetValue(coin);
-}
-
-bool CCoinsViewLoadedDBCursor::Valid() const
-{
-    return pcursor->Valid();
-}
-
-void CCoinsViewLoadedDBCursor::Next()
-{
-    pcursor->Next();
 }
 
 bool CBlockTreeDB::WriteBatchSync(const std::vector<std::pair<int, const CBlockFileInfo*> >& fileInfo, int nLastFile, const std::vector<const CBlockIndex*>& blockinfo) {
@@ -505,13 +301,8 @@ bool CBlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, 
                 pindexNew->nStatus        = diskindex.nStatus;
                 pindexNew->nTx            = diskindex.nTx;
 
-                // Copy Litecoin, skip PoW check when reading our own data for
-                // performance reasons. This can be re-enabled but each block on
-                // disk will need to be SHAndwich hashed again when read as we
-                // only use the SHAndwich hash for PoW and then forget about it.
-                //
-                //if (!CheckProofOfWork(pindexNew->GetBlockHash(), pindexNew->nBits, consensusParams))
-                //    return error("%s: CheckProofOfWork failed: %s", __func__, pindexNew->ToString());
+                if (!CheckProofOfWork(pindexNew->GetBlockHash(), pindexNew->nBits, consensusParams))
+                    return error("%s: CheckProofOfWork failed: %s", __func__, pindexNew->ToString());
 
                 pcursor->Next();
             } else {
@@ -780,7 +571,7 @@ bool CCoinsViewDB::Upgrade() {
             COutPoint outpoint(key.second, 0);
             for (size_t i = 0; i < old_coins.vout.size(); ++i) {
                 if (!old_coins.vout[i].IsNull() && !old_coins.vout[i].scriptPubKey.IsUnspendable()) {
-                    Coin newcoin(std::move(old_coins.vout[i]), old_coins.nHeight, old_coins.fCoinBase, false, false);
+                    Coin newcoin(std::move(old_coins.vout[i]), old_coins.nHeight, old_coins.fCoinBase);
                     outpoint.n = i;
                     CoinEntry entry(&outpoint);
                     batch.Write(entry, newcoin);

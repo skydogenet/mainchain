@@ -57,6 +57,7 @@
         <file alias="fontbigger">res/icons/fontbigger.png</file>
         <file alias="fontsmaller">res/icons/fontsmaller.png</file>
         <file alias="prompticon">res/icons/chevron.png</file>
+        <file alias="print">res/icons/print.png</file>
         <file alias="transaction_abandoned">res/icons/transaction_abandoned.png</file>
         <file alias="hd_enabled">res/icons/hd_enabled.png</file>
         <file alias="hd_disabled">res/icons/hd_disabled.png</file>
@@ -70,6 +71,23 @@
         <file alias="search">res/icons/search.png</file>
         <file alias="flip">res/icons/flip.png</file>
         <file alias="broadcastnews">res/icons/broadcastnews.png</file>
+        <file alias="createwallet">res/icons/createwallet.png</file>
+        <file alias="restorewallet">res/icons/restorewallet.png</file>
+        <file alias="dots0">res/icons/dots0.png</file>
+        <file alias="dots1">res/icons/dots1.png</file>
+        <file alias="dots2">res/icons/dots2.png</file>
+        <file alias="dots3">res/icons/dots3.png</file>
+        <file alias="dots4">res/icons/dots4.png</file>
+        <file alias="dots5">res/icons/dots5.png</file>
+        <file alias="crosseye">res/icons/crosseye.png</file>
+        <file alias="timer">res/icons/timer.png</file>
+        <file alias="safe">res/icons/safe.png</file>
+        <file alias="scale">res/icons/scale.png</file>
+        <file alias="check">res/icons/check.png</file>
+        <file alias="pool">res/icons/pool.png</file>
+        <file alias="network">res/icons/network.png</file>
+        <file alias="tree">res/icons/tree.png</file>
+        <file alias="paperwallet">res/doc/wallet.pdf</file>
     </qresource>
     <qresource prefix="/movies">
         <file alias="spinner-000">res/movies/spinner-000.png</file>

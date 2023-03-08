@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2021 The Bitcoin Core developers
+﻿// Copyright (c) 2021-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,11 +9,8 @@
 #include <utilmoneystr.h>
 #include <validation.h>
 
-#include <qt/clientmodel.h>
-
 #include <QDateTime>
 #include <QMetaType>
-#include <QTimer>
 #include <QVariant>
 
 Q_DECLARE_METATYPE(OPReturnTableObject)
@@ -123,26 +120,9 @@ QVariant OPReturnTableModel::headerData(int section, Qt::Orientation orientation
     return QVariant();
 }
 
-void OPReturnTableModel::setClientModel(ClientModel *model)
-{
-    this->clientModel = model;
-    if(model)
-    {
-        numBlocksChanged();
-
-        connect(model, SIGNAL(numBlocksChanged(int,QDateTime,double,bool)),
-                this, SLOT(numBlocksChanged()));
-    }
-}
-
 void OPReturnTableModel::setDays(int nDaysIn)
 {
     nDays = nDaysIn;
-    UpdateModel();
-}
-
-void OPReturnTableModel::numBlocksChanged()
-{
     UpdateModel();
 }
 
@@ -161,6 +141,7 @@ void OPReturnTableModel::UpdateModel()
 
     // Loop backwards from chainTip until we reach target time or genesis block.
     std::vector<OPReturnTableObject> vObj;
+    int nBatchSize = 300;
     for (int i = nHeight; i > 1; i--) {
         CBlockIndex *index = chainActive[i];
         if (!index)
@@ -193,9 +174,25 @@ void OPReturnTableModel::UpdateModel()
 
             vObj.push_back(object);
         }
+
+        // Write batch
+        if (i % nBatchSize == 0 && vObj.size()) {
+            int offset = model.size() ? 2 : 1;
+            beginInsertRows(QModelIndex(), model.size(), model.size() + vObj.size() - offset);
+            for (const OPReturnTableObject& o : vObj)
+                model.append(QVariant::fromValue(o));
+            endInsertRows();
+
+            vObj.clear();
+        }
     }
 
-    beginInsertRows(QModelIndex(), 0, vObj.size() - 1);
+    if (!vObj.size())
+        return;
+
+    // Write final batch
+    int offset = model.size() ? 2 : 1;
+    beginInsertRows(QModelIndex(), model.size(), model.size() + vObj.size() - offset);
     for (const OPReturnTableObject& o : vObj)
         model.append(QVariant::fromValue(o));
     endInsertRows();

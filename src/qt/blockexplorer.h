@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Bitcoin Core developers
+// Copyright (c) 2021-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -31,6 +31,7 @@ public:
     void setClientModel(ClientModel *model);
 
 public Q_SLOTS:
+    void updateOnShow();
     void scrollRight();
 
 private Q_SLOTS:
@@ -49,6 +50,9 @@ private:
     BlockIndexDetailsDialog* blockIndexDialog = nullptr;
 
     void Search();
+
+Q_SIGNALS:
+    void UpdateTable();
 };
 
 #endif // BLOCKEXPLORER_H

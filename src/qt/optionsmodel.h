@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -55,6 +55,7 @@ public:
         SpendZeroConfChange,    // bool
         Listen,                 // bool
         Theme,                  // int
+        USDBTC,                 // int
         OptionIDRowCount,
     };
 
@@ -73,6 +74,7 @@ public:
     bool getMinimizeOnClose() const { return fMinimizeOnClose; }
     int getDisplayUnit() const { return nDisplayUnit; }
     int getTheme() const { return nTheme; }
+    int getUSDBTC() const { return nUSDBTC; }
     QString getThirdPartyTxUrls() const { return strThirdPartyTxUrls; }
     bool getProxySettings(QNetworkProxy& proxy) const;
     bool getCoinControlFeatures() const { return fCoinControlFeatures; }
@@ -90,6 +92,7 @@ private:
     QString language;
     int nDisplayUnit;
     int nTheme;
+    int nUSDBTC;
     QString strThirdPartyTxUrls;
     bool fCoinControlFeatures;
     /* settings that were overridden by command-line */
@@ -100,9 +103,11 @@ private:
 
     // Check settings version and upgrade default values if required
     void checkAndMigrate();
+
 Q_SIGNALS:
     void displayUnitChanged(int unit);
     void themeChanged(int nTheme);
+    void usdBTCChanged(int nUSDBTC);
     void coinControlFeaturesChanged(bool);
     void hideTrayIconChanged(bool);
 };

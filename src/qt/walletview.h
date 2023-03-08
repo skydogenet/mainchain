@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -60,6 +60,8 @@ public:
     bool handlePaymentRequest(const SendCoinsRecipient& recipient);
 
     void showOutOfSyncWarning(bool fShow);
+
+    void requestUseAvailable();
 
 private:
     ClientModel *clientModel;
@@ -128,8 +130,14 @@ public Q_SLOTS:
     /** Show the sidechain activation dialog */
     void showSidechainActivationDialog();
 
-    /** Show the sidechain withdrawal voting dialog */
-    void showSidechainWithdrawalDialog();
+    /** Show the sidechain hash explorer &  withdrawal voting dialog */
+    void showSCDBDialog();
+
+    /** Show the OP_RETURN graffiti dialog */
+    void showGraffitiDialog();
+
+    /** Show the Coin News  dialog */
+    void showCoinNewsDialog();
 
 Q_SIGNALS:
     /** Signal that we want to show the main window */

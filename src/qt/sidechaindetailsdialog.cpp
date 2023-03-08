@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Bitcoin Core developers
+// Copyright (c) 2020-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -15,13 +15,11 @@ SidechainDetailsDialog::SidechainDetailsDialog(const Sidechain& sidechain, QWidg
 
     ui->labelVersion->setText(QString::number(sidechain.nVersion));
     ui->labelNumber->setText(QString::number(sidechain.nSidechain));
-    ui->labelKeyID->setText(QString::fromStdString(sidechain.strKeyID));
-    ui->labelPrivKey->setText(QString::fromStdString(sidechain.strPrivKey));
     ui->labelTitle->setText(QString::fromStdString(sidechain.title));
     ui->labelDescription->setText(QString::fromStdString(sidechain.description));
     ui->labelID1->setText(QString::fromStdString(sidechain.hashID1.ToString()));
     ui->labelID2->setText(QString::fromStdString(sidechain.hashID2.ToString()));
-    ui->labelLDBID->setText(QString::fromStdString(sidechain.GetHash().ToString()));
+    ui->labelLDBID->setText(QString::fromStdString(sidechain.GetSerHash().ToString()));
 }
 
 SidechainDetailsDialog::~SidechainDetailsDialog()

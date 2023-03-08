@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -117,14 +117,14 @@ QString BitcoinUnits::format(int unit, const CAmount& nIn, bool fPlus, Separator
     else if (fPlus && n > 0)
         quotient_str.insert(0, '+');
 
-    QString final = quotient_str + QString(".") + remainder_str;
+    QString str = quotient_str + QString(".") + remainder_str;
 
     // Insert comma if needed
     if (unit == SKYDOGE && remainder_str.size() == 8) {
-        final.insert(final.size() - 4, ",");
+        str.insert(str.size() - 4, ",");
     }
 
-    return final;
+    return str;
 }
 
 

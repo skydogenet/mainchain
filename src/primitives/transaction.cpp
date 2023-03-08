@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -155,8 +155,8 @@ std::string CTransaction::ToString() const
     for (unsigned int i = 0; i < vout.size(); i++)
         str += "    " + vout[i].ToString() + "\n";
     if (!criticalData.IsNull()) {
-        str += strprintf("Critical Data:\nbytes.size=%s\nhashCritical=%s",
-        criticalData.bytes.size(),
+        str += strprintf("Critical Data:\nvBytes.size=%s\nhashCritical=%s",
+        criticalData.vBytes.size(),
         criticalData.hashCritical.ToString());
     }
     return str;
@@ -172,80 +172,27 @@ bool CCriticalData::IsBMMRequest() const
 
 bool CCriticalData::IsBMMRequest(uint8_t& nSidechain, std::string& strPrevBlock) const
 {
-    // Check for h* commit flag in critical data bytes
     if (IsNull())
         return false;
     if (hashCritical.IsNull())
         return false;
-    if (bytes.size() < 13)
+    if (vBytes.size() != 8)
         return false;
 
-    if (bytes[0] != 0x00 || bytes[1] != 0xbf || bytes[2] != 0x00)
+    if (vBytes[0] != 0x00 || vBytes[1] != 0xbf || vBytes[2] != 0x00)
         return false;
 
-    int intSidechain = -1;
-    size_t nSideBytes = 0;
-    if (bytes[3] == 0x00)
-    {
-        // Special case for sidechain 0
-        intSidechain = 0;
-        nSideBytes = 0;
-    }
-    else
-    if (bytes[3] == 0x01)
-    {
-        intSidechain = CScriptNum(std::vector<unsigned char>{bytes[4]}, false).getint();
-        nSideBytes = 1;
-    }
-    else
-    if (bytes[3] == 0x02)
-    {
-        intSidechain = CScriptNum(std::vector<unsigned char>{bytes[4], bytes[5]}, false).getint();
-        nSideBytes = 2;
-    }
-    else
-    {
-        // Only 0 - 255 are allowed
-        return false;
-    }
-
-    if (intSidechain < 0 || intSidechain > 255)
-        return false;
-
-    nSidechain = (uint8_t)intSidechain;
+    nSidechain = vBytes[3];
 
     // Read prev block bytes
-
-    size_t nBytes = 4 + nSideBytes;
-    std::vector<unsigned char> prevBytes;
-    if (bytes[nBytes] == 0x08) {
-        prevBytes = std::vector<unsigned char>(bytes.begin() + nBytes + 1, bytes.end());
-    } else {
+    std::vector<unsigned char> vPrevBytes;
+    vPrevBytes = std::vector<unsigned char>(vBytes.begin() + 4, vBytes.end());
+    if (vPrevBytes.size() != 4)
         return false;
-    }
 
-    std::stringstream ss;
-    for (size_t i = 0; i < prevBytes.size(); i++) {
-        ss << std::hex << prevBytes[i];
-    }
-
-    std::string strHex = ss.str();
-    std::string strBytesFinal = "";
-    int nHexBytes = strHex.size();
-    for (int i = 0; i < nHexBytes; i += 2) {
-        // Convert the c_str into a long integer and then cast to char. We want
-        // to get the previous block hash string back from the hex bytes for
-        // easy verification.
-        std::string byte = strHex.substr(i, 2);
-        char c = (char) (int) strtol(byte.c_str(), NULL /* endptr - unused */, 16);
-        strBytesFinal.push_back(c);
-    }
-
-    if (strBytesFinal.size() == 4) {
-        strPrevBlock = strBytesFinal;
-    } else {
+    strPrevBlock = HexStr(vPrevBytes);
+    if (strPrevBlock.size() != 8)
         return false;
-    }
 
     return true;
 }

@@ -1,23 +1,22 @@
 dnl require autoconf 2.60 (AS_ECHO/AS_ECHO_N)
 AC_PREREQ([2.60])
 define(_CLIENT_VERSION_MAJOR, 0)
-define(_CLIENT_VERSION_MINOR, 40)
-define(_CLIENT_VERSION_REVISION, 02)
+define(_CLIENT_VERSION_MINOR, 44)
+define(_CLIENT_VERSION_REVISION, 00)
 define(_CLIENT_VERSION_BUILD, 0)
 define(_CLIENT_VERSION_IS_RELEASE, true)
-define(_COPYRIGHT_YEAR, 2021)
+define(_COPYRIGHT_YEAR, 2022)
 define(_COPYRIGHT_HOLDERS,[The %s developers])
 define(_COPYRIGHT_HOLDERS_SUBSTITUTION,[[Skydoge]])
-AC_INIT([Skydoge],[_CLIENT_VERSION_MAJOR._CLIENT_VERSION_MINOR._CLIENT_VERSION_REVISION],[https://github.com/SkydogeTESTDRIVE/skydoge/issues],[mainchain],[http://skydoge.info/])
+AC_INIT([skydoge],[_CLIENT_VERSION_MAJOR._CLIENT_VERSION_MINOR._CLIENT_VERSION_REVISION],[https://github.com/skydogenet/mainchain/issues],[mainchain],[http://skydoge.net/])
 AC_CONFIG_SRCDIR([src/validation.cpp])
 AC_CONFIG_HEADERS([src/config/skydoge-config.h])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR([build-aux/m4])
-
-DRIVENET_DAEMON_NAME=skydoged
-DRIVENET_GUI_NAME=skydoge-qt
-DRIVENET_CLI_NAME=skydoge-cli
-DRIVENET_TX_NAME=skydoge-tx
+DRIVECHAIN_DAEMON_NAME=skydoged
+DRIVECHAIN_GUI_NAME=skydoge-qt
+DRIVECHAIN_CLI_NAME=skydoge-cli
+DRIVECHAIN_TX_NAME=skydoge-tx
 
 dnl Unless the user specified ARFLAGS, force it to be cr
 AC_ARG_VAR(ARFLAGS, [Flags for the archiver, defaults to <cr> if not set])
@@ -27,9 +26,9 @@ fi
 
 AC_CANONICAL_HOST
 
-AH_TOP([#ifndef DRIVENET_CONFIG_H])
-AH_TOP([#define DRIVENET_CONFIG_H])
-AH_BOTTOM([#endif //DRIVENET_CONFIG_H])
+AH_TOP([#ifndef DRIVECHAIN_CONFIG_H])
+AH_TOP([#define DRIVECHAIN_CONFIG_H])
+AH_BOTTOM([#endif //DRIVECHAIN_CONFIG_H])
 
 dnl faketime breaks configure and is only needed for make. Disable it here.
 unset FAKETIME
@@ -734,7 +733,7 @@ AC_SUBST(LIBMEMENV)
 
 if test x$enable_wallet != xno; then
     dnl Check for libdb_cxx only if wallet enabled
-    DRIVENET_FIND_BDB48
+    DRIVECHAIN_FIND_BDB48
 fi
 
 dnl Check for libminiupnpc (optional)
@@ -746,10 +745,10 @@ if test x$use_upnp != xno; then
   )
 fi
 
-DRIVENET_QT_INIT
+DRIVECHAIN_QT_INIT
 
 dnl sets $skydoge_enable_qt, $skydoge_enable_qt_test, $skydoge_enable_qt_dbus
-DRIVENET_QT_CONFIGURE([$use_pkgconfig], [qt5])
+DRIVECHAIN_QT_CONFIGURE([$use_pkgconfig], [qt5])
 
 if test x$build_skydoge_utils$build_skydoged$skydoge_enable_qt$use_tests$use_bench = xnonononono; then
     use_boost=no
@@ -936,9 +935,9 @@ if test x$use_pkgconfig = xyes; then
     [
       PKG_CHECK_MODULES([SSL], [libssl],, [AC_MSG_ERROR(openssl not found.)])
       PKG_CHECK_MODULES([CRYPTO], [libcrypto],,[AC_MSG_ERROR(libcrypto not found.)])
-      DRIVENET_QT_CHECK([PKG_CHECK_MODULES([PROTOBUF], [protobuf], [have_protobuf=yes], [DRIVENET_QT_FAIL(libprotobuf not found)])])
+      DRIVECHAIN_QT_CHECK([PKG_CHECK_MODULES([PROTOBUF], [protobuf], [have_protobuf=yes], [DRIVECHAIN_QT_FAIL(libprotobuf not found)])])
       if test x$use_qr != xno; then
-        DRIVENET_QT_CHECK([PKG_CHECK_MODULES([QR], [libqrencode], [have_qrencode=yes], [have_qrencode=no])])
+        DRIVECHAIN_QT_CHECK([PKG_CHECK_MODULES([QR], [libqrencode], [have_qrencode=yes], [have_qrencode=no])])
       fi
       if test x$build_skydoge_utils$build_skydoged$skydoge_enable_qt$use_tests != xnononono; then
         PKG_CHECK_MODULES([EVENT], [libevent],, [AC_MSG_ERROR(libevent not found.)])
@@ -996,10 +995,10 @@ else
     esac
   fi
 
-  DRIVENET_QT_CHECK(AC_CHECK_LIB([protobuf] ,[main],[PROTOBUF_LIBS=-lprotobuf], DRIVENET_QT_FAIL(libprotobuf not found)))
+  DRIVECHAIN_QT_CHECK(AC_CHECK_LIB([protobuf] ,[main],[PROTOBUF_LIBS=-lprotobuf], DRIVECHAIN_QT_FAIL(libprotobuf not found)))
   if test x$use_qr != xno; then
-    DRIVENET_QT_CHECK([AC_CHECK_LIB([qrencode], [main],[QR_LIBS=-lqrencode], [have_qrencode=no])])
-    DRIVENET_QT_CHECK([AC_CHECK_HEADER([qrencode.h],, have_qrencode=no)])
+    DRIVECHAIN_QT_CHECK([AC_CHECK_LIB([qrencode], [main],[QR_LIBS=-lqrencode], [have_qrencode=no])])
+    DRIVECHAIN_QT_CHECK([AC_CHECK_HEADER([qrencode.h],, have_qrencode=no)])
   fi
 fi
 
@@ -1058,23 +1057,24 @@ AM_CONDITIONAL([EMBEDDED_UNIVALUE],[test x$need_bundled_univalue = xyes])
 AC_SUBST(UNIVALUE_CFLAGS)
 AC_SUBST(UNIVALUE_LIBS)
 
-DRIVENET_QT_PATH_PROGS([PROTOC], [protoc],$protoc_bin_path)
+DRIVECHAIN_QT_PATH_PROGS([PROTOC], [protoc],$protoc_bin_path)
 
 AC_MSG_CHECKING([whether to build skydoged])
-AM_CONDITIONAL([BUILD_DRIVENETD], [test x$build_skydoged = xyes])
+AM_CONDITIONAL([BUILD_DRIVECHAIND], [test x$build_skydoged = xyes])
 AC_MSG_RESULT($build_skydoged)
 
 AC_MSG_CHECKING([whether to build utils (skydoge-cli skydoge-tx)])
-AM_CONDITIONAL([BUILD_DRIVENET_UTILS], [test x$build_skydoge_utils = xyes])
+AM_CONDITIONAL([BUILD_DRIVECHAIN_UTILS], [test x$build_skydoge_utils = xyes])
 AC_MSG_RESULT($build_skydoge_utils)
 
 AC_MSG_CHECKING([whether to build libraries])
-AM_CONDITIONAL([BUILD_DRIVENET_LIBS], [test x$build_skydoge_libs = xyes])
+AM_CONDITIONAL([BUILD_DRIVECHAIN_LIBS], [test x$build_skydoge_libs = xyes])
 if test x$build_skydoge_libs = xyes; then
   AC_DEFINE(HAVE_CONSENSUS_LIB, 1, [Define this symbol if the consensus lib has been built])
   AC_CONFIG_FILES([libskydogeconsensus.pc:libskydogeconsensus.pc.in])
 fi
 AC_MSG_RESULT($build_skydoge_libs)
+
 
 AC_LANG_POP
 
@@ -1230,10 +1230,10 @@ AC_SUBST(COPYRIGHT_YEAR, _COPYRIGHT_YEAR)
 AC_SUBST(COPYRIGHT_HOLDERS, "_COPYRIGHT_HOLDERS")
 AC_SUBST(COPYRIGHT_HOLDERS_SUBSTITUTION, "_COPYRIGHT_HOLDERS_SUBSTITUTION")
 AC_SUBST(COPYRIGHT_HOLDERS_FINAL, "_COPYRIGHT_HOLDERS_FINAL")
-AC_SUBST(DRIVENET_DAEMON_NAME)
-AC_SUBST(DRIVENET_GUI_NAME)
-AC_SUBST(DRIVENET_CLI_NAME)
-AC_SUBST(DRIVENET_TX_NAME)
+AC_SUBST(DRIVECHAIN_DAEMON_NAME)
+AC_SUBST(DRIVECHAIN_GUI_NAME)
+AC_SUBST(DRIVECHAIN_CLI_NAME)
+AC_SUBST(DRIVECHAIN_TX_NAME)
 
 AC_SUBST(RELDFLAGS)
 AC_SUBST(ERROR_CXXFLAGS)

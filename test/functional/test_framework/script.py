@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2015-2017 The Bitcoin Core developers
+# Copyright (c) 2015-2022 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Functionality to build scripts, as well as SignatureHash().
@@ -225,7 +225,7 @@ OP_NOP1 = CScriptOp(0xb0)
 OP_CHECKLOCKTIMEVERIFY = CScriptOp(0xb1)
 OP_CHECKSEQUENCEVERIFY = CScriptOp(0xb2)
 OP_NOP4 = CScriptOp(0xb3)
-OP_NOP5 = CScriptOp(0xb4)
+OP_DRIVECHAIN = CScriptOp(0xb4)
 OP_NOP6 = CScriptOp(0xb5)
 OP_NOP7 = CScriptOp(0xb6)
 OP_NOP8 = CScriptOp(0xb7)
@@ -352,7 +352,7 @@ VALID_OPCODES = {
     OP_CHECKLOCKTIMEVERIFY,
     OP_CHECKSEQUENCEVERIFY,
     OP_NOP4,
-    OP_NOP5,
+    OP_DRIVECHAIN,
     OP_NOP6,
     OP_NOP7,
     OP_NOP8,
@@ -471,7 +471,7 @@ OPCODE_NAMES.update({
     OP_CHECKLOCKTIMEVERIFY : 'OP_CHECKLOCKTIMEVERIFY',
     OP_CHECKSEQUENCEVERIFY : 'OP_CHECKSEQUENCEVERIFY',
     OP_NOP4 : 'OP_NOP4',
-    OP_NOP5 : 'OP_NOP5',
+    OP_DRIVECHAIN : 'OP_DRIVECHAIN',
     OP_NOP6 : 'OP_NOP6',
     OP_NOP7 : 'OP_NOP7',
     OP_NOP8 : 'OP_NOP8',
@@ -590,7 +590,7 @@ OPCODES_BY_NAME = {
     'OP_CHECKLOCKTIMEVERIFY' : OP_CHECKLOCKTIMEVERIFY,
     'OP_CHECKSEQUENCEVERIFY' : OP_CHECKSEQUENCEVERIFY,
     'OP_NOP4' : OP_NOP4,
-    'OP_NOP5' : OP_NOP5,
+    'OP_DRIVECHAIN' : OP_DRIVECHAIN,
     'OP_NOP6' : OP_NOP6,
     'OP_NOP7' : OP_NOP7,
     'OP_NOP8' : OP_NOP8,

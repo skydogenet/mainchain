@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Bitcoin Core developers
+// Copyright (c) 2021-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -11,7 +11,6 @@
 #include <QList>
 
 class CBlockIndex;
-class ClientModel;
 class OPReturnData;
 
 QT_BEGIN_NAMESPACE
@@ -38,7 +37,6 @@ public:
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
     QVariant headerData(int section, Qt::Orientation orientation, int role) const;
 
-    void setClientModel(ClientModel *model);
     void setDays(int nDays);
 
     enum RoleIndex {
@@ -47,15 +45,10 @@ public:
     };
 
 public Q_SLOTS:
-    void numBlocksChanged();
+    void UpdateModel();
 
 private:
     QList<QVariant> model;
-
-    ClientModel *clientModel = nullptr;
-
-    void UpdateModel();
-
     int nDays;
 };
 

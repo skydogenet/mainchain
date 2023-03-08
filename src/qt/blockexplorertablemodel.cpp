@@ -1,16 +1,16 @@
+// Copyright (c) 2021-2022 The Bitcoin Core developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/blockexplorertablemodel.h>
 
 #include <chain.h>
 #include <validation.h>
 
-#include <qt/clientmodel.h>
-
 #include <QDateTime>
 #include <QIcon>
 #include <QMetaType>
-#include <QTimer>
 #include <QVariant>
-
 
 Q_DECLARE_METATYPE(BlockExplorerTableObject)
 
@@ -131,23 +131,6 @@ QVariant BlockExplorerTableModel::headerData(int section, Qt::Orientation orient
         }
     }
     return QVariant();
-}
-
-void BlockExplorerTableModel::setClientModel(ClientModel *model)
-{
-    this->clientModel = model;
-    if(model)
-    {
-        numBlocksChanged();
-
-        connect(model, SIGNAL(numBlocksChanged(int,QDateTime,double,bool)),
-                this, SLOT(numBlocksChanged()));
-    }
-}
-
-void BlockExplorerTableModel::numBlocksChanged()
-{
-    UpdateModel();
 }
 
 void BlockExplorerTableModel::UpdateModel()

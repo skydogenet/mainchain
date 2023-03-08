@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2017 The Bitcoin Core developers
+// Copyright (c) 2012-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -14,14 +14,6 @@ uint256 CCoinsView::GetBestBlock() const { return uint256(); }
 std::vector<uint256> CCoinsView::GetHeadBlocks() const { return std::vector<uint256>(); }
 bool CCoinsView::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) { return false; }
 CCoinsViewCursor *CCoinsView::Cursor() const { return nullptr; }
-CCoinsViewLoadedCursor *CCoinsView::LoadedCursor() const { return nullptr; }
-
-// Loaded coins functions
-bool CCoinsView::ReadLoadedCoins() { return false; }
-std::vector<LoadedCoin> CCoinsView::ReadMyLoadedCoins() {return std::vector<LoadedCoin>(); }
-void CCoinsView::WriteMyLoadedCoins(const std::vector<LoadedCoin>& vLoadedCoin) {}
-bool CCoinsView::WriteToLoadedCoinIndex(const LoadedCoin& coin) { return false; }
-bool CCoinsView::GetLoadedCoin(const uint256& hashOutPoint, LoadedCoin& coinOut) const { return false; }
 
 bool CCoinsView::HaveCoin(const COutPoint &outpoint) const
 {
@@ -37,14 +29,7 @@ std::vector<uint256> CCoinsViewBacked::GetHeadBlocks() const { return base->GetH
 void CCoinsViewBacked::SetBackend(CCoinsView &viewIn) { base = &viewIn; }
 bool CCoinsViewBacked::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlock) { return base->BatchWrite(mapCoins, hashBlock); }
 
-bool CCoinsViewBacked::WriteToLoadedCoinIndex(const LoadedCoin& coin) { return base->WriteToLoadedCoinIndex(coin); }
-bool CCoinsViewBacked::GetLoadedCoin(const uint256& hashOutPoint, LoadedCoin& coinOut) const { return base->GetLoadedCoin(hashOutPoint, coinOut); };
-bool CCoinsViewBacked::ReadLoadedCoins() { return base->ReadLoadedCoins(); }
-std::vector<LoadedCoin> CCoinsViewBacked::ReadMyLoadedCoins() { return base->ReadMyLoadedCoins(); }
-void CCoinsViewBacked::WriteMyLoadedCoins(const std::vector<LoadedCoin>& vLoadedCoin) { base->WriteMyLoadedCoins(vLoadedCoin); }
-
 CCoinsViewCursor *CCoinsViewBacked::Cursor() const { return base->Cursor(); }
-CCoinsViewLoadedCursor *CCoinsViewBacked::LoadedCursor() const { return base->LoadedCursor(); }
 size_t CCoinsViewBacked::EstimateSize() const { return base->EstimateSize(); }
 
 SaltedOutpointHasher::SaltedOutpointHasher() : k0(GetRand(std::numeric_limits<uint64_t>::max())), k1(GetRand(std::numeric_limits<uint64_t>::max())) {}
@@ -109,11 +94,7 @@ void AddCoins(CCoinsViewCache& cache, const CTransaction &tx, int nHeight, bool 
         bool overwrite = check ? cache.HaveCoin(COutPoint(txid, i)) : fCoinbase;
         // Always set the possible_overwrite flag to AddCoin for coinbase txn, in order to correctly
         // deal with the pre-BIP30 occurrences of duplicate coinbase transactions.
-        if (tx.criticalData.IsNull()) {
-            cache.AddCoin(COutPoint(txid, i), Coin(tx.vout[i], nHeight, fCoinbase, false /* fCriticalData */, false /* fLoaded */), overwrite);
-        } else {
-            cache.AddCoin(COutPoint(txid, i), Coin(tx.vout[i], nHeight, fCoinbase, true /* fCriticalData */, false /* fLoaded */), overwrite);
-        }
+        cache.AddCoin(COutPoint(txid, i), Coin(tx.vout[i], nHeight, fCoinbase), overwrite);
     }
 }
 
@@ -121,21 +102,6 @@ bool CCoinsViewCache::SpendCoin(const COutPoint &outpoint, bool fJustCheck, Coin
     CCoinsMap::iterator it = FetchCoin(outpoint);
     if (it == cacheCoins.end()) return false;
     cachedCoinsUsage -= it->second.coin.DynamicMemoryUsage();
-
-    // Set fSpent for loaded coins
-    if (it->second.coin.fLoaded) {
-        // Lookup the loaded coin
-        LoadedCoin loaded;
-        if (!base->GetLoadedCoin(outpoint.GetHash(), loaded))
-            return false;
-
-        // Update fSpent
-        loaded.fSpent = true;
-
-        // Write update to loaded coin index
-        if (!fJustCheck)
-            base->WriteToLoadedCoinIndex(loaded);
-    }
 
     if (moveout) {
         *moveout = std::move(it->second.coin);
@@ -147,20 +113,6 @@ bool CCoinsViewCache::SpendCoin(const COutPoint &outpoint, bool fJustCheck, Coin
         it->second.coin.Clear();
     }
     return true;
-}
-
-bool CCoinsViewCache::ReadLoadedCoins()
-{
-    return base->ReadLoadedCoins();
-}
-
-std::vector<LoadedCoin> CCoinsViewCache::ReadMyLoadedCoins()
-{
-    return base->ReadMyLoadedCoins();
-}
-void CCoinsViewCache::WriteMyLoadedCoins(const std::vector<LoadedCoin>& vLoadedCoin)
-{
-    base->WriteMyLoadedCoins(vLoadedCoin);
 }
 
 static const Coin coinEmpty;
@@ -198,10 +150,6 @@ bool CCoinsViewCache::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlockIn
     for (CCoinsMap::iterator it = mapCoins.begin(); it != mapCoins.end(); it = mapCoins.erase(it)) {
         // Ignore non-dirty entries (optimization).
         if (!(it->second.flags & CCoinsCacheEntry::DIRTY)) {
-            continue;
-        }
-        // Ignore loaded coins (we don't want them written to the base)
-        if (it->second.coin.fLoaded) {
             continue;
         }
         CCoinsMap::iterator itUs = cacheCoins.find(it->first);
@@ -254,11 +202,6 @@ bool CCoinsViewCache::BatchWrite(CCoinsMap &mapCoins, const uint256 &hashBlockIn
     }
     hashBlock = hashBlockIn;
     return true;
-}
-
-CCoinsViewLoadedCursor* CCoinsViewCache::LoadedCursor() const
-{
-    return base->LoadedCursor();
 }
 
 bool CCoinsViewCache::Flush() {

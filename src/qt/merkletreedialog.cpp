@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Bitcoin Core developers
+// Copyright (c) 2021-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -73,7 +73,7 @@ static const char* strHelp =
 "                                                                      |                                                        |\n"
 "                                                                       -------------------------------------------------------- \n"
 "\n\n"
-"For reference, we also provide the wtxid hashes and segwit merkleroot (which is now the \"real\" one):\n\n";
+"For reference, we also provide the wtxid hashes and segwit merkleroot (which is now the \"real\" one)";
 
 
 MerkleTreeDialog::MerkleTreeDialog(QWidget *parent) :

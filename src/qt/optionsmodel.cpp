@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -28,6 +28,8 @@
 #include <QStringList>
 
 const char *DEFAULT_GUI_PROXY_HOST = "127.0.0.1";
+
+static const int DEFAULT_USD_BTC = 50000;
 
 OptionsModel::OptionsModel(QObject *parent, bool resetSettings) :
     QAbstractListModel(parent)
@@ -154,6 +156,12 @@ void OptionsModel::Init(bool resetSettings)
     nTheme = settings.value("nTheme").toInt();
 
     Q_EMIT themeChanged(nTheme);
+
+    if (!settings.contains("nUSDBTC"))
+        settings.setValue("nUSDBTC", DEFAULT_USD_BTC);
+    nUSDBTC = settings.value("nUSDBTC").toInt();
+
+    Q_EMIT usdBTCChanged(nUSDBTC);
 
     language = settings.value("language").toString();
 }
@@ -293,6 +301,8 @@ QVariant OptionsModel::data(const QModelIndex & index, int role) const
             return settings.value("fListen");
         case Theme:
             return nTheme;
+        case USDBTC:
+            return nUSDBTC;
         default:
             return QVariant();
         }
@@ -434,6 +444,13 @@ bool OptionsModel::setData(const QModelIndex & index, const QVariant & value, in
                 settings.setValue("nTheme", value);
                 nTheme = value.toInt();
                 Q_EMIT themeChanged(value.toInt());
+            }
+            break;
+        case USDBTC:
+            if (nUSDBTC != value.toInt()) {
+                settings.setValue("nUSDBTC", value);
+                nUSDBTC = value.toInt();
+                Q_EMIT usdBTCChanged(value.toInt());
             }
             break;
         default:

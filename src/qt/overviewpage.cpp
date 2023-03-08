@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -18,6 +18,7 @@
 #include <qt/newstablemodel.h>
 #include <qt/newstypestablemodel.h>
 #include <qt/optionsmodel.h>
+#include <qt/optionsdialog.h>
 #include <qt/opreturndialog.h>
 #include <qt/platformstyle.h>
 #include <qt/transactionfilterproxy.h>
@@ -26,11 +27,13 @@
 #include <qt/walletmodel.h>
 
 #include <QMenu>
+#include <QLocale>
 #include <QPoint>
 #include <QScrollBar>
 #include <QSortFilterProxyModel>
 
 #include <txdb.h>
+#include <utilmoneystr.h>
 #include <validation.h>
 
 OverviewPage::OverviewPage(const PlatformStyle *platformStyleIn, QWidget *parent) :
@@ -122,11 +125,13 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyleIn, QWidget *parent
     ui->tableViewNews2->horizontalHeader()->setStretchLastSection(true);
 
     // Hide vertical header
+    ui->tableViewMempool->verticalHeader()->setVisible(false);
     ui->tableViewBlocks->verticalHeader()->setVisible(false);
     ui->tableViewNews1->verticalHeader()->setVisible(false);
     ui->tableViewNews2->verticalHeader()->setVisible(false);
 
     // Left align the horizontal header text
+    ui->tableViewMempool->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
     ui->tableViewBlocks->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
     ui->tableViewNews1->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
     ui->tableViewNews2->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
@@ -184,9 +189,12 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyleIn, QWidget *parent
 
     // Recent txns (mempool) table context menu
     QAction *showDetailsMempoolAction = new QAction(tr("Show transaction details from mempool"), this);
+    QAction *showDisplayOptionsAction = new QAction(tr("Set BTC / USD display price"), this);
+
     contextMenuMempool = new QMenu(this);
     contextMenuMempool->setObjectName("contextMenuMempool");
     contextMenuMempool->addAction(showDetailsMempoolAction);
+    contextMenuMempool->addAction(showDisplayOptionsAction);
 
     // Recent block table context menu
     QAction *showDetailsBlockAction = new QAction(tr("Show in block explorer"), this);
@@ -207,6 +215,7 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyleIn, QWidget *parent
     connect(copyNewsHexAction1, SIGNAL(triggered()), this, SLOT(copyNewsHex1()));
     connect(copyNewsHexAction2, SIGNAL(triggered()), this, SLOT(copyNewsHex2()));
     connect(showDetailsMempoolAction, SIGNAL(triggered()), this, SLOT(showDetailsMempool()));
+    connect(showDisplayOptionsAction, SIGNAL(triggered()), this, SLOT(showDisplayOptions()));
     connect(showDetailsBlockAction, SIGNAL(triggered()), this, SLOT(showDetailsBlock()));
 
     // Setup news type combo box options
@@ -225,6 +234,7 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyleIn, QWidget *parent
     ui->pushButtonCreateNews->setIcon(platformStyle->SingleColorIcon(":/icons/broadcastnews"));
     ui->pushButtonManageNews->setIcon(platformStyle->SingleColorIcon(":/icons/options"));
     ui->pushButtonGraffiti->setIcon(platformStyle->SingleColorIcon(":/icons/spray"));
+    ui->pushButtonSetUSDBTC->setIcon(platformStyle->SingleColorIcon(":/icons/options"));
 }
 
 void OverviewPage::handleOutOfSyncWarningClicks()
@@ -234,7 +244,7 @@ void OverviewPage::handleOutOfSyncWarningClicks()
 
 void OverviewPage::on_pushButtonCreateNews_clicked()
 {
-    createNewsDialog->show();
+    showCoinNewsDialog();
 }
 
 void OverviewPage::on_pushButtonManageNews_clicked()
@@ -244,7 +254,12 @@ void OverviewPage::on_pushButtonManageNews_clicked()
 
 void OverviewPage::on_pushButtonGraffiti_clicked()
 {
-    opReturnDialog->show();
+    showGraffitiDialog();
+}
+
+void OverviewPage::on_pushButtonSetUSDBTC_clicked()
+{
+    showDisplayOptions();
 }
 
 OverviewPage::~OverviewPage()
@@ -269,6 +284,11 @@ void OverviewPage::setBalance(const CAmount& balance, const CAmount& unconfirmed
     ui->labelWatchPending->setText(BitcoinUnits::formatWithUnit(unit, watchUnconfBalance, false, BitcoinUnits::separatorAlways));
     ui->labelWatchImmature->setText(BitcoinUnits::formatWithUnit(unit, watchImmatureBalance, false, BitcoinUnits::separatorAlways));
     ui->labelWatchTotal->setText(BitcoinUnits::formatWithUnit(unit, watchOnlyBalance + watchUnconfBalance + watchImmatureBalance, false, BitcoinUnits::separatorAlways));
+
+    CAmount total = balance + unconfirmedBalance + immatureBalance + watchOnlyBalance + watchUnconfBalance + watchImmatureBalance;
+    int nUSDBTC = walletModel->getOptionsModel()->getUSDBTC();
+    ui->labelUSDBTC->setText("$" + QLocale(QLocale::English).toString(nUSDBTC) + "/BTC");
+    ui->labelUSDBTCTotal->setText("$" + QLocale(QLocale::English).toString(ConvertToFiat(total, nUSDBTC), 'f', 0));
 
     // only show immature (newly mined) balance if it's non-zero, so as not to complicate things
     // for the non-mining users
@@ -326,6 +346,9 @@ void OverviewPage::setWalletModel(WalletModel *model)
 
         updateWatchOnlyLabels(model->haveWatchOnly());
         connect(model, SIGNAL(notifyWatchonlyChanged(bool)), this, SLOT(updateWatchOnlyLabels(bool)));
+
+        connect(model->getOptionsModel(), SIGNAL(usdBTCChanged(int)),
+                this, SLOT(updateUSDTotal()));
     }
 
     // update the display unit, to not use the default ("SKYDOGE")
@@ -359,6 +382,18 @@ void OverviewPage::updateAlerts(const QString &warnings)
 void OverviewPage::showOutOfSyncWarning(bool fShow)
 {
     ui->labelWalletStatus->setVisible(fShow);
+}
+
+void OverviewPage::showGraffitiDialog()
+{
+    opReturnDialog->updateOnShow();
+    opReturnDialog->show();
+}
+
+void OverviewPage::showCoinNewsDialog()
+{
+    createNewsDialog->show();
+
 }
 
 void OverviewPage::on_tableViewBlocks_doubleClicked(const QModelIndex& index)
@@ -612,6 +647,17 @@ void OverviewPage::showDetailsBlock()
         on_tableViewBlocks_doubleClicked(selection.front());
 }
 
+void OverviewPage::showDisplayOptions()
+{
+    if(!clientModel || !clientModel->getOptionsModel())
+        return;
+
+    OptionsDialog dlg(this, (walletModel != nullptr));
+    dlg.setModel(clientModel->getOptionsModel());
+    dlg.showDisplayOptions();
+    dlg.exec();
+}
+
 void OverviewPage::updateNewsTypes()
 {
     if (!newsTypesTableModel)
@@ -628,4 +674,18 @@ void OverviewPage::updateNewsTypes()
     // Setup combo box #2
     for (const NewsType t : vType)
         ui->comboBoxNewsType2->addItem(QString::fromStdString(t.title));
+}
+
+void OverviewPage::updateUSDTotal()
+{
+    // Update the balance to refresh the BTC USD conversion
+    if(walletModel)
+    {
+        setBalance(walletModel->getBalance(),
+                   walletModel->getUnconfirmedBalance(),
+                   walletModel->getImmatureBalance(),
+                   walletModel->getWatchBalance(),
+                   walletModel->getWatchUnconfirmedBalance(),
+                   walletModel->getWatchImmatureBalance());
+    }
 }

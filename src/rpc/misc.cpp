@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -9,6 +9,7 @@
 #include <consensus/validation.h>
 #include <core_io.h>
 #include <crypto/ripemd160.h>
+#include <crypto/sha256.h>
 #include <httpserver.h>
 #include <init.h>
 #include <merkleblock.h>
@@ -719,10 +720,10 @@ UniValue listsidechaindeposits(const JSONRPCRequest& request)
             "Optionally limited to count. Note that this only has access to "
             "deposits which are currently cached.\n"
             "\nArguments:\n"
-            "1. \"sidechainkey\"  (string, required) The sidechain key\n"
-            "2. \"txid\"          (string, optional) Only return deposits after this deposit TXID\n"
-            "3. \"n\"             (numeric, optional, required if txid is set) The output index of the previous argument txn\n"
-            "4. \"count\"         (numeric, optional) The number of most recent deposits to list\n"
+            "1. \"nsidechain\"  (numeric, required) The sidechain number\n"
+            "2. \"txid\"        (string, optional) Only return deposits after this deposit TXID\n"
+            "3. \"n\"           (numeric, optional, required if txid is set) The output index of the previous argument txn\n"
+            "4. \"count\"       (numeric, optional) The number of most recent deposits to list\n"
             "\nExamples:\n"
             + HelpExampleCli("listsidechaindeposits", "\"sidechainkey\", \"count\"")
             + HelpExampleRpc("listsidechaindeposits", "\"sidechainkey\", \"count\"")
@@ -738,14 +739,10 @@ UniValue listsidechaindeposits(const JSONRPCRequest& request)
     }
 #endif
 
-    // Check address bytes (sha256 hash)
-    std::string strSidechain = request.params[0].get_str();
-    uint256 hashSidechain = uint256S(strSidechain);
-    if (hashSidechain.IsNull()) {
-        std::string strError = "Invalid sidechain key!";
-        LogPrintf("%s: %s\n", __func__, strError);
-        throw JSONRPCError(RPC_MISC_ERROR, strError);
-    }
+    // Check sidechain number
+    int nSidechain = request.params[0].get_int();
+    if (nSidechain < 0 || nSidechain > 255)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
 
     // If TXID was passed in, make sure we also received N
     if (request.params.size() > 1 && request.params.size() < 3) {
@@ -772,11 +769,6 @@ UniValue listsidechaindeposits(const JSONRPCRequest& request)
         nKnown = request.params[2].get_int();
     }
 
-    // Figure out the base58 encoding of the private key
-    CKey key;
-    key.Set(hashSidechain.begin(), hashSidechain.end(), false);
-    CBitcoinSecret vchSecret(key);
-
     // Get number of recent deposits to return (default is all cached deposits)
     bool fLimit = false;
     int count = 0;
@@ -788,12 +780,7 @@ UniValue listsidechaindeposits(const JSONRPCRequest& request)
     UniValue arr(UniValue::VARR);
 
 #ifdef ENABLE_WALLET
-    std::vector<SidechainDeposit> vDeposit = scdb.GetDeposits(vchSecret.ToString());
-    if (!vDeposit.size()) {
-        std::string strError = "No deposits in cache for this sidechain!";
-        LogPrintf("%s: %s\n", __func__, strError);
-        throw JSONRPCError(RPC_MISC_ERROR, strError);
-    }
+    std::vector<SidechainDeposit> vDeposit = scdb.GetDeposits(nSidechain);
 
     for (auto rit = vDeposit.crbegin(); rit != vDeposit.crend(); rit++) {
         const SidechainDeposit d = *rit;
@@ -893,6 +880,44 @@ UniValue countsidechaindeposits(const JSONRPCRequest& request)
     count = vDeposit.size();
 
     return count;
+}
+
+UniValue addwithdrawal(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 2)
+        throw std::runtime_error(
+            "addwithdrawal\n"
+            "For testing purposes only! Add withdrawal to SCDB\n"
+            "\nArguments:\n"
+            "1. \"nsidechain\"      (int, required) Sidechain number\n"
+            "2. \"hash\"            (string, required) Bundle hash\n"
+            "\nExamples:\n"
+            + HelpExampleCli("addwithdrawal", "")
+            + HelpExampleRpc("addwithdrawal", "")
+    );
+
+    // Is nSidechain valid?
+    int nSidechain = request.params[0].get_int();
+    if (!scdb.IsSidechainActive(nSidechain)) {
+        std::string strError = "Invalid sidechain number!";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+
+    uint256 hash = uint256S(request.params[1].get_str());
+    if (hash.IsNull()) {
+        std::string strError = "Invalid bundle hash!";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+
+    if (!scdb.AddWithdrawal(nSidechain, hash, true /* fDebug */)) {
+        std::string strError = "Failed to add withdrawal!";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+
+    return NullUniValue;
 }
 
 UniValue receivewithdrawalbundle(const JSONRPCRequest& request)
@@ -1022,25 +1047,34 @@ UniValue receivewithdrawalbundle(const JSONRPCRequest& request)
 
 UniValue verifybmm(const JSONRPCRequest& request)
 {
-    if (request.fHelp || request.params.size() != 2)
+    if (request.fHelp || request.params.size() != 3)
         throw std::runtime_error(
             "verifybmm\n"
             "Check if a mainchain block includes BMM for a sidechain h*\n"
             "\nArguments:\n"
             "1. \"blockhash\"      (string, required) mainchain blockhash with h*\n"
             "2. \"bmmhash\"        (string, required) h* to locate\n"
+            "3. \"nsidechain\"     (number, required) sidechain number\n"
             "\nExamples:\n"
-            + HelpExampleCli("verifybmm", "\"blockhash\", \"bmmhash\"")
-            + HelpExampleRpc("verifybmm", "\"blockhash\", \"bmmhash\"")
+            + HelpExampleCli("verifybmm", "\"blockhash\", \"bmmhash\", \"nsidechain\"")
+            + HelpExampleRpc("verifybmm", "\"blockhash\", \"bmmhash\", \"nsidechain\"")
             );
 
     uint256 hashBlock = uint256S(request.params[0].get_str());
     uint256 hashBMM = uint256S(request.params[1].get_str());
+    int nSidechain = request.params[2].get_int();
+
+    // Is nSidechain valid?
+    if (!scdb.IsSidechainActive(nSidechain)) {
+        std::string strError = "Invalid sidechain number!";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
 
     if (!mapBlockIndex.count(hashBlock)) {
         std::string strError = "Block not found";
         LogPrintf("%s: %s\n", __func__, strError);
-        throw JSONRPCError(RPC_INTERNAL_ERROR, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
     }
 
     CBlockIndex* pblockindex = mapBlockIndex[hashBlock];
@@ -1048,7 +1082,7 @@ UniValue verifybmm(const JSONRPCRequest& request)
     {
         std::string strError = "pblockindex null";
         LogPrintf("%s: %s\n", __func__, strError);
-        throw JSONRPCError(RPC_INTERNAL_ERROR, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
     }
 
     CBlock block;
@@ -1056,13 +1090,13 @@ UniValue verifybmm(const JSONRPCRequest& request)
     {
         std::string strError = "Failed to read block from disk";
         LogPrintf("%s: %s\n", __func__, strError);
-        throw JSONRPCError(RPC_INTERNAL_ERROR, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
     }
 
     if (!block.vtx.size()) {
         std::string strError = "No txns in block";
         LogPrintf("%s: %s\n", __func__, strError);
-        throw JSONRPCError(RPC_INTERNAL_ERROR, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
     }
 
     bool fBMMFound = false;
@@ -1070,30 +1104,38 @@ UniValue verifybmm(const JSONRPCRequest& request)
     for (const CTxOut& out : txCoinbase.vout) {
         const CScript& scriptPubKey = out.scriptPubKey;
 
-        if (scriptPubKey.size() < sizeof(uint256) + 5)
+        uint256 hashCritical = uint256();
+        std::vector<unsigned char> vBytes;
+        if (!scriptPubKey.IsCriticalHashCommit(hashCritical, vBytes))
             continue;
-        if (scriptPubKey[0] != OP_RETURN)
+
+        // Create critical data object and validate BMM
+        CCriticalData data;
+        data.hashCritical = hashCritical;
+        data.vBytes = vBytes;
+
+        uint8_t nSidechainBMM;
+        std::string strPrevBlock = "";
+        if (!data.IsBMMRequest(nSidechainBMM, strPrevBlock))
             continue;
 
-        // TODO add script function to check for commit & return data
+        // Check sidechain number
+        if (nSidechain != nSidechainBMM)
+            continue;
 
-        // Get h*
-        std::vector<unsigned char> vch (scriptPubKey.begin() + 5, scriptPubKey.begin() + 37);
+        // Check prev block bytes
+        if (strPrevBlock != block.hashPrevBlock.ToString().substr(56, 63))
+            continue;
 
-        // TODO return the bytes
-        // Get Bytes
-        if (scriptPubKey.size() > 37) {
-            std::vector<unsigned char> vchBytes(scriptPubKey.begin() + 37, scriptPubKey.end());
-        }
-
-        if (hashBMM == uint256(vch))
+        // Check h*
+        if (hashBMM == data.hashCritical)
             fBMMFound = true;
     }
 
     if (!fBMMFound) {
         std::string strError = "h* not found in block";
         LogPrintf("%s: %s\n", __func__, strError);
-        throw JSONRPCError(RPC_INTERNAL_ERROR, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
     }
 
     UniValue ret(UniValue::VOBJ);
@@ -1233,8 +1275,6 @@ UniValue listactivesidechains(const JSONRPCRequest& request)
         UniValue obj(UniValue::VOBJ);
         obj.push_back(Pair("title", s.title));
         obj.push_back(Pair("description", s.description));
-        obj.push_back(Pair("privatekey", s.strPrivKey));
-        obj.push_back(Pair("keyid", s.strKeyID));
         obj.push_back(Pair("nversion", s.nVersion));
         obj.push_back(Pair("hashid1", s.hashID1.ToString()));
         obj.push_back(Pair("hashid2", s.hashID2.ToString()));
@@ -1265,8 +1305,6 @@ UniValue listsidechainactivationstatus(const JSONRPCRequest& request)
         UniValue obj(UniValue::VOBJ);
         obj.push_back(Pair("title", s.proposal.title));
         obj.push_back(Pair("description", s.proposal.description));
-        obj.push_back(Pair("privatekey", s.proposal.strPrivKey));
-        obj.push_back(Pair("keyid", s.proposal.strKeyID));
         obj.push_back(Pair("nage", s.nAge));
         obj.push_back(Pair("nfail", s.nFail));
 
@@ -1294,8 +1332,6 @@ UniValue listsidechainproposals(const JSONRPCRequest& request)
         UniValue obj(UniValue::VOBJ);
         obj.push_back(Pair("title", s.title));
         obj.push_back(Pair("description", s.description));
-        obj.push_back(Pair("privatekey", s.strPrivKey));
-        obj.push_back(Pair("keyid", s.strKeyID));
         obj.push_back(Pair("nversion", s.nVersion));
         obj.push_back(Pair("hashid1", s.hashID1.ToString()));
         obj.push_back(Pair("hashid2", s.hashID2.ToString()));
@@ -1318,7 +1354,6 @@ UniValue getsidechainactivationstatus(const JSONRPCRequest& request)
             + HelpExampleRpc("getsidechainactivationstatus", "")
             );
 
-    // TODO
     std::vector<SidechainActivationStatus> vStatus;
     vStatus = scdb.GetSidechainActivationStatus();
 
@@ -1327,11 +1362,9 @@ UniValue getsidechainactivationstatus(const JSONRPCRequest& request)
         UniValue obj(UniValue::VOBJ);
         obj.push_back(Pair("title", s.proposal.title));
         obj.push_back(Pair("description", s.proposal.description));
-        obj.push_back(Pair("privatekey", s.proposal.strPrivKey));
-        obj.push_back(Pair("keyid", s.proposal.strKeyID));
         obj.push_back(Pair("nage", s.nAge));
         obj.push_back(Pair("nfail", s.nFail));
-        obj.push_back(Pair("proposalhash", s.proposal.GetHash().ToString()));
+        obj.push_back(Pair("proposalhash", s.proposal.GetSerHash().ToString()));
 
         ret.push_back(obj);
     }
@@ -1341,26 +1374,27 @@ UniValue getsidechainactivationstatus(const JSONRPCRequest& request)
 
 UniValue createsidechainproposal(const JSONRPCRequest& request)
 {
-    if (request.fHelp || request.params.size() < 4 || request.params.size() > 7)
+    if (request.fHelp || request.params.size() < 2 || request.params.size() > 6)
         throw std::runtime_error(
             "createsidechainproposal\n"
             "Generates a sidechain proposal to be included in the next block " \
             "mined by this node.\n"\
             "Note that this will not broadcast the proposal to other nodes. " \
             "You must mine a block which includes your proposal to complete " \
-            "the process. Pending proposals created by this node will " \
-            "automatically be included in the soonest block mined possible.\n"
+            "the process.\n"\
+            "Pending proposals created by this node will automatically be " \
+            "included in the soonest block mined possible.\n"
             "\nArguments:\n"
             "1. \"nsidechain\"   (numeric, required) sidechain slot number\n"
             "2. \"title\"        (string, required) sidechain title\n"
-            "3. \"description\"  (string, required) sidechain description\n"
-            "4. \"keyhash\"      (string, required) any SHA256 hash (used to generate private key)\n"
-            "5. \"version\"      (numeric, optional) sidechain / proposal version\n"
-            "6. \"hashid1\"      (string, optional) 256 bits used to identify sidechain\n"
-            "7. \"hashid2\"      (string, optional) 160 bits used to identify sidechain\n"
+            "3. \"description\"  (string, optional) sidechain description\n"
+            "4. \"version\"      (numeric, optional) sidechain / proposal version\n"
+            "5. \"hashid1\"      (string, optional) 256 bits used to identify sidechain\n"
+            "6. \"hashid2\"      (string, optional) 160 bits used to identify sidechain\n"
             "\nExamples:\n"
-            + HelpExampleCli("createsidechainproposal", "")
-            + HelpExampleRpc("createsidechainproposal", "")
+            + HelpExampleCli("createsidechainproposal", "1 \"Namecoin\" \"Namecoin as a Bitcoin sidechain\" 0 78b140259d5626e17c4bf339c23cb4fa8d16d138f71d9803ec394bb01c051f0b 90869d013db27608c7428251c6755e5a1d9e9313")
+            + "\n"
+            + HelpExampleRpc("createsidechainproposal", "1 \"Namecoin\" \"Namecoin as a Bitcoin sidechain\" 0 78b140259d5626e17c4bf339c23cb4fa8d16d138f71d9803ec394bb01c051f0b 90869d013db27608c7428251c6755e5a1d9e9313")
             );
 
     int nSidechain = request.params[0].get_int();
@@ -1368,22 +1402,24 @@ UniValue createsidechainproposal(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
 
     std::string strTitle = request.params[1].get_str();
-    std::string strDescription = request.params[2].get_str();
-    std::string strHash = request.params[3].get_str();
+
+    std::string strDescription = "";
+    if (!request.params[2].isNull())
+        strDescription = request.params[2].get_str();
 
     int nVersion = -1;
-    if (request.params.size() >= 5)
-        nVersion = request.params[4].get_int();
+    if (!request.params[3].isNull())
+        nVersion = request.params[3].get_int();
 
     std::string strHashID1 = "";
     std::string strHashID2 = "";
-    if (request.params.size() >= 6) {
-        strHashID1 = request.params[5].get_str();
+    if (!request.params[4].isNull()) {
+        strHashID1 = request.params[4].get_str();
         if (strHashID1.size() != 64)
             throw JSONRPCError(RPC_MISC_ERROR, "HashID1 size invalid!");
     }
-    if (request.params.size() == 7) {
-        strHashID2 = request.params[6].get_str();
+    if (!request.params[5].isNull()) {
+        strHashID2 = request.params[5].get_str();
         if (strHashID2.size() != 40)
             throw JSONRPCError(RPC_MISC_ERROR, "HashID2 size invalid!");
     }
@@ -1391,38 +1427,10 @@ UniValue createsidechainproposal(const JSONRPCRequest& request)
     if (strTitle.empty())
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Sidechain must have a title!");
 
-    // TODO maybe we should allow sidechains with no description? Anyways this
-    // isn't a consensus rule right now
-    if (strDescription.empty())
-        throw JSONRPCError(RPC_INTERNAL_ERROR, "Sidechain must have a description!");
-
-    uint256 hash = uint256S(strHash);
-    if (hash.IsNull())
-        throw JSONRPCError(RPC_INTERNAL_ERROR, "Invalid sidechain key hash!");
-
-    CKey key;
-    key.Set(hash.begin(), hash.end(), false);
-    if (!key.IsValid())
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Private key outside allowed range");
-
-    CBitcoinSecret vchSecret(key);
-    if (!vchSecret.IsValid())
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid private key encoding");
-
-    CPubKey pubkey = key.GetPubKey();
-    assert(key.VerifyPubKey(pubkey));
-    CKeyID vchAddress = pubkey.GetID();
-
-    // Generate deposit script
-    CScript sidechainScript = CScript() << OP_DUP << OP_HASH160 << ToByteVector(vchAddress) << OP_EQUALVERIFY << OP_CHECKSIG;
-
     Sidechain proposal;
     proposal.nSidechain = nSidechain;
     proposal.title = strTitle;
     proposal.description = strDescription;
-    proposal.strPrivKey = vchSecret.ToString();
-    proposal.strKeyID = HexStr(vchAddress);
-    proposal.scriptPubKey = sidechainScript;
     if (nVersion >= 0)
         proposal.nVersion = nVersion;
     else
@@ -1436,14 +1444,12 @@ UniValue createsidechainproposal(const JSONRPCRequest& request)
     scdb.CacheSidechainProposals(std::vector<Sidechain>{proposal});
 
     // Cache the hash of the sidechain to ACK it
-    scdb.CacheSidechainHashToAck(proposal.GetHash());
+    scdb.CacheSidechainHashToAck(proposal.GetSerHash());
 
     UniValue obj(UniValue::VOBJ);
-    obj.push_back(Pair("nSidechain", proposal.nVersion));
+    obj.push_back(Pair("nSidechain", proposal.nSidechain));
     obj.push_back(Pair("title", proposal.title));
     obj.push_back(Pair("description", proposal.description));
-    obj.push_back(Pair("privatekey", proposal.strPrivKey));
-    obj.push_back(Pair("keyid", proposal.strKeyID));
     obj.push_back(Pair("version", proposal.nVersion));
     obj.push_back(Pair("hashID1", proposal.hashID1.ToString()));
     obj.push_back(Pair("hashID2", proposal.hashID2.ToString()));
@@ -1453,14 +1459,14 @@ UniValue createsidechainproposal(const JSONRPCRequest& request)
 
 UniValue setwithdrawalvote(const JSONRPCRequest& request)
 {
-    if (request.fHelp || request.params.size() != 3)
+    if (request.fHelp || request.params.size() < 2 || request.params.size() > 3)
         throw std::runtime_error(
             "setwithdrawalvote\n"
             "Set custom vote for sidechain Withdrawal.\n"
             "\nArguments:\n"
-            "1. vote (\"upvote\"/\"downvote\"/\"abstain\")  (string, required) vote\n"
+            "1. vote (\"upvote\"/\"downvote\"/\"abstain\")  (string, required) Vote\n"
             "2. nsidechain                            (numeric, required) Sidechain number of Withdrawal\n"
-            "3. hash                                  (string, required) Hash of the withdrawal\n"
+            "3. hash                                  (string, optional) Hash of the withdrawal\n"
             "\nExamples:\n"
             + HelpExampleCli("setwithdrawalvote", "")
             + HelpExampleRpc("setwithdrawalvote", "")
@@ -1476,33 +1482,34 @@ UniValue setwithdrawalvote(const JSONRPCRequest& request)
     if (!scdb.IsSidechainActive(nSidechain))
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Sidechain number");
 
-    std::string strHash = request.params[2].get_str();
-    if (strHash.size() != 64)
-        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Withdrawal hash length");
+    if (strVote == "upvote" && request.params.size() != 3)
+        throw JSONRPCError(RPC_TYPE_ERROR, "Withdrawal hash required for upvote");
+
+    std::string strHash = "";
+    if (request.params.size() == 3) {
+        strHash = request.params[2].get_str();
+        if (strHash.size() != 64)
+            throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Withdrawal hash length");
+    }
 
     uint256 hash = uint256S(strHash);
-    if (hash.IsNull())
+    if (request.params.size() == 3 && hash.IsNull())
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Withdrawal hash");
 
-    SidechainCustomVote vote;
-    vote.nSidechain = nSidechain;
-    vote.hash = hash;
+    // Get current votes
+    std::vector<std::string> vVote = scdb.GetVotes();
 
-    if (strVote == "upvote") {
-        vote.vote = SCDB_UPVOTE;
-    }
+    if (strVote == "upvote")
+        vVote[nSidechain] = strHash;
     else
-    if (strVote == "downvote") {
-        vote.vote = SCDB_DOWNVOTE;
-    }
+    if (strVote == "downvote")
+        vVote[nSidechain] = SCDB_DOWNVOTE;
     else
-    if (strVote == "abstain") {
-        vote.vote = SCDB_ABSTAIN;
-    }
+    if (strVote == "abstain")
+        vVote[nSidechain] = SCDB_ABSTAIN;
 
-    // TODO improve error message
-    if (!scdb.CacheCustomVotes(std::vector<SidechainCustomVote> {vote}))
-        throw JSONRPCError(RPC_MISC_ERROR, "Failed to cache Withdrawal vote!");
+    if (!scdb.CacheCustomVotes(vVote))
+        throw JSONRPCError(RPC_MISC_ERROR, "Failed to cache withdrawal votes!");
 
     return NullUniValue;
 }
@@ -1534,28 +1541,23 @@ UniValue listwithdrawalvotes(const JSONRPCRequest& request)
             + HelpExampleRpc("listwithdrawalvotes", "")
             );
 
-    std::vector<SidechainCustomVote> vCustomVote = scdb.GetCustomVoteCache();
-
     UniValue ret(UniValue::VARR);
 
-    for (const SidechainCustomVote& v : vCustomVote) {
+    std::vector<std::string> vVote = scdb.GetVotes();
+    for (uint8_t i = 0; i < vVote.size(); i++) {
         std::string strVote = "";
-        if (v.vote == SCDB_UPVOTE) {
-            strVote = "upvote";
-        }
+        if (vVote[i].size() == 64)
+            strVote = vVote[i];
         else
-        if (v.vote == SCDB_DOWNVOTE) {
-            strVote = "downvote";
-        }
+        if (vVote[i].front() == SCDB_DOWNVOTE)
+            strVote = "Downvote";
         else
-        if (v.vote == SCDB_ABSTAIN) {
-            strVote = "abstain";
-        }
+        if (vVote[i].front() == SCDB_ABSTAIN)
+            strVote = "Abstain";
 
         UniValue obj(UniValue::VOBJ);
-        obj.push_back(Pair("nSidechain", v.nSidechain));
+        obj.push_back(Pair("nSidechain", i));
         obj.push_back(Pair("vote", strVote));
-        obj.push_back(Pair("hash", v.hash.ToString()));
         ret.push_back(obj);
     }
 
@@ -1705,8 +1707,6 @@ UniValue listwithdrawalstatus(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Sidechain number");
 
     std::vector<SidechainWithdrawalState> vState = scdb.GetState(nSidechain);
-    if (vState.empty())
-        throw JSONRPCError(RPC_TYPE_ERROR, "No Withdrawal(s) in SCDB for sidechain");
 
     UniValue ret(UniValue::VARR);
     for (const SidechainWithdrawalState& s : vState) {
@@ -1745,14 +1745,19 @@ UniValue listcachedwithdrawaltx(const JSONRPCRequest& request)
     if (!scdb.IsSidechainActive(nSidechain))
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Sidechain number");
 
-    std::vector<SidechainWithdrawalState> vState = scdb.GetState(nSidechain);
-    if (vState.empty())
-        throw JSONRPCError(RPC_TYPE_ERROR, "No Withdrawal(s) in SCDB for sidechain");
+    std::vector<std::pair<uint8_t, CMutableTransaction>> vWithdrawal;
+    vWithdrawal = scdb.GetWithdrawalTxCache();
+
+    if (vWithdrawal.empty())
+        throw JSONRPCError(RPC_TYPE_ERROR, "No withdrawal bundle txns cached for sidechain");
 
     UniValue ret(UniValue::VARR);
-    for (const SidechainWithdrawalState& s : vState) {
+    for (auto const& i : vWithdrawal) {
+        if (i.first != nSidechain)
+            continue;
+
         UniValue obj(UniValue::VOBJ);
-        obj.push_back(Pair("hash", s.hash.ToString()));
+        obj.push_back(Pair("hash", i.second.GetHash().ToString()));
 
         ret.push_back(obj);
     }
@@ -1836,8 +1841,6 @@ UniValue listspentwithdrawals(const JSONRPCRequest& request)
             );
 
     std::vector<SidechainSpentWithdrawal> vSpent = scdb.GetSpentWithdrawalCache();
-    if (vSpent.empty())
-        throw JSONRPCError(RPC_TYPE_ERROR, "No spent Withdrawal(s) in cache!");
 
     UniValue ret(UniValue::VARR);
     for (const SidechainSpentWithdrawal& s : vSpent) {
@@ -1870,8 +1873,6 @@ UniValue listfailedwithdrawals(const JSONRPCRequest& request)
             );
 
     std::vector<SidechainFailedWithdrawal> vFailed = scdb.GetFailedWithdrawalCache();
-    if (vFailed.empty())
-        throw JSONRPCError(RPC_TYPE_ERROR, "No failed Withdrawal(s) in cache!");
 
     UniValue ret(UniValue::VARR);
     for (const SidechainFailedWithdrawal& f : vFailed) {
@@ -1886,20 +1887,6 @@ UniValue listfailedwithdrawals(const JSONRPCRequest& request)
     return ret;
 }
 
-UniValue getscdbhash(const JSONRPCRequest& request)
-{
-    if (request.fHelp || request.params.size())
-        throw std::runtime_error(
-            "getscdbhash\n"
-            "Get SCDB hash.\n"
-            );
-
-    UniValue ret(UniValue::VOBJ);
-    ret.push_back(Pair("hashscdb", scdb.GetSCDBHash().ToString()));
-
-    return ret;
-}
-
 UniValue gettotalscdbhash(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size())
@@ -1909,7 +1896,7 @@ UniValue gettotalscdbhash(const JSONRPCRequest& request)
             );
 
     UniValue ret(UniValue::VOBJ);
-    ret.push_back(Pair("hashscdbtotal", scdb.GetTotalSCDBHash().ToString()));
+    ret.push_back(Pair("hashscdbtotal", scdb.GetTestHash().ToString()));
 
     return ret;
 }
@@ -1959,7 +1946,6 @@ UniValue getscdbdataforblock(const JSONRPCRequest& request)
 
     UniValue ret(UniValue::VARR);
     UniValue obj(UniValue::VOBJ);
-    obj.push_back(Pair("nsidechains", (uint64_t)data.vWithdrawalStatus.size()));
     ret.push_back(obj);
     for (auto& x : data.vWithdrawalStatus) {
         for (auto& y : x) {
@@ -1967,7 +1953,7 @@ UniValue getscdbdataforblock(const JSONRPCRequest& request)
             obj.push_back(Pair("nsidechain", y.nSidechain));
             obj.push_back(Pair("nblocksleft", y.nBlocksLeft));
             obj.push_back(Pair("nworkscore", y.nWorkScore));
-            obj.push_back(Pair("hash", y.hash.ToString()));
+            obj.push_back(Pair("withdrawalbundle", y.hash.ToString()));
             ret.push_back(obj);
         }
     }
@@ -2064,6 +2050,26 @@ UniValue getopreturndata(const JSONRPCRequest& request)
     return ret;
 }
 
+UniValue getactivesidechaincount(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size())
+        throw std::runtime_error(
+            "getactivesidechaincount\n"
+            "Count number of active sidechains.\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"count\"   : (number) number of active sidechains\n"
+            "}\n"
+            "\n"
+            "\nExample:\n"
+            + HelpExampleCli("getactivesidechaincount", "")
+            );
+
+    int count = scdb.GetActiveSidechainCount();
+
+    return count;
+}
+
 UniValue echo(const JSONRPCRequest& request)
 {
     if (request.fHelp)
@@ -2105,36 +2111,36 @@ static const CRPCCommand commands[] =
     { "hidden",             "echojson",               &echo,                   {"arg0","arg1","arg2","arg3","arg4","arg5","arg6","arg7","arg8","arg9"}},
     { "hidden",             "getinfo",                &getinfo_deprecated,     {}},
 
-    // TODO improve & shorten name. Sort alphabetically
-    /* DriveChain rpc commands (mainly used by sidechains) */
-    { "DriveChain",  "createcriticaldatatx",          &createcriticaldatatx,            {"amount", "height", "criticalhash"}},
-    { "DriveChain",  "listsidechainctip",             &listsidechainctip,               {"nsidechain"}},
-    { "DriveChain",  "listsidechaindeposits",         &listsidechaindeposits,           {"addressbytes"}},
-    { "DriveChain",  "countsidechaindeposits",        &countsidechaindeposits,          {"nsidechain"}},
-    { "DriveChain",  "receivewithdrawalbundle",       &receivewithdrawalbundle,         {"nsidechain","rawtx"}},
-    { "DriveChain",  "verifybmm",                     &verifybmm,                       {"blockhash", "bmmhash"}},
-    { "DriveChain",  "verifydeposit",                 &verifydeposit,                   {"blockhash", "txid", "ntx"}},
-    { "DriveChain",  "listpreviousblockhashes",       &listpreviousblockhashes,         {}},
-    { "DriveChain",  "listactivesidechains",          &listactivesidechains,            {}},
-    { "DriveChain",  "listsidechainactivationstatus", &listsidechainactivationstatus,   {}},
-    { "DriveChain",  "listsidechainproposals",        &listsidechainproposals,          {}},
-    { "DriveChain",  "getsidechainactivationstatus",  &getsidechainactivationstatus,    {}},
-    { "DriveChain",  "createsidechainproposal",       &createsidechainproposal,         {"nsidechain", "title", "description", "keyhash", "nversion", "hashid1", "hashid2"}},
-    { "DriveChain",  "clearwithdrawalvotes",          &clearwithdrawalvotes,            {}},
-    { "DriveChain",  "setwithdrawalvote",             &setwithdrawalvote,               {"vote", "nsidechain", "hashwithdrawal"}},
-    { "DriveChain",  "listwithdrawalvotes",           &listwithdrawalvotes,             {}},
-    { "DriveChain",  "getaveragefee",                 &getaveragefee,                   {"numblocks", "startheight"}},
-    { "DriveChain",  "getworkscore",                  &getworkscore,                    {"nsidechain", "hashwithdrawal"}},
-    { "DriveChain",  "havespentwithdrawal",           &havespentwithdrawal,             {"hashwithdrawal", "nsidechain"}},
-    { "DriveChain",  "havefailedwithdrawal",          &havefailedwithdrawal,            {"hashwithdrawal", "nsidechain"}},
-    { "DriveChain",  "listcachedwithdrawaltx",        &listcachedwithdrawaltx,          {"nsidechain"}},
-    { "DriveChain",  "listwithdrawalstatus",          &listwithdrawalstatus,            {"nsidechain"}},
-    { "DriveChain",  "listspentwithdrawals",          &listspentwithdrawals,            {}},
-    { "DriveChain",  "listfailedwithdrawals",         &listfailedwithdrawals,           {}},
-    { "DriveChain",  "getscdbhash",                   &getscdbhash,                     {}},
-    { "DriveChain",  "gettotalscdbhash",              &gettotalscdbhash,                {}},
-    { "DriveChain",  "getscdbdataforblock",           &getscdbdataforblock,             {"blockhash"}},
-    { "DriveChain",  "listfailedbmm",                 &listfailedbmm,                   {}},
+    /* Drivechain rpc commands for the user and sidechains */
+    { "Drivechain",  "addwithdrawal",                 &addwithdrawal,                   {"nsidechain", "hash"}},
+    { "Drivechain",  "createcriticaldatatx",          &createcriticaldatatx,            {"amount", "height", "criticalhash"}},
+    { "Drivechain",  "listsidechainctip",             &listsidechainctip,               {"nsidechain"}},
+    { "Drivechain",  "listsidechaindeposits",         &listsidechaindeposits,           {"nsidechain"}},
+    { "Drivechain",  "countsidechaindeposits",        &countsidechaindeposits,          {"nsidechain"}},
+    { "Drivechain",  "receivewithdrawalbundle",       &receivewithdrawalbundle,         {"nsidechain","rawtx"}},
+    { "Drivechain",  "verifybmm",                     &verifybmm,                       {"blockhash", "bmmhash", "nsidechain"}},
+    { "Drivechain",  "verifydeposit",                 &verifydeposit,                   {"blockhash", "txid", "ntx"}},
+    { "Drivechain",  "listpreviousblockhashes",       &listpreviousblockhashes,         {}},
+    { "Drivechain",  "listactivesidechains",          &listactivesidechains,            {}},
+    { "Drivechain",  "listsidechainactivationstatus", &listsidechainactivationstatus,   {}},
+    { "Drivechain",  "listsidechainproposals",        &listsidechainproposals,          {}},
+    { "Drivechain",  "getsidechainactivationstatus",  &getsidechainactivationstatus,    {}},
+    { "Drivechain",  "createsidechainproposal",       &createsidechainproposal,         {"nsidechain", "title", "description", "keyhash", "nversion", "hashid1", "hashid2"}},
+    { "Drivechain",  "clearwithdrawalvotes",          &clearwithdrawalvotes,            {}},
+    { "Drivechain",  "setwithdrawalvote",             &setwithdrawalvote,               {"vote", "nsidechain", "hashwithdrawal"}},
+    { "Drivechain",  "listwithdrawalvotes",           &listwithdrawalvotes,             {}},
+    { "Drivechain",  "getaveragefee",                 &getaveragefee,                   {"numblocks", "startheight"}},
+    { "Drivechain",  "getworkscore",                  &getworkscore,                    {"nsidechain", "hashwithdrawal"}},
+    { "Drivechain",  "havespentwithdrawal",           &havespentwithdrawal,             {"hashwithdrawal", "nsidechain"}},
+    { "Drivechain",  "havefailedwithdrawal",          &havefailedwithdrawal,            {"hashwithdrawal", "nsidechain"}},
+    { "Drivechain",  "listcachedwithdrawaltx",        &listcachedwithdrawaltx,          {"nsidechain"}},
+    { "Drivechain",  "listwithdrawalstatus",          &listwithdrawalstatus,            {"nsidechain"}},
+    { "Drivechain",  "listspentwithdrawals",          &listspentwithdrawals,            {}},
+    { "Drivechain",  "listfailedwithdrawals",         &listfailedwithdrawals,           {}},
+    { "Drivechain",  "gettotalscdbhash",              &gettotalscdbhash,                {}},
+    { "Drivechain",  "getscdbdataforblock",           &getscdbdataforblock,             {"blockhash"}},
+    { "Drivechain",  "listfailedbmm",                 &listfailedbmm,                   {}},
+    { "Drivechain",  "getactivesidechaincount",       &getactivesidechaincount,         {}},
 
     /* Coin News RPC */
     { "CoinNews",    "getopreturndata",               &getopreturndata,                 {"blockhash"}},

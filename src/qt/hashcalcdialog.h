@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Bitcoin Core developers
+// Copyright (c) 2020-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -22,6 +22,9 @@ public:
     ~HashCalcDialog();
 
 public Q_SLOTS:
+
+    // Basic
+
     void on_plainTextEdit_textChanged();
 
     void on_pushButtonClear_clicked();
@@ -31,6 +34,15 @@ public Q_SLOTS:
     void on_radioButtonHex_toggled(bool fChecked);
     void on_pushButtonFlip_clicked();
 
+    // HMAC
+
+    void on_plainTextEditHMAC_textChanged();
+    void on_lineEditHMACKey_textChanged(QString);
+    void on_pushButtonClearHMAC_clicked();
+    void on_pushButtonHelpHMAC_clicked();
+    void on_pushButtonHelpInvalidHexHMAC_clicked();
+    void on_radioButtonHexHMAC_toggled(bool fChecked);
+
 private:
     Ui::HashCalcDialog *ui;
 
@@ -39,6 +51,14 @@ private:
     void ShowInvalidHexWarning(bool fShow);
     void ClearOutput();
     void UpdateOutput();
+
+    void ShowInvalidHexWarningHMAC(bool fShow);
+    void ClearOutputHMAC();
+    void UpdateOutputHMAC();
 };
+
+std::string HexToBinStr(const std::string strHex);
+std::string BinToHexStr(const std::string strBin);
+
 
 #endif // HASHCALCDIALOG_H

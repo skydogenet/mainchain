@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Bitcoin Core developers
+// Copyright (c) 2020-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -11,6 +11,7 @@
 
 #include <base58.h>
 #include <core_io.h>
+#include <crypto/sha256.h>
 #include <key.h>
 #include <sidechain.h>
 #include <sidechaindb.h>
@@ -25,10 +26,7 @@ SidechainProposalDialog::SidechainProposalDialog(const PlatformStyle *_platformS
 {
     ui->setupUi(this);
 
-    ui->toolButtonKeyHash->setIcon(platformStyle->SingleColorIcon(":/icons/transaction_0"));
-    ui->toolButtonSoftwareHashes->setIcon(platformStyle->SingleColorIcon(":/icons/transaction_0"));
-    ui->toolButtonIDHash1->setIcon(platformStyle->SingleColorIcon(":/icons/transaction_0"));
-    ui->toolButtonIDHash2->setIcon(platformStyle->SingleColorIcon(":/icons/transaction_0"));
+    ui->toolButtonHelp->setIcon(platformStyle->SingleColorIcon(":/icons/transaction_0"));
     ui->pushButtonCreate->setIcon(platformStyle->SingleColorIcon(":/icons/transaction_confirmed"));
 }
 
@@ -36,8 +34,8 @@ SidechainProposalDialog::~SidechainProposalDialog()
 {
     delete ui;
 }
-
-void SidechainProposalDialog::on_toolButtonKeyHash_clicked()
+// old DC
+void SidechainProposalDialogOLD::on_toolButtonHelp_clicked()
 {
     // TODO move text into static const
     QMessageBox::information(this, tr("Skydoge - information"),
@@ -78,11 +76,26 @@ void SidechainProposalDialog::on_toolButtonIDHash2_clicked()
     // TODO display message based on current selected version
     // TODO move text into static const
     QMessageBox::information(this, tr("Skydoge - information"),
-        tr("Build commit hash (160 bits):\n\n"
+// old DC
+//        tr("Build commit hash (160 bits):\n\n"
+        tr("These fields are optional but highly recommended.\n\n"
+           "Description:\n"
+           "Brief description of the sidechain's purpose and where to find more information.\n\n"
+           "Release tarball hash:\n"
+           "hash of the original gitian software build of this sidechain.\n"
+           "Use the sha256sum utility to generate this hash, or copy the hash "
+           "when it is printed to the console after gitian builds complete.\n\n"
+           "Example:\n"
+           "sha256sum Drivechain-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
+           "Result:\n"
+           "fd9637e427f1e967cc658bfe1a836d537346ce3a6dd0746878129bb5bc646680  Drivechain-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
+           "Build commit hash (160 bits):\n"
            "If the software was developed using git, the build commit hash "
-           "should match the commit hash of the first sidechain release.\n\n"
+           "should match the commit hash of the first sidechain release.\n"
            "To verify it later, you can look up this commit in the repository "
-           "history."),
+           "history.\n\n"
+           "These help users find the sidechain full node software. "
+           "Only this software can filter out invalid withdrawals."),
         QMessageBox::Ok);
 }
 
@@ -94,18 +107,15 @@ void SidechainProposalDialog::on_toolButtonSoftwareHashes_clicked()
         tr("These help users find the sidechain node software. "
            "Only this software can filter out invalid withdrawals. \n\n"
            "These fields are optional but highly recommended."),
-        QMessageBox::Ok);
-}
 
 void SidechainProposalDialog::on_pushButtonCreate_clicked()
 {
     std::string strTitle = ui->lineEditTitle->text().toStdString();
     std::string strDescription = ui->plainTextEditDescription->toPlainText().toStdString();
-    std::string strHash = ui->lineEditHash->text().toStdString();
     std::string strHashID1 = ui->lineEditIDHash1->text().toStdString();
     std::string strHashID2 = ui->lineEditIDHash2->text().toStdString();
     int nVersion = ui->spinBoxVersion->value();
-    int nSidechain = ui->spinBoxNSidechain->value();
+    int nSidechain = ui->lineEditNumber->text().toInt();
 
     if (nSidechain < 0 || nSidechain > 255) {
         QMessageBox::critical(this, tr("Skydoge - error"),
@@ -137,6 +147,9 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
         return;
     }
 
+if (nHeight < DrivechainHeight) {
+
+
     // TODO maybe we should allow sidechains with no description? Anyways this
     // isn't a consensus rule right now
     if (strDescription.empty()) {
@@ -145,13 +158,16 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
             QMessageBox::Ok);
         return;
     }
-
+}
     if (nVersion > SIDECHAIN_VERSION_MAX) {
         QMessageBox::critical(this, tr("Skydoge - error"),
             tr("This sidechain has an invalid version number (too high)!"),
             QMessageBox::Ok);
         return;
     }
+
+if (nHeight < DrivechainHeight) {
+
 
     uint256 uHash = uint256S(strHash);
     if (uHash.IsNull()) {
@@ -160,9 +176,16 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
             QMessageBox::Ok);
         return;
     }
+}
+    const uint8_t nSC = nSidechain;
+    const unsigned char vchSC[1] = { nSC };
+
+    std::vector<unsigned char> vch256;
+    vch256.resize(CSHA256::OUTPUT_SIZE);
+    CSHA256().Write(&vchSC[0], 1).Finalize(&vch256[0]);
 
     CKey key;
-    key.Set(uHash.begin(), uHash.end(), false);
+    key.Set(vch256.begin(), vch256.end(), false);
 
     CBitcoinSecret vchSecret(key);
 
@@ -175,7 +198,12 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
     }
 
     CPubKey pubkey = key.GetPubKey();
-    assert(key.VerifyPubKey(pubkey));
+    if (!key.VerifyPubKey(pubkey)) {
+        QMessageBox::critical(this, tr("Drivechain - error"),
+            tr("Failed to verify pubkey!"),
+            QMessageBox::Ok);
+        return;
+    }
     CKeyID vchAddress = pubkey.GetID();
 
     if (!strHashID1.empty() && strHashID1.size() != 64) {
@@ -191,16 +219,13 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
         return;
     }
 
-    // Generate script hex
+    // Generate deposit script
     CScript sidechainScript = CScript() << OP_DUP << OP_HASH160 << ToByteVector(vchAddress) << OP_EQUALVERIFY << OP_CHECKSIG;
 
     Sidechain proposal;
     proposal.nSidechain = nSidechain;
     proposal.title = strTitle;
     proposal.description = strDescription;
-    proposal.strPrivKey = vchSecret.ToString();
-    proposal.strKeyID = HexStr(vchAddress);
-    proposal.scriptPubKey = sidechainScript;
     if (!strHashID1.empty())
         proposal.hashID1 = uint256S(strHashID1);
     if (!strHashID1.empty())
@@ -211,17 +236,13 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
     scdb.CacheSidechainProposals(std::vector<Sidechain>{proposal});
 
     // Cache sidechain hash to ACK it
-    scdb.CacheSidechainHashToAck(proposal.GetHash());
+    scdb.CacheSidechainHashToAck(proposal.GetSerHash());
 
     QString message = QString("Sidechain proposal created!\n\n");
     message += QString("Sidechain Number:\n%1\n\n").arg(nSidechain);
     message += QString("Version:\n%1\n\n").arg(nVersion);
     message += QString("Title:\n%1\n\n").arg(QString::fromStdString(strTitle));
     message += QString("Description:\n%1\n\n").arg(QString::fromStdString(strDescription));
-    message += QString("Private key:\n%1\n\n").arg(QString::fromStdString(proposal.strPrivKey));
-    message += QString("KeyID:\n%1\n\n").arg(QString::fromStdString(proposal.strKeyID));
-    message += QString("Deposit script asm:\n%1\n\n").arg(QString::fromStdString(ScriptToAsmStr(proposal.scriptPubKey)));
-
     if (!strHashID1.empty())
         message += QString("Hash ID 1:\n%1\n\n").arg(QString::fromStdString(strHashID1));
     if (!strHashID2.empty())
@@ -238,7 +259,6 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
 
     ui->lineEditTitle->clear();
     ui->plainTextEditDescription->clear();
-    ui->lineEditHash->clear();
     ui->lineEditIDHash1->clear();
     ui->lineEditIDHash2->clear();
     ui->spinBoxVersion->setValue(0);

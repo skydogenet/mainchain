@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -24,9 +24,9 @@
 
 CTxMemPoolEntry::CTxMemPoolEntry(const CTransactionRef& _tx, const CAmount& _nFee,
                                  int64_t _nTime, unsigned int _entryHeight,
-                                 bool _spendsCoinbase, bool _spendsCriticalData, bool _fSidechainDeposit, uint8_t _nSidechain, int64_t _sigOpsCost, LockPoints lp):
+                                 bool _spendsCoinbase, bool _fSidechainDeposit, uint8_t _nSidechain, int64_t _sigOpsCost, LockPoints lp):
     tx(_tx), nFee(_nFee), nTime(_nTime), entryHeight(_entryHeight),
-    spendsCoinbase(_spendsCoinbase), spendsCriticalData(_spendsCriticalData), fSidechainDeposit(_fSidechainDeposit), nSidechain(_nSidechain), sigOpCost(_sigOpsCost), lockPoints(lp)
+    spendsCoinbase(_spendsCoinbase), fSidechainDeposit(_fSidechainDeposit), nSidechain(_nSidechain), sigOpCost(_sigOpsCost), lockPoints(lp)
 {
     nTxWeight = GetTransactionWeight(*tx);
     nUsageSize = RecursiveDynamicUsage(tx);
@@ -485,14 +485,6 @@ void CTxMemPool::CalculateDescendants(txiter entryit, setEntries &setDescendants
     }
 }
 
-void CTxMemPool::removeIfExists(const txiter& it)
-{
-    LOCK(cs);
-
-    if (mapTx.count(it->GetTx().GetHash()))
-        removeRecursive(it->GetTx());
-}
-
 void CTxMemPool::removeRecursive(const CTransaction &origTx, MemPoolRemovalReason reason)
 {
     // Remove transaction from memory pool
@@ -534,7 +526,9 @@ void CTxMemPool::removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMem
         const CTransaction& tx = it->GetTx();
         LockPoints lp = it->GetLockPoints();
         bool validLP =  TestLockPointValidity(&lp);
-        bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+        if (nHeight < DrivechainHeight) {
+            bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+        }
         if (!CheckFinalTx(tx, flags) || !CheckSequenceLocks(tx, flags, &lp, validLP)) {
             // Note if CheckSequenceLocks fails the LockPoints may still be invalid
             // So it's critical that we remove the tx and not depend on the LockPoints.
@@ -551,17 +545,19 @@ void CTxMemPool::removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMem
                     break;
                 }
             }
-        } else if (skydogesEnabled && it->GetSpendsCriticalData()) {
-            for (const CTxIn& txin : tx.vin) {
-                indexed_transaction_set::const_iterator it2 = mapTx.find(txin.prevout.hash);
-                if (it2 != mapTx.end())
-                    continue;
-                const Coin &coin = pcoins->AccessCoin(txin.prevout);
-                if (nCheckFrequency != 0) assert(!coin.IsSpent());
-                if (coin.IsSpent() /* || (coin.IsCriticalData() && ((signed long)nMemPoolHeight) - coin.nHeight < CRITICAL_DATA_MATURITY)*/) {
-                    txToRemove.insert(it);
-                    break;
-                }
+        } else if (nHeight < DrivechainHeight) {
+                   if (skydogesEnabled && it->GetSpendsCriticalData()) {
+                       for (const CTxIn& txin : tx.vin) {
+                           indexed_transaction_set::const_iterator it2 = mapTx.find(txin.prevout.hash);
+                           if (it2 != mapTx.end())
+                           continue;
+                           const Coin &coin = pcoins->AccessCoin(txin.prevout);
+                           if (nCheckFrequency != 0) assert(!coin.IsSpent());
+                           if (coin.IsSpent() /* || (coin.IsCriticalData() && ((signed long)nMemPoolHeight) - coin.nHeight < CRITICAL_DATA_MATURITY)*/) {
+                           txToRemove.insert(it);
+                           break;
+                      }
+                  }
             }
         }
         if (!validLP) {
@@ -985,11 +981,7 @@ bool CCoinsViewMemPool::GetCoin(const COutPoint &outpoint, Coin &coin) const {
     CTransactionRef ptx = mempool.get(outpoint.hash);
     if (ptx) {
         if (outpoint.n < ptx->vout.size()) {
-            if (ptx->criticalData.IsNull()) {
-                coin = Coin(ptx->vout[outpoint.n], MEMPOOL_HEIGHT, false, false, false);
-            } else {
-                coin = Coin(ptx->vout[outpoint.n], MEMPOOL_HEIGHT, false, true /* fCriticalData */, false);
-            }
+            coin = Coin(ptx->vout[outpoint.n], MEMPOOL_HEIGHT, false);
             return true;
         } else {
             return false;
@@ -1076,23 +1068,21 @@ const CTxMemPool::setEntries & CTxMemPool::GetMemPoolChildren(txiter entry) cons
 
 void CTxMemPool::RemoveExpiredCriticalRequests(std::vector<uint256>& vHashRemoved)
 {
-    setEntries txToRemove;
-    {
-        LOCK(cs);
+    LOCK(cs);
 
-        for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
-            if (!it->GetTx().criticalData.IsNull()) {
-                if (chainActive.Height() + 1 != (int64_t)it->GetTx().nLockTime + 1) {
-                    txToRemove.insert(it);
-                    vHashRemoved.push_back(it->GetTx().GetHash());
-                }
+    std::vector<CTransaction> vTxRemove;
+    for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
+        if (!it->GetTx().criticalData.IsNull()) {
+            if (chainActive.Height() + 1 != (int64_t)it->GetTx().nLockTime + 1) {
+                vHashRemoved.push_back(it->GetTx().GetHash());
+                vTxRemove.push_back(it->GetTx());
             }
         }
-    } // end lock
+    }
 
-    for (const txiter& it : txToRemove) {
-        vHashRemoved.push_back(it->GetTx().GetHash());
-        removeIfExists(it);
+    for (const CTransaction& tx : vTxRemove) {
+        vHashRemoved.push_back(tx.GetHash());
+        removeRecursive(tx);
     }
 }
 
@@ -1104,50 +1094,48 @@ void CTxMemPool::SelectBMMRequests(std::vector<uint256>& vHashRemoved)
     // such as minimum payment amount, filter by sidechain, etc.
     //
 
-    setEntries txToRemove;
-    {
-        LOCK(cs);
+    LOCK(cs);
 
-        // We only want 1 BMM request per sidechain, so we have a vector that t
-        // racks whether we've already found one for a given sidechain
-        std::vector<bool> vSidechain;
-        vSidechain.resize(scdb.GetActiveSidechainCount());
+    // We only want 1 BMM request per sidechain so track whether we've
+    // already found one for a given sidechain
+    std::vector<bool> vSidechain;
+    vSidechain.resize(SIDECHAIN_ACTIVATION_MAX_ACTIVE);
 
-        for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
-            if (!it->GetTx().criticalData.IsNull()) {
-                uint8_t nSidechain;
-                std::string strPrevBlock = "";
-                if (it->GetTx().criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
-                    if (!scdb.IsSidechainActive(nSidechain)) {
-                        // A BMM request for an invalid sidechain shouldn't be
-                        // accepted, but a sidechain can be deactivated so if we
-                        // have BMM requests for a sidechain that doesn't exist
-                        // we should clear them out
-                            txToRemove.insert(it);
-                        continue;
-                    }
+    std::vector<CTransaction> vTxRemove;
+    for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
+        if (!it->GetTx().criticalData.IsNull()) {
+            uint8_t nSidechain;
+            std::string strPrevBlock = "";
+            if (it->GetTx().criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
+                if (!scdb.IsSidechainActive(nSidechain)) {
+                    // A BMM request for an invalid sidechain shouldn't be
+                    // accepted, but a sidechain can be deactivated so if we
+                    // have BMM requests for a sidechain that doesn't exist
+                    // we should clear them out
+                    vTxRemove.push_back(it->GetTx());
+                    continue;
+                }
 
-                    if (nSidechain > vSidechain.size()) {
-                        txToRemove.insert(it);
-                        continue;
-                    }
+                if (nSidechain >= vSidechain.size()) {
+                    vTxRemove.push_back(it->GetTx());
+                    continue;
+                }
 
-                    if (vSidechain[nSidechain] == false) {
-                        // Track that we have found a BMM request for this sidechain
-                        vSidechain[nSidechain] = true;
-                    } else {
-                        // We already have a BMM request selected for this sidechain
-                        // so remove any extras
-                        txToRemove.insert(it);
-                    }
+                if (vSidechain[nSidechain] == false) {
+                    // Track that we have found a BMM request for this sidechain
+                    vSidechain[nSidechain] = true;
+                } else {
+                    // We already have a BMM request selected for this sidechain
+                    // so remove any extras
+                    vTxRemove.push_back(it->GetTx());
                 }
             }
         }
-    } // end lock
+    }
 
-    for (const txiter& it : txToRemove) {
-        vHashRemoved.push_back(it->GetTx().GetHash());
-        removeIfExists(it);
+    for (const CTransaction& tx : vTxRemove) {
+        vHashRemoved.push_back(tx.GetHash());
+        removeRecursive(tx);
     }
 }
 
@@ -1182,14 +1170,14 @@ void CTxMemPool::UpdateCTIPFromBlock(const std::map<uint8_t, SidechainCTIP>& map
     std::vector<Sidechain> vSidechain = scdb.GetActiveSidechains();
     if (mapActiveSidechain.empty()) {
         for (const Sidechain& s : vSidechain)
-            mapActiveSidechain[s.nSidechain] = s.GetHash();
+            mapActiveSidechain[s.nSidechain] = s.GetSerHash();
     }
 
     // Check if any sidechains have changed since we last updated our cache
     for (const Sidechain& s : vSidechain) {
-        if (mapActiveSidechain.count(s.nSidechain) && mapActiveSidechain[s.nSidechain] != s.GetHash()) {
+        if (mapActiveSidechain.count(s.nSidechain) && mapActiveSidechain[s.nSidechain] != s.GetSerHash()) {
             // Cache updated sidechain hash
-            mapActiveSidechain[s.nSidechain] = s.GetHash();
+            mapActiveSidechain[s.nSidechain] = s.GetSerHash();
 
             // If the sidechain has changed, remove old deposits from mempool
             auto itRem = mapLastSidechainDeposit.find(s.nSidechain);
@@ -1274,23 +1262,21 @@ bool CTxMemPool::GetMemPoolCTIP(uint8_t nSidechain, SidechainCTIP& ctip) const
 
 void CTxMemPool::RemoveSidechainDeposits(uint8_t nSidechain, const setEntries& setKeep)
 {
-    setEntries txToRemove;
-    {
-        LOCK(cs);
+    LOCK(cs);
 
-        for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
-            if (it->GetSidechainDeposit() &&
-                    it->GetSidechainNumber() == nSidechain &&
-                    setKeep.count(it) == 0)
-            {
-                txToRemove.insert(it);
-            }
+    std::vector<CTransaction> vTxRemove;
+    for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
+        if (it->IsSidechainDeposit() &&
+                it->GetSidechainNumber() == nSidechain &&
+                setKeep.count(it) == 0)
+        {
+            vTxRemove.push_back(it->GetTx());
         }
-    } // end lock
+    }
 
-    for (const txiter& it : txToRemove) {
-        scdb.AddRemovedDeposit(it->GetTx().GetHash());
-        removeIfExists(it);
+    for (const CTransaction& tx : vTxRemove) {
+        scdb.AddRemovedDeposit(tx.GetHash());
+        removeRecursive(tx);
     }
 }
 
@@ -1312,7 +1298,7 @@ void CTxMemPool::RemoveUnsortedSidechainDeposits(const std::map<uint8_t, Sidecha
         LOCK(cs);
 
         for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
-            if (it->GetSidechainDeposit() && it->GetSidechainNumber() == nSidechain) {
+            if (it->IsSidechainDeposit() && it->GetSidechainNumber() == nSidechain) {
                 SidechainDeposit deposit;
                 // Get deposit information from transaction and check format.
                 // We do not have the block hash or transaction number here.

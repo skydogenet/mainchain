@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -201,7 +201,7 @@ struct CNodeState {
     bool fHaveWitness;
     //! Whether this peer wants witnesses in cmpctblocks/blocktxns
     bool fWantsCmpctWitness;
-    //! Whether this peer supports DriveChain
+    //! Whether this peer supports Drivechain
     bool fHaveDrivechain;
     /**
      * If we've announced NODE_WITNESS to this peer: whether the peer sends witnesses in cmpctblocks/blocktxns,
@@ -407,10 +407,20 @@ void UpdateBlockAvailability(NodeId nodeid, const uint256 &hash) {
 void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman* connman) {
     AssertLockHeld(cs_main);
     CNodeState* nodestate = State(nodeid);
+if (nHeight < DrivechainHeight) {
+
     if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion || !nodestate->fHaveDrivechain) {
         // Never ask from peers who can't provide witnesses or skydoge support
         return;
     }
+} else {
+
+    if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion) {
+        // Never ask from peers who can't provide witnesses
+        return;
+    }
+}
+
     if (nodestate->fProvidesHeaderAndIDs) {
         for (std::list<NodeId>::iterator it = lNodesAnnouncingHeaderAndIDs.begin(); it != lNodesAnnouncingHeaderAndIDs.end(); it++) {
             if (*it == nodeid) {
@@ -893,7 +903,7 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
                     hashBlock.ToString(), pnode->GetId());
 
             bool fPeerHasDrivechain = state.fHaveDrivechain;
-            if (fPeerHasDrivechain) {
+            if (fDrivechainEnabled && fPeerHasDrivechain) {
                 connman->PushMessage(pnode, msgMaker.Make(NetMsgType::CMPCTBLOCK, *pcmpctblock));
             }
             else {
@@ -1891,6 +1901,31 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
     }
 
+    else if (strCommand == NetMsgType::CMPCTWITBLOCK)
+    {
+        bool fAnnounceUsingCMPCTBLOCK = false;
+        uint64_t nCMPCTBLOCKVersion = 1;
+        if (nCMPCTBLOCKVersion == 1 || ((pfrom->GetLocalServices() & NODE_WITNESS) && nCMPCTBLOCKVersion == 2)) {
+            LOCK(cs_main);
+            // fProvidesHeaderAndIDs is used to "lock in" version of compact blocks we send (fWantsCmpctWitness)
+            if (!State(pfrom->GetId())->fProvidesHeaderAndIDs) {
+                State(pfrom->GetId())->fProvidesHeaderAndIDs = true;
+                State(pfrom->GetId())->fWantsCmpctWitness = nCMPCTBLOCKVersion == 2;
+            }
+            if (State(pfrom->GetId())->fWantsCmpctWitness == (nCMPCTBLOCKVersion == 2)) // ignore later version announces
+                State(pfrom->GetId())->fPreferHeaderAndIDs = fAnnounceUsingCMPCTBLOCK;
+            if (!State(pfrom->GetId())->fSupportsDesiredCmpctVersion) {
+                if (pfrom->GetLocalServices() & NODE_WITNESS)
+                    State(pfrom->GetId())->fSupportsDesiredCmpctVersion = (nCMPCTBLOCKVersion == 2);
+                else
+                    State(pfrom->GetId())->fSupportsDesiredCmpctVersion = (nCMPCTBLOCKVersion == 1);
+            }
+            connman->ForEachNode([&](CNode* pto) {
+                connman->PushMessage(pto, msgMaker.Make(NetMsgType::CMPCTWITBLOCK));
+            });
+            CompactWitBlockIndex();
+        }
+    }
 
     else if (strCommand == NetMsgType::INV)
     {

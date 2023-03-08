@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -232,9 +232,30 @@ void WalletFrame::showSidechainActivationDialog()
         walletView->showSidechainActivationDialog();
 }
 
-void WalletFrame::showSidechainWithdrawalDialog()
+void WalletFrame::showSCDBDialog()
 {
     WalletView *walletView = currentWalletView();
     if (walletView)
-        walletView->showSidechainWithdrawalDialog();
+        walletView->showSCDBDialog();
+}
+
+void WalletFrame::showGraffitiDialog()
+{
+    WalletView *walletView = currentWalletView();
+    if (walletView)
+        walletView->showGraffitiDialog();
+}
+
+void WalletFrame::showCoinNewsDialog()
+{
+    WalletView *walletView = currentWalletView();
+    if (walletView)
+        walletView->showCoinNewsDialog();
+}
+
+void WalletFrame::requestUseAvailable()
+{
+    WalletView *walletView = currentWalletView();
+    if (walletView)
+        walletView->requestUseAvailable();
 }

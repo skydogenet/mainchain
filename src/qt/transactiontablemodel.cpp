@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -25,6 +25,10 @@
 #include <QDebug>
 #include <QIcon>
 #include <QList>
+
+#include <boost/bind/placeholders.hpp>
+
+using namespace boost::placeholders;
 
 static int column_alignments[] = {
         Qt::AlignHCenter|Qt::AlignVCenter, /* # Confs */
@@ -295,7 +299,6 @@ void TransactionTableModel::updateReplayStatus(const QString &hash, int replaySt
 {
     if (replayStatus != TransactionStatus::ReplayUnknown &&
             replayStatus != TransactionStatus::ReplayFalse &&
-            replayStatus != TransactionStatus::ReplayLoaded &&
             replayStatus != TransactionStatus::ReplayTrue &&
             replayStatus != TransactionStatus::ReplaySplit)
     {
@@ -372,9 +375,6 @@ QString TransactionTableModel::formatTxStatus(const TransactionRecord *wtx) cons
         break;
     case TransactionStatus::ReplayFalse:
         status += "Not replayed.\n";
-        break;
-    case TransactionStatus::ReplayLoaded:
-        status += "Loaded coin, replayed.\n";
         break;
     case TransactionStatus::ReplayTrue:
         status += "Replayed\n";
@@ -553,8 +553,6 @@ QVariant TransactionTableModel::txReplayStatusDecoration(const TransactionRecord
         return QIcon(":/icons/replay_unknown");
     case TransactionStatus::ReplayFalse:
         return QIcon(":/icons/replay_not_replayed");
-    case TransactionStatus::ReplayLoaded:
-        return QIcon(":/icons/replay_loaded");
     case TransactionStatus::ReplayTrue:
         return QIcon(":/icons/replay_replayed");
     case TransactionStatus::ReplaySplit:

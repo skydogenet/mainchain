@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -6,7 +6,11 @@
 
 #include <qt/addressbookpage.h>
 #include <qt/askpassphrasedialog.h>
+<<<<<<< HEAD
 #include <qt/skydogegui.h>
+=======
+#include <qt/drivechaingui.h>
+>>>>>>> master
 #include <qt/clientmodel.h>
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
@@ -83,9 +87,6 @@ void WalletView::setBitcoinGUI(BitcoinGUI *gui)
 {
     if (gui)
     {
-        // Clicking on a transaction on the overview page simply sends you to transaction history page
-        connect(overviewPage, SIGNAL(transactionClicked(QModelIndex)), gui, SLOT(gotoHistoryPage()));
-
         // Receive and report messages
         connect(this, SIGNAL(message(QString,QString,unsigned int)), gui, SLOT(message(QString,QString,unsigned int)));
 
@@ -351,8 +352,26 @@ void WalletView::showSidechainActivationDialog()
         sidechainPage->ShowActivationDialog();
 }
 
-void WalletView::showSidechainWithdrawalDialog()
+void WalletView::showSCDBDialog()
 {
     if (sidechainPage)
-        sidechainPage->ShowWithdrawalDialog();
+        sidechainPage->ShowSCDBDialog();
+}
+
+void WalletView::showGraffitiDialog()
+{
+    if (overviewPage)
+        overviewPage->showGraffitiDialog();
+}
+
+void WalletView::showCoinNewsDialog()
+{
+    if (overviewPage)
+        overviewPage->showCoinNewsDialog();
+}
+
+void WalletView::requestUseAvailable()
+{
+    if (sendCoinsPage)
+        sendCoinsPage->requestUseAvailable();
 }

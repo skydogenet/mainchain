@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -10,6 +10,7 @@
 #include <qt/forms/ui_optionsdialog.h>
 
 #include <qt/skydogeunits.h>
+#include <qt/guiconstants.h>
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
 
@@ -22,6 +23,7 @@
 #include <QIntValidator>
 #include <QLocale>
 #include <QMessageBox>
+#include <QPalette>
 #include <QTextStream>
 #include <QTimer>
 
@@ -155,6 +157,9 @@ void OptionsDialog::setModel(OptionsModel *_model)
 
         // Set the current index of the theme selection combo box
         ui->comboBoxTheme->setCurrentIndex(_model->getTheme());
+
+        // Set the USD BTC conversion
+        ui->spinBoxUSDBTC->setValue(_model->getUSDBTC());
     }
 
     /* warn when one of the following settings changes by user action (placed here so init via mapper doesn't trigger them) */
@@ -209,6 +214,7 @@ void OptionsDialog::setMapper()
     mapper->addMapping(ui->thirdPartyTxUrls, OptionsModel::ThirdPartyTxUrls);
 
     mapper->addMapping(ui->comboBoxTheme, OptionsModel::Theme, "currentIndex");
+    mapper->addMapping(ui->spinBoxUSDBTC, OptionsModel::USDBTC, "value");
 }
 
 void OptionsDialog::setOkButtonState(bool fState)
@@ -294,6 +300,12 @@ void OptionsDialog::clearStatusLabel()
     if (model && model->isRestartRequired()) {
         showRestartWarning(true);
     }
+}
+
+void OptionsDialog::showDisplayOptions()
+{
+    ui->tabWidget->setCurrentIndex(4);
+    ui->spinBoxUSDBTC->setStyleSheet(STYLE_HIGHLIGHT);
 }
 
 void OptionsDialog::updateProxyValidationState()

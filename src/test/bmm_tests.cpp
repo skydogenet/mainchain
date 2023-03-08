@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Bitcoin Core developers
+// Copyright (c) 2017-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -16,22 +16,21 @@
 
 #include <boost/test/unit_test.hpp>
 
-BOOST_FIXTURE_TEST_SUITE(bmm_tests, BasicTestingSetup)
+BOOST_FIXTURE_TEST_SUITE(bmm_tests, TestChain100Setup)
 
 BOOST_AUTO_TEST_CASE(bmm_commit)
 {
     // Create a BMM h* request transaction
     // Create critical data
     CScript bytes;
-    bytes.resize(3);
+    bytes.resize(4);
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
-
-    bytes << CScriptNum(0); // nSidechain
+    bytes[3] = uint8_t(0);
 
     CCriticalData criticalData;
-    criticalData.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
+    criticalData.vBytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
     criticalData.hashCritical = GetRandHash();
 
     // Create transaction with critical data
@@ -54,6 +53,7 @@ BOOST_AUTO_TEST_CASE(bmm_commit)
     CMutableTransaction coinbase;
     coinbase.nVersion = 1;
     coinbase.vin.resize(1);
+    coinbase.vout.resize(1);
     coinbase.vin[0].prevout.SetNull();
     coinbase.vin[0].scriptSig = CScript() << 102;
 
@@ -63,11 +63,14 @@ BOOST_AUTO_TEST_CASE(bmm_commit)
     block.vtx.push_back(MakeTransactionRef(std::move(mtx)));
 
     // Generate commit
-    GenerateCriticalHashCommitments(block, Params().GetConsensus());
+    GenerateCriticalHashCommitments(block);
+
+    BOOST_REQUIRE(block.vtx[0]->vout.size() == 2);
 
     // Check that the commit has been generated
     uint256 hashCritical;
-    BOOST_CHECK(block.vtx[0]->vout[0].scriptPubKey.IsCriticalHashCommit(hashCritical));
+    std::vector<unsigned char> vBytes;
+    BOOST_CHECK(block.vtx[0]->vout[1].scriptPubKey.IsCriticalHashCommit(hashCritical, vBytes));
     BOOST_CHECK(hashCritical == criticalData.hashCritical);
 }
 
@@ -85,7 +88,7 @@ BOOST_AUTO_TEST_CASE(bmm_commit_format)
 
     // Null h*
     bmm.hashCritical.SetNull();
-    bmm.bytes = std::vector<unsigned char> {0x00};
+    bmm.vBytes = std::vector<unsigned char> {0x00};
     BOOST_CHECK(!bmm.IsBMMRequest());
 
     // With valid h*, invalid bytes
@@ -96,14 +99,17 @@ BOOST_AUTO_TEST_CASE(bmm_commit_format)
     bmm.hashCritical.SetNull();
 
     CScript bytes;
-    bytes.resize(3);
+    bytes.resize(4);
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
-    bytes << CScriptNum(0); // nSidechain
-    bytes << ToByteVector(HexStr(std::string("fd3s")));
+    bytes[3] = uint8_t(0); // nSidechain
+    bytes.push_back(0xFD);
+    bytes.push_back(0xFD);
+    bytes.push_back(0xFD);
+    bytes.push_back(0xFD);
 
-    bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
+    bmm.vBytes = ToByteVector(bytes);
 
     BOOST_CHECK(!bmm.IsBMMRequest());
 
@@ -115,82 +121,68 @@ BOOST_AUTO_TEST_CASE(bmm_commit_format)
     for (unsigned int i = 0; i < 256; i++) {
         bytes.clear();
 
-        bytes.resize(3);
+        bytes.resize(4);
         bytes[0] = 0x00;
         bytes[1] = 0xbf;
         bytes[2] = 0x00;
-        bytes << CScriptNum(i); // nSidechain
-        bytes << ToByteVector(HexStr(std::string("fd3s")));
+        bytes[3] = uint8_t(i); // nSidechain
+        bytes.push_back(0xFD);
+        bytes.push_back(0xFD);
+        bytes.push_back(0xFD);
+        bytes.push_back(0xFD);
 
-        bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
+        bmm.vBytes = ToByteVector(bytes);
 
         uint8_t nSidechain;
         std::string strPrevBlock = "";
         BOOST_CHECK(bmm.IsBMMRequest(nSidechain, strPrevBlock));
 
         BOOST_CHECK(nSidechain == i);
-        BOOST_CHECK(strPrevBlock == "fd3s");
+        BOOST_CHECK(strPrevBlock == "fdfdfdfd");
     }
 
-    // Invalid nSidechain
+
+    // Invalid bytes - too few
     bytes.clear();
 
-    bytes.resize(3);
+    bytes.resize(4);
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
-    bytes << CScriptNum(1337); // nSidechain
-    bytes << ToByteVector(HexStr(std::string("fd3s")));
+    bytes[3] = uint8_t(0); // nSidechain
+    bytes.push_back(0xFD);
+    bytes.push_back(0xFD);
+    bytes.push_back(0xFD);
 
-    bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
-
-    BOOST_CHECK(!bmm.IsBMMRequest());
-
-    // Invalid prev bytes - too few
-    bytes.clear();
-
-    bytes.resize(3);
-    bytes[0] = 0x00;
-    bytes[1] = 0xbf;
-    bytes[2] = 0x00;
-    bytes << CScriptNum(0); // nSidechain
-    bytes << ToByteVector(HexStr(std::string("btc")));
-
-    bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
+    bmm.vBytes = ToByteVector(bytes);
 
     BOOST_CHECK(!bmm.IsBMMRequest());
 
     // Invalid prev bytes - too many
     bytes.clear();
 
-    bytes.resize(3);
+    bytes.resize(4);
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
-    bytes << CScriptNum(255); // nSidechain
-    bytes << ToByteVector(HexStr(std::string("The Times 03/Jan/2009 Chancellor on brink of second bailout for banks")));
+    bytes[3] = uint8_t(255); // nSidechain
+    bytes << ParseHex(HexStr(std::string("The Times 03/Jan/2009 Chancellor on brink of second bailout for banks")));
 
-    bmm.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
+    bmm.vBytes = ToByteVector(bytes);
 
     BOOST_CHECK(!bmm.IsBMMRequest());
 }
-
-BOOST_AUTO_TEST_SUITE_END()
-
-// BMM tests that require a blockchain, wallet, mempool
-
-
-BOOST_FIXTURE_TEST_SUITE(bmm_chain_mempool_tests, TestChain100Setup)
 
 BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
 {
     // Create a BMM h* request transaction
     // Create critical data
     CScript bytes;
-    bytes.resize(3);
+    bytes.resize(4);
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
+    bytes[3] = uint8_t(0);
 
     CBlock block = CreateAndProcessBlock({}, GetScriptForRawPubKey(coinbaseKey.GetPubKey()));
 
@@ -199,13 +191,14 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
 
     // Get the prevBlock hash
     std::string strPrevHash = chainActive.Tip()->GetBlockHash().ToString();
-    strPrevHash = strPrevHash.substr(strPrevHash.size() - 4, strPrevHash.size() - 1);
+    strPrevHash = strPrevHash.substr(strPrevHash.size() - 8, strPrevHash.size() - 1);
 
-    bytes << CScriptNum(0); // nSidechain
-    bytes << ToByteVector(HexStr(std::string(strPrevHash)));
+    std::vector<unsigned char> vPrevBytes = ParseHex(strPrevHash);
+    bytes.resize(8);
+    memcpy(&bytes[4], vPrevBytes.data(), vPrevBytes.size());
 
     CCriticalData criticalData;
-    criticalData.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
+    criticalData.vBytes = ToByteVector(bytes);
     criticalData.hashCritical = GetRandHash();
 
     // Create transaction with critical data
@@ -244,6 +237,7 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
     mtx.vin[0].scriptSig = sigdata.scriptSig;
 
     CValidationState state;
+
 
     // Check that valid prevBytes are accepted to the mempool
     {
@@ -315,11 +309,11 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
+    bytes[3] = uint8_t(0);
 
-    bytes << CScriptNum(0); // nSidechain
-    bytes << ToByteVector(HexStr(std::string("trueno")));
+    bytes << ParseHex(HexStr(std::string("trueno")));
 
-    criticalData.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
+    criticalData.vBytes = ToByteVector(bytes);
 
     // Update input
     mtx.vin.clear();
@@ -365,14 +359,13 @@ BOOST_AUTO_TEST_CASE(bmm_prevbytes_mempool)
     BOOST_CHECK(pcoinsTip->GetBestBlock() == block.GetHash());
 
     bytes.clear();
-    bytes.resize(3);
+    bytes.resize(4);
     bytes[0] = 0x00;
     bytes[1] = 0xbf;
     bytes[2] = 0x00;
+    bytes[3] = uint8_t(0);
 
-    bytes << CScriptNum(0); // nSidechain
-
-    criticalData.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
+    criticalData.vBytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
 
     // Update input
     mtx.vin.clear();

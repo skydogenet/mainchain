@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -763,7 +763,7 @@ BOOST_AUTO_TEST_CASE(transaction_v4_replay_serialization)
     CMutableTransaction mtx;
     mtx.vin.resize(1);
     mtx.vout.resize(1);
-    mtx.nVersion = 4;
+    mtx.nVersion = TX_REPLAY_VERSION;
     mtx.vin[0].prevout.SetNull();
     mtx.vin[0].scriptSig = CScript();
     CScript script;

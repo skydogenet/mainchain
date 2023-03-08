@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -72,7 +72,6 @@ private:
     int64_t nTime;             //!< Local time when entering the mempool
     unsigned int entryHeight;  //!< Chain height when entering the mempool
     bool spendsCoinbase;       //!< keep track of transactions that spend a coinbase
-    bool spendsCriticalData;   //!< keep track of transactions that spend a critical data request
 
     // Sidechain deposit info
     bool fSidechainDeposit;
@@ -100,7 +99,6 @@ public:
     CTxMemPoolEntry(const CTransactionRef& _tx, const CAmount& _nFee,
                     int64_t _nTime, unsigned int _entryHeight,
                     bool spendsCoinbase,
-                    bool spendsCriticalData,
                     bool fSidechainDeposit,
                     uint8_t nSidechain,
                     int64_t nSigOpsCost, LockPoints lp);
@@ -132,10 +130,9 @@ public:
     CAmount GetModFeesWithDescendants() const { return nModFeesWithDescendants; }
 
     bool GetSpendsCoinbase() const { return spendsCoinbase; }
-    bool GetSpendsCriticalData() const { return spendsCriticalData; }
     bool HasCriticalData() const { return !this->tx->criticalData.IsNull(); }
 
-    bool GetSidechainDeposit() const { return fSidechainDeposit; }
+    bool IsSidechainDeposit() const { return fSidechainDeposit; }
     uint8_t GetSidechainNumber() const { return nSidechain; }
 
     uint64_t GetCountWithAncestors() const { return nCountWithAncestors; }
@@ -583,7 +580,6 @@ public:
     bool addUnchecked(const uint256& hash, const CTxMemPoolEntry &entry, bool validFeeEstimate = true);
     bool addUnchecked(const uint256& hash, const CTxMemPoolEntry &entry, setEntries &setAncestors, bool validFeeEstimate = true);
 
-    void removeIfExists(const txiter& it);
     void removeRecursive(const CTransaction &tx, MemPoolRemovalReason reason = MemPoolRemovalReason::UNKNOWN);
     void removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMemPoolHeight, int flags);
     void removeConflicts(const CTransaction &tx);

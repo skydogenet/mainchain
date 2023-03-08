@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Bitcoin Core developers
+// Copyright (c) 2017-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -48,13 +48,19 @@ static const int SIDECHAIN_VERSION_MAX = 0;
 //! The key for sidechain block data in ldb
 static const char DB_SIDECHAIN_BLOCK_OP = 'S';
 
+//! The SidechainDB update script version
+static const uint8_t SCDB_BYTES_VERSION = 0;
+static const uint8_t SCDB_BYTES_MAX_VERSION = 0;
+
+// Custom characters for withdrawal bundle votes
+static const char SCDB_UPVOTE = 'u';
+static const char SCDB_DOWNVOTE = 'd';
+static const char SCDB_ABSTAIN = 'a';
+
 struct Sidechain {
     bool fActive;
     uint8_t nSidechain;
     int32_t nVersion = SIDECHAIN_VERSION_CURRENT;
-    std::string strKeyID;
-    std::string strPrivKey;
-    CScript scriptPubKey;
     std::string title;
     std::string description;
     uint256 hashID1;
@@ -65,9 +71,6 @@ struct Sidechain {
         fActive = false;
         nSidechain = 0;
         nVersion = SIDECHAIN_VERSION_CURRENT;
-        strKeyID = "";
-        strPrivKey = "";
-        scriptPubKey.clear();
         title = "";
         description = "";
         hashID1.SetNull();
@@ -77,7 +80,7 @@ struct Sidechain {
     bool operator==(const Sidechain& s) const;
     std::string GetSidechainName() const;
     std::string ToString() const;
-    uint256 GetHash() const;
+    uint256 GetSerHash() const;
 
     // Sidechain proposal script functions
     bool DeserializeFromProposalScript(const CScript& script);
@@ -90,9 +93,6 @@ struct Sidechain {
         READWRITE(fActive);
         READWRITE(nSidechain);
         READWRITE(nVersion);
-        READWRITE(strKeyID);
-        READWRITE(strPrivKey);
-        READWRITE(scriptPubKey);
         READWRITE(title);
         READWRITE(description);
         READWRITE(hashID1);
@@ -104,9 +104,6 @@ struct Sidechain {
     inline void SerializeProposal(Stream& s) {
         s << nSidechain;
         s << nVersion;
-        s << strKeyID;
-        s << strPrivKey;
-        s << scriptPubKey;
         s << title;
         s << description;
         s << hashID1;
@@ -118,9 +115,6 @@ struct Sidechain {
     inline void DeserializeProposal(Stream& s) {
         s >> nSidechain;
         s >> nVersion;
-        s >> strKeyID;
-        s >> strPrivKey;
-        s >> scriptPubKey;
         s >> title;
         s >> description;
         s >> hashID1;
@@ -134,7 +128,7 @@ struct SidechainActivationStatus
     int nFail;
     Sidechain proposal;
 
-    uint256 GetHash() const;
+    uint256 GetSerHash() const;
 
     ADD_SERIALIZE_METHODS
 
@@ -156,7 +150,7 @@ struct SidechainDeposit {
 
     bool operator==(const SidechainDeposit& a) const;
     std::string ToString() const;
-    uint256 GetHash() const;
+    uint256 GetSerHash() const;
 
     ADD_SERIALIZE_METHODS
 
@@ -171,44 +165,16 @@ struct SidechainDeposit {
     }
 };
 
-// Custom votes for withdrawal bundles set by user
-static const char SCDB_UPVOTE = 'u';
-static const char SCDB_DOWNVOTE = 'd';
-static const char SCDB_ABSTAIN = 'a';
-struct SidechainCustomVote
-{
-    char vote;          // SCDB_UPVOTE, SCDB_DOWNVOTE or SCDB_ABSTAIN
-    uint8_t nSidechain; // Withdrawal bundle sidechain number
-    uint256 hash;       // Withdrawal bundle hash
-
-    bool operator==(const SidechainCustomVote& v) const
-    {
-        return (vote == v.vote && nSidechain == v.nSidechain
-                && hash== v.hash);
-    }
-
-    ADD_SERIALIZE_METHODS
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(vote);
-        READWRITE(nSidechain);
-        READWRITE(hash);
-    }
-};
-
 struct SidechainWithdrawalState {
     uint8_t nSidechain;
     uint16_t nBlocksLeft;
     uint16_t nWorkScore;
     uint256 hash;
 
-    bool IsNull() const;
-    uint256 GetHash() const;
+    uint256 GetSerHash() const;
     bool operator==(const SidechainWithdrawalState& a) const;
     std::string ToString() const;
 
-    // For hash calculation
     ADD_SERIALIZE_METHODS
 
     template <typename Stream, typename Operation>
@@ -252,10 +218,9 @@ struct SidechainCTIP {
     COutPoint out;
     CAmount amount;
 
-    uint256 GetHash() const;
+    uint256 GetSerHash() const;
     std::string ToString() const;
 
-    // For hash calculation
     ADD_SERIALIZE_METHODS
 
     template <typename Stream, typename Operation>
@@ -274,8 +239,7 @@ struct SidechainObj {
     SidechainObj(void) { }
     virtual ~SidechainObj(void) { }
 
-    uint256 GetHash(void) const;
-    CScript GetScript(void) const;
+    uint256 GetSerHash(void) const;
     virtual std::string ToString(void) const;
 };
 
@@ -287,7 +251,6 @@ struct SidechainBlockData: public SidechainObj {
     std::vector<SidechainSpentWithdrawal> vSpent;
     std::vector<SidechainActivationStatus> vActivationStatus;
     std::vector<Sidechain> vSidechain;
-    uint256 hashMT;
 
     SidechainBlockData(void) : SidechainObj() { sidechainop = DB_SIDECHAIN_BLOCK_OP; }
     virtual ~SidechainBlockData(void) { }
@@ -301,14 +264,10 @@ struct SidechainBlockData: public SidechainObj {
         READWRITE(vSpent);
         READWRITE(vActivationStatus);
         READWRITE(vSidechain);
-        READWRITE(hashMT);
     }
 
     std::string ToString(void) const;
-
-    uint256 GetID() const {
-        return GetHash();
-    }
+    uint256 GetSerHash() const;
 };
 
 bool ParseDepositAddress(const std::string& strAddressIn, std::string& strAddressOut, unsigned int& nSidechainOut);

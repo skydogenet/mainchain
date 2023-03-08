@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Bitcoin Core developers
+// Copyright (c) 2021-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -12,8 +12,7 @@
 #include <policy/feerate.h>
 #include <uint256.h>
 
-class CFeeRate;
-class uint256;
+class ClientModel;
 class CTransaction;
 typedef std::shared_ptr<const CTransaction> CTransactionRef;
 
@@ -27,6 +26,7 @@ struct MemPoolTableObject
     QString time;
     CAmount value;
     CFeeRate feeRate;
+    CAmount fee;
 };
 
 class MemPoolTableModel : public QAbstractTableModel
@@ -41,20 +41,26 @@ public:
     QVariant headerData(int section, Qt::Orientation orientation, int role) const;
     bool GetTx(const uint256& txid, CTransactionRef& tx) const;
 
+    void setClientModel(ClientModel *model);
+
     enum RoleIndex {
         HashRole = Qt::UserRole,
     };
 
 public Q_SLOTS:
     void memPoolSizeChanged(long nTx, size_t nBytes);
+    void setUSDBTC(int nUSDBTC);
 
 private:
     void updateModel();
 
     QList<QVariant> model;
 
+    ClientModel *clientModel = nullptr;
+
     long nTx;
     size_t nBytes;
+    int64_t nUSDBTC;
 };
 
 #endif // MEMPOOLTABLEMODEL_H

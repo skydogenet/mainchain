@@ -1,5 +1,5 @@
 // Copyright (c) 2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -3588,7 +3588,7 @@ UniValue createsidechaindeposit(const JSONRPCRequest& request)
 
     ObserveSafeMode();
 
-    // nSidechain
+    // Check sidechain number we are depositing to
     unsigned int nSidechain = request.params[0].get_int();
     if (!scdb.IsSidechainActive(nSidechain)) {
         std::string strError = "Invalid sidechain number";
@@ -3619,7 +3619,7 @@ UniValue createsidechaindeposit(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strError);
     }
 
-    // Double check sidechain number
+    // Check number from address matches sidechain we are depositing to
     if (nSidechainFromAddress != nSidechain) {
         std::string strError = "Invalid sidechain deposit address - sidechain number mismatch";
         LogPrintf("%s: %s\n", __func__, strError);
@@ -3820,7 +3820,6 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
         return NullUniValue;
     }
 
-    // TODO handle optional height better
     if (request.fHelp || request.params.size() != 5)
         throw std::runtime_error(
             "createbmmcriticaldatatx\n"
@@ -3828,7 +3827,7 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
             "\nArguments:\n"
             "1. \"amount\"         (numeric or string, required) The amount in " + CURRENCY_UNIT + " to be spent.\n"
             "2. \"height\"         (numeric, required) The block height this transaction must be included in.\n"
-            "Note: If 0 is passed in for height, current block height will be used"
+            "Note: If 0 is passed in for height, current block height will be used\n"
             "3. \"criticalhash\"   (string, required) h* you want added to a coinbase\n"
             "4. \"nsidechain\"     (numeric, required) Sidechain requesting BMM\n"
             "5. \"prevbytes\"      (string, required) a portion of the previous block hash\n"
@@ -3864,7 +3863,6 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
 
     // nSidechain
     int nSidechain = request.params[3].get_int();
-
     if (!scdb.IsSidechainActive(nSidechain))
     {
         std::string strError = "Invalid Sidechain number";
@@ -3874,34 +3872,47 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
 
     // prevBlockHash bytes
     std::string strPrevBlock = request.params[4].get_str();
-    if (strPrevBlock.size() != 4) {
-        std::string strError = "Invalid prevBlockHash bytes size";
+    if (strPrevBlock.size() != 8) {
+        std::string strError = "Invalid prevBlockHash bytes string size";
         LogPrintf("%s: %s\n", __func__, strError);
         throw JSONRPCError(RPC_TYPE_ERROR, strError);
     }
 
     std::string strTip = chainActive.Tip()->GetBlockHash().ToString();
-    strTip = strTip.substr(strTip.size() - 4, strTip.size() - 1);
+    strTip = strTip.substr(strTip.size() - 8, strTip.size() - 1);
 
-    // Check the 4 prev block hash bytes
+    // Check the prev block hash bytes
     if (strTip != strPrevBlock) {
         std::string strError = "Invalid prevBlockHash bytes - incorrect";
         LogPrintf("%s: %s. %s != %s\n", __func__, strError, strTip, strPrevBlock);
         throw (JSONRPCError(RPC_TYPE_ERROR, strError));
     }
 
-    // Create critical data
-    CScript bytes;
-    bytes.resize(3);
-    bytes[0] = 0x00;
-    bytes[1] = 0xbf;
-    bytes[2] = 0x00;
+    // Check prev bytes size
+    std::vector<unsigned char> vPrevBytes = ParseHex(strPrevBlock);
+    if (vPrevBytes.size() != 4) {
+        std::string strError = "Invalid prevBlockHash bytes size";
+        LogPrintf("%s: %s.\n", __func__, strError);
+        throw (JSONRPCError(RPC_TYPE_ERROR, strError));
+    }
 
-    bytes << CScriptNum(nSidechain);
-    bytes << ToByteVector(HexStr(strPrevBlock));
+    // Create critical data bytes
+    CScript vBytes;
+    vBytes.resize(8);
+
+    // Add header to identify BMM data
+    vBytes[0] = 0x00;
+    vBytes[1] = 0xbf;
+    vBytes[2] = 0x00;
+
+    // Add sidechain number
+    vBytes[3] = nSidechain;
+
+    // Add prev block bytes
+    memcpy(&vBytes[4], vPrevBytes.data(), vPrevBytes.size());
 
     CCriticalData criticalData;
-    criticalData.bytes = std::vector<unsigned char>(bytes.begin(), bytes.end());
+    criticalData.vBytes = std::vector<unsigned char>(vBytes.begin(), vBytes.end());
     criticalData.hashCritical = hashCritical;
 
 #ifdef ENABLE_WALLET
@@ -3923,8 +3934,7 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
     CReserveKey reservekey(pwallet);
     CAmount nFeeRequired;
     int nChangePosRet = -1;
-    //TODO: set this as a real thing
-    CCoinControl cc;
+    CCoinControl cc;  // TODO Allow user to set coin control
     cc.signalRbf = false;
     if (!pwallet->CreateTransaction(vecSend, wtx, reservekey, nFeeRequired, nChangePosRet, strError, cc, true, 3, nHeight, criticalData)) {
         if (nAmount + nFeeRequired > pwallet->GetBalance() || nAmount < nFeeRequired)
@@ -4106,8 +4116,8 @@ static const CRPCCommand commands[] =
 
     { "generating",         "generate",                   &generate,                   {"nblocks","maxtries"} },
 
-    { "DriveChain",         "createsidechaindeposit",     &createsidechaindeposit,     {"nSidechain", "depositaddress", "amount", "fee"} },
-    { "DriveChain",         "createbmmcriticaldatatx",    &createbmmcriticaldatatx,    {"amount", "height", "criticalhash", "nsidechain"}},
+    { "Drivechain",         "createsidechaindeposit",     &createsidechaindeposit,     {"nSidechain", "depositaddress", "amount", "fee"} },
+    { "Drivechain",         "createbmmcriticaldatatx",    &createbmmcriticaldatatx,    {"amount", "height", "criticalhash", "nsidechain"}},
 
     { "CoinNews",           "createopreturntransaction",  &createopreturntransaction,  {"text", "fee"} },
     { "CoinNews",           "broadcastnews",              &broadcastnews,              {"header", "text", "fee"} },

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2017 The Bitcoin Core developers
+# Copyright (c) 2017-2022 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Class for bitcoind node under test"""
@@ -52,7 +52,7 @@ class TestNode():
             # Wait for up to 60 seconds for the RPC server to respond
             self.rpc_timeout = 60
         if binary is None:
-            self.binary = os.getenv("DRIVENETD", "skydoged")
+            self.binary = os.getenv("DRIVECHAIND", "skydoged")
         else:
             self.binary = binary
         self.stderr = stderr
@@ -61,7 +61,7 @@ class TestNode():
         self.extra_args = extra_args
         self.args = [self.binary, "-datadir=" + self.datadir, "-server", "-keypool=1", "-discover=0", "-rest", "-logtimemicros", "-debug", "-debugexclude=libevent", "-debugexclude=leveldb", "-mocktime=" + str(mocktime), "-uacomment=testnode%d" % i]
 
-        self.cli = TestNodeCLI(os.getenv("DRIVENETCLI", "skydoge-cli"), self.datadir)
+        self.cli = TestNodeCLI(os.getenv("DRIVECHAINCLI", "skydoge-cli"), self.datadir)
         self.use_cli = use_cli
 
         self.running = False

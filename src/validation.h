@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -30,6 +30,7 @@
 
 #include <atomic>
 
+class AddressBook;
 class CBlockIndex;
 class CBlockTreeDB;
 class CChainParams;
@@ -181,6 +182,7 @@ extern int nScriptCheckThreads;
 extern bool fTxIndex;
 extern bool fIsBareMultisigStd;
 extern bool fRequireStandard;
+extern bool fCMPCTWit;
 extern bool fCheckBlockIndex;
 extern bool fCheckpointsEnabled;
 extern size_t nCoinCacheUsage;
@@ -217,7 +219,7 @@ static const unsigned int MIN_BLOCKS_TO_KEEP = 288;
 static const unsigned int NODE_NETWORK_LIMITED_MIN_BLOCKS = 288;
 
 static const signed int DEFAULT_CHECKBLOCKS = 6;
-static const unsigned int DEFAULT_CHECKLEVEL = 4;
+static const unsigned int DEFAULT_CHECKLEVEL = 2;
 
 // Require that user allocate at least 550MB for block & undo files (blk???.dat and rev???.dat)
 // At 1MB per block, 288 blocks = 288MB.
@@ -278,6 +280,8 @@ bool LoadGenesisBlock(const CChainParams& chainparams);
 bool LoadBlockIndex(const CChainParams& chainparams);
 /** Update the chain tip based on database information. */
 bool LoadChainTip(const CChainParams& chainparams);
+/** Compact witness block information */
+void CompactWitBlockIndex();
 /** Unload database information */
 void UnloadBlockIndex();
 /** Run an instance of the script checking thread */
@@ -313,13 +317,16 @@ void PruneAndFlush();
 /** Prune block files up to a given height */
 void PruneBlockFilesManual(int nManualPruneHeight);
 
-/** Calculate input and output values specific
- *  to sidechain deposit transactions with mempool view */
-void GetSidechainValues(const CCoinsView& coins, const CTransaction& tx, CAmount& amtSidechainUTXO, CAmount& amtUserInput,
-                        CAmount& amtReturning, CAmount& amtWithdrawn);
-
-/** Compare the blinded hash with the transaction provided */
-bool CheckBlindHash(const uint256& hash, const CTransaction& tx);
+/** Calculate amount sent into and out of Drivechain BIP 300 hashrate escrow
+ * amountSidechainIn = Value of the hashrate escrow coin being spent
+ * amountIn = Value of coins input from outside of the escrow (user input)
+ * amountSidechainOut = Value being sent (back) to the hashrate escrow
+ * amountWithdrawn = Amount subtracted from hashrate escrow by this transaction
+ */
+bool GetDrivechainAmounts(const CCoinsView& coins, const CTransaction& tx,
+                        CAmount& amountSidechainIn, CAmount& amountIn,
+                        CAmount& amountSidechainOut, CAmount& amountWithdrawn,
+                        std::string& strFail);
 
 /** (try to) add transaction to memory pool
  * plTxnReplaced will be appended to with all transactions replaced from mempool **/
@@ -441,28 +448,25 @@ void UpdateUncommittedBlockStructures(CBlock& block, const CBlockIndex* pindexPr
 std::vector<unsigned char> GenerateCoinbaseCommitment(CBlock& block, const CBlockIndex* pindexPrev, const Consensus::Params& consensusParams);
 
 /** Produce BMM h* (or other critical data) coinbase commitment(s) for a block */
-void GenerateCriticalHashCommitments(CBlock& block, const Consensus::Params& consensusParams);
+void GenerateCriticalHashCommitments(CBlock& block);
 
 /** Produce a BMM h* coinbase commitment for a block (with lightning)*/
-void GenerateLNCriticalHashCommitment(CBlock& block, const Consensus::Params& consensusParams);
+void GenerateLNCriticalHashCommitment(CBlock& block);
 
-/** Produce the SCDB hashMerkleRoot coinbase commitment for a block */
-void GenerateSCDBHashMerkleRootCommitment(CBlock& block, const uint256& hashSCDB, const Consensus::Params& consensusParams);
+/** Produce sidechain withdrawal hash coinbase commitment for a block */
+void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const uint8_t nSidechain);
 
-/** Produce withdrawal hash coinbase commitment for a block */
-void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const uint8_t nSidechain, const Consensus::Params& consensusParams);
+void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidechain);
 
-void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidechain, const Consensus::Params& consensusParams);
+void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash);
 
-void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash, const Consensus::Params& consensusParams);
-
-void GenerateSCDBUpdateScript(CBlock& block, CScript& script, const std::vector<std::vector<SidechainWithdrawalState>>& vScores, const std::vector<SidechainCustomVote>& vUserVotes, const Consensus::Params& consensusParams);
+bool GenerateSCDBByteCommitment(CBlock& block, CScript& scriptOut, const std::vector<std::vector<SidechainWithdrawalState>>& vScores, const std::vector<std::string>& vVote);
 
 CScript GetNewsTokyoDailyHeader();
 CScript GetNewsUSDailyHeader();
 
 /** Return a vector of all of the critical data requests found in a block */
-std::vector<CCriticalData> GetCriticalDataRequests(const CBlock& block, const Consensus::Params& consensusParams);
+std::vector<CCriticalData> GetCriticalDataRequests(const CBlock& block);
 
 /** RAII wrapper for VerifyDB: Verify consistency of the block and coin databases */
 class CVerifyDB {
@@ -591,5 +595,14 @@ void DumpSCDBCache();
 bool ResyncSCDB(const CBlockIndex* pindex);
 
 double GetNetworkHashPerSecond(int nLookup, int nHeight);
+
+/** Address Book */
+extern AddressBook addressBook;
+
+/* Load address book */
+bool LoadAddressBook();
+
+/* Write address book */
+void DumpAddressBook();
 
 #endif // BITCOIN_VALIDATION_H

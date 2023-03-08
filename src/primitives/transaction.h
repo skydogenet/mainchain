@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -16,6 +16,7 @@ static const int SERIALIZE_TRANSACTION_NO_WITNESS = 0x40000000;
 static const int SERIALIZE_TRANSACTION_NO_DRIVECHAIN = 0x20000000;
 
 static const unsigned char TX_REPLAY_BYTES = 0x3f;
+static const int32_t TX_REPLAY_VERSION = 12566463;
 
 /** An outpoint - a combination of a transaction hash and an index n into its vout */
 class COutPoint
@@ -184,7 +185,7 @@ struct CMutableTransaction;
 class CCriticalData
 {
 public:
-    std::vector<unsigned char> bytes;
+    std::vector<unsigned char> vBytes;
     uint256 hashCritical;
 
     CCriticalData()
@@ -196,27 +197,28 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(bytes);
+        READWRITE(vBytes);
         READWRITE(hashCritical);
     }
 
     void SetNull()
     {
-        bytes.clear();
+        vBytes.clear();
         hashCritical.SetNull();
     }
 
     bool IsNull() const
     {
-        return (bytes.empty() && hashCritical.IsNull());
+        return (vBytes.empty() && hashCritical.IsNull());
     }
 
+    // Check if critical data is a BMM request
     bool IsBMMRequest() const;
     bool IsBMMRequest(uint8_t& nSidechain, std::string& strPrevBlock) const;
 
     friend bool operator==(const CCriticalData& a, const CCriticalData& b)
     {
-        return (a.bytes == b.bytes &&
+        return (a.vBytes == b.vBytes &&
                 a.hashCritical == b.hashCritical);
     }
 };
@@ -245,7 +247,7 @@ inline void UnserializeTransaction(TxType& tx, Stream& s) {
     const bool fAllowWitness = !(s.GetVersion() & SERIALIZE_TRANSACTION_NO_WITNESS);
 
     s >> tx.nVersion;
-    if (tx.nVersion == 4) {
+    if (tx.nVersion == TX_REPLAY_VERSION) {
         unsigned char noreplay;
         s >> noreplay;
     }
@@ -297,7 +299,7 @@ inline void SerializeTransaction(const TxType& tx, Stream& s) {
         tx.nVersion == 3;
 
     s << tx.nVersion;
-    if (tx.nVersion == 4) {
+    if (tx.nVersion == TX_REPLAY_VERSION) {
         s << TX_REPLAY_BYTES;
     }
     unsigned char flags = 0;

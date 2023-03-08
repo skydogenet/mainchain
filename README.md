@@ -1,18 +1,30 @@
-Skydoge
+Skydoge / Drivechain (BIPs 300+301)
 ------------------
+
+Drivechain allows Bitcoin to create, delete, send BTC to, and receive BTC from “Layer-2”s called “sidechains”. Sidechains are Altcoins that lack a native “coin” – instead, BTC must first be sent over.
+
 Learn more about Skydoge here:
-https://skydoge.info
+https://skydoge.net
 
 Start helping here:
 https://github.com/skydogenet/mainchain/issues
 
 For an example sidechain implementation, see: https://github.com/skydogenet/sidechains
 
+BIP 300:
+https://github.com/bitcoin/bips/blob/master/bip-0300.mediawiki
+
+BIP 301:
+https://github.com/bitcoin/bips/blob/master/bip-0301.mediawiki
 
 What is Skydoge?
 --------------------------
 Skydoge.net is a decentralized messaging platform including it's own crypto currency built on layer 1 blockchain network also including sidechain enabled technologies. This project is a fork of Drivechain (Bitcoin Core 0.16.99 + BIPs 300 and 301) and could be implemented on Bitcoin.
 
+Learn more about Drivechain here:
+http://drivechain.info
+
+For an example sidechain implementation, see: https://github.com/drivechain-project/sidechains
 
 License
 -------
@@ -57,3 +69,6 @@ Changes should be tested by somebody other than the developer who wrote the
 code. This is especially important for large or high-risk changes. It is useful
 to add a test plan to the pull request description if testing the changes is
 not straightforward.
+=======
+Bitcoin Core (and Drivechain) are released under the terms of the MIT license. See [COPYING](COPYING) for more
+information or see https://opensource.org/licenses/MIT.

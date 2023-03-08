@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -33,9 +33,14 @@ class MemPoolTableModel;
 class MiningDialog;
 class WalletFrame;
 class WalletModel;
+class MultisigLoungeDialog;
+class PaperWalletDialog;
 class HelpMessageDialog;
+class ModalOverlay;
 class HashCalcDialog;
 class BlockExplorer;
+class CreateWalletDialog;
+class DenialDialog;
 
 QT_BEGIN_NAMESPACE
 class QAction;
@@ -122,14 +127,39 @@ private:
     QAction *showHelpMessageAction;
     QAction *showSidechainTableDialogAction;
     QAction *showMiningDialogAction;
+    QAction *showPaperWalletDialogAction;
+    QAction *showPaperCheckDialogAction;
+    QAction *showCreateWalletDialogAction;
+    QAction *showRestoreWalletDialogAction;
     QAction *showHashCalcDialogAction;
     QAction *showBlockExplorerDialogAction;
+    QAction *showSCDBDialogAction;
+    QAction *showDenialDialogAction;
+    QAction *showBip47AddrDialogAction;
+    QAction *showProofOfFundsDialogAction;
+    QAction *showMerkleTreeDialogAction;
+    QAction *showMultisigLoungeDialogAction;
+    QAction *showSignaturesDialogAction;
+    QAction *showBase58DialogAction;
+    QAction *showGraffitiDialogAction;
+    QAction *showMerchantsDialogAction;
+    QAction *showTimestampDialogAction;
+    QAction *showStorageDialogAction;
+    QAction *showCoinNewsDialogAction;
+    QAction *showMiningPoolsDialogAction;
+    QAction *showNetworkDialogAction;
+    QAction *showAddRemoveSidechainDialogAction;
+    QAction *showFileBroadcastDialogAction;
+    QAction *showSidechainTransferAction;
+    QAction *showSendMoneyAction;
+    QAction *showReceiveMoneyAction;
 
     QSystemTrayIcon *trayIcon;
     QMenu *trayIconMenu;
     Notificator *notificator;
     RPCConsole *rpcConsole;
     HelpMessageDialog *helpMessageDialog;
+    ModalOverlay *modalOverlay = nullptr;
 
     QTimer *pollTimer;
 
@@ -138,10 +168,18 @@ private:
     SidechainTableDialog *sidechainTableDialog;
     /** Mining dialog */
     MiningDialog *miningDialog;
+    /** Paper Wallet dialog */
+    PaperWalletDialog *paperWalletDialog;
+    /** Create / restore Wallet dialog */
+    CreateWalletDialog *createWalletDialog;
     /** Hash calculator dialog */
     HashCalcDialog *hashCalcDialog;
     /** Block explorer dialog */
     BlockExplorer *blockExplorerDialog;
+    /** Denial dialog */
+    DenialDialog *denialDialog;
+    /** Multisig Lounge dialog */
+    MultisigLoungeDialog *multisigLoungeDialog;
 #endif
 
     /** Keep track of previous number of blocks, to detect progress */
@@ -239,11 +277,77 @@ private Q_SLOTS:
     /** Show mining dialog */
     void showMiningDialog();
 
+    /** Show paper wallet dialog */
+    void showPaperWalletDialog();
+
+    /** Show paper check dialog */
+    void showPaperCheckDialog();
+
+    /** Show create wallet dialog */
+    void showCreateWalletDialog();
+
+    /** Show restore wallet dialog */
+    void showRestoreWalletDialog();
+
     /** Show hash calculator dialog */
     void showHashCalcDialog();
 
     /** Show block explorer dialog */
     void showBlockExplorerDialog();
+
+    /** Show SCDB M4 dialog */
+    void showSCDBDialog();
+
+    /** Show denial dialog */
+    void showDenialDialog();
+
+    /** Show Bip47Addr dialog */
+    void showBip47AddrDialog();
+
+    /** Show Proof Of Funds dialog */
+    void showProofOfFundsDialog();
+
+    /** Show MultisigLounge dialog */
+    void showMultisigLoungeDialog();
+
+    /** Show Merkle tree dialog */
+    void showMerkleTreeDialog();
+
+    /** Show Signatures dialog */
+    void showSignaturesDialog();
+
+    /** Show Base58 dialog */
+    void showBase58Dialog();
+
+    /** Show Graffiti dialog */
+    void showGraffitiDialog();
+
+    /** Show Merchants dialog */
+    void showMerchantsDialog();
+
+    /** Show Timestamp dialog */
+    void showTimestampDialog();
+
+    /** Show Storage dialog */
+    void showStorageDialog();
+
+    /** Show Coin News dialog */
+    void showCoinNewsDialog();
+
+    /** Go to the send coins page & click on use available balance */
+    void gotoSendAllCoins();
+
+    /** Show mining pool dialog */
+    void showMiningPoolsDialog();
+
+    /** Show network stats dialog */
+    void showNetworkDialog();
+
+    /** Show add / remove sidechain dialog */
+    void showAddRemoveSidechainDialog();
+
+    /** Show file broadcast dialog */
+    void showFileBroadcastDialog();
 
 #endif // ENABLE_WALLET
     /** Show configuration dialog */
@@ -271,6 +375,8 @@ private Q_SLOTS:
 
     /** Show progress dialog e.g. for verifychain */
     void showProgress(const QString &title, int nProgress);
+
+    void showModalOverlay();
 
     /** When hideTrayIcon setting is changed in OptionsModel hide or show the icon accordingly. */
     void setTrayIconVisible(bool);

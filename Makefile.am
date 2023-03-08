@@ -11,15 +11,15 @@ endif
 
 export PYTHONPATH
 
-if BUILD_DRIVENET_LIBS
+if BUILD_DRIVECHAIN_LIBS
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = libskydogeconsensus.pc
 endif
 
-DRIVENETD_BIN=$(top_builddir)/src/$(DRIVENET_DAEMON_NAME)$(EXEEXT)
-DRIVENET_QT_BIN=$(top_builddir)/src/qt/$(DRIVENET_GUI_NAME)$(EXEEXT)
-DRIVENET_CLI_BIN=$(top_builddir)/src/$(DRIVENET_CLI_NAME)$(EXEEXT)
-DRIVENET_WIN_INSTALLER=$(PACKAGE)-$(PACKAGE_VERSION)-win$(WINDOWS_BITS)-setup$(EXEEXT)
+DRIVECHAIND_BIN=$(top_builddir)/src/$(DRIVECHAIN_DAEMON_NAME)$(EXEEXT)
+DRIVECHAIN_QT_BIN=$(top_builddir)/src/qt/$(DRIVECHAIN_GUI_NAME)$(EXEEXT)
+DRIVECHAIN_CLI_BIN=$(top_builddir)/src/$(DRIVECHAIN_CLI_NAME)$(EXEEXT)
+DRIVECHAIN_WIN_INSTALLER=$(PACKAGE)-$(PACKAGE_VERSION)-win$(WINDOWS_BITS)-setup$(EXEEXT)
 
 empty :=
 space := $(empty) $(empty)
@@ -70,11 +70,11 @@ COVERAGE_INFO = baseline.info \
 dist-hook:
 	-$(GIT) archive --format=tar HEAD -- src/clientversion.cpp | $(AMTAR) -C $(top_distdir) -xf -
 
-$(DRIVENET_WIN_INSTALLER): all-recursive
+$(DRIVECHAIN_WIN_INSTALLER): all-recursive
 	$(MKDIR_P) $(top_builddir)/release
-	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(DRIVENETD_BIN) $(top_builddir)/release
-	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(DRIVENET_QT_BIN) $(top_builddir)/release
-	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(DRIVENET_CLI_BIN) $(top_builddir)/release
+	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(DRIVECHAIND_BIN) $(top_builddir)/release
+	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(DRIVECHAIN_QT_BIN) $(top_builddir)/release
+	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM) $(DRIVECHAIN_CLI_BIN) $(top_builddir)/release
 	@test -f $(MAKENSIS) && $(MAKENSIS) -V2 $(top_builddir)/share/setup.nsi || \
 	  echo error: could not build $@
 	@echo built $@
@@ -95,7 +95,7 @@ $(OSX_APP)/Contents/Resources/skydoge.icns: $(OSX_INSTALLER_ICONS)
 	$(MKDIR_P) $(@D)
 	$(INSTALL_DATA) $< $@
 
-$(OSX_APP)/Contents/MacOS/Skydoge-Qt: $(DRIVENET_QT_BIN)
+$(OSX_APP)/Contents/MacOS/Skydoge-Qt: $(DRIVECHAIN_QT_BIN)
 	$(MKDIR_P) $(@D)
 	STRIPPROG="$(STRIP)" $(INSTALL_STRIP_PROGRAM)  $< $@
 
@@ -156,16 +156,16 @@ appbundle: $(OSX_APP_BUILT)
 deploy: $(OSX_DMG)
 endif
 if TARGET_WINDOWS
-deploy: $(DRIVENET_WIN_INSTALLER)
+deploy: $(DRIVECHAIN_WIN_INSTALLER)
 endif
 
-$(DRIVENET_QT_BIN): FORCE
+$(DRIVECHAIN_QT_BIN): FORCE
 	$(MAKE) -C src qt/$(@F)
 
-$(DRIVENETD_BIN): FORCE
+$(DRIVECHAIND_BIN): FORCE
 	$(MAKE) -C src $(@F)
 
-$(DRIVENET_CLI_BIN): FORCE
+$(DRIVECHAIN_CLI_BIN): FORCE
 	$(MAKE) -C src $(@F)
 
 if USE_LCOV
@@ -271,7 +271,7 @@ EXTRA_DIST += \
     test/util/data/txcreatesignv1.json \
     test/util/data/txcreatesignv2.hex
 
-CLEANFILES = $(OSX_DMG) $(DRIVENET_WIN_INSTALLER)
+CLEANFILES = $(OSX_DMG) $(DRIVECHAIN_WIN_INSTALLER)
 
 .INTERMEDIATE: $(COVERAGE_INFO)
 

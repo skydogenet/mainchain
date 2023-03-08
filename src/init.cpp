@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -94,9 +94,6 @@ static CZMQNotificationInterface* pzmqNotificationInterface = nullptr;
 
 static const char* FEE_ESTIMATES_FILENAME="fee_estimates.dat";
 
-static const char* LAST_LOADED_OUTPOINT="000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f";
-static const uint32_t LAST_LOADED_N=25;
-
 //////////////////////////////////////////////////////////////////////////////
 //
 // Shutdown
@@ -178,14 +175,6 @@ void Interrupt()
 
 void Shutdown()
 {
-#ifdef ENABLE_WALLET
-    if (!vpwallets.empty()) {
-        CWalletRef pwallet = vpwallets.front();
-        std::vector<LoadedCoin> vLoadedCoin = pwallet->GetMyLoadedCoins();
-        pcoinsTip->WriteMyLoadedCoins(vLoadedCoin);
-    }
-#endif
-
     LogPrintf("%s: In progress...\n", __func__);
     static CCriticalSection cs_Shutdown;
     TRY_LOCK(cs_Shutdown, lockShutdown);
@@ -225,6 +214,8 @@ void Shutdown()
     threadGroup.join_all();
 
     DumpSCDBCache();
+
+    DumpAddressBook();
 
     if (fDumpMempoolLater && gArgs.GetArg("-persistmempool", DEFAULT_PERSIST_MEMPOOL)) {
         DumpMempool();
@@ -1414,6 +1405,7 @@ bool AppInitMain()
     // ********************************************************* Step 7: load caches
     fReindex = gArgs.GetBoolArg("-reindex", false);
 
+//old DC
     bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
 
     std::string strFailSCDAT;
@@ -1430,12 +1422,10 @@ bool AppInitMain()
     int64_t nTotalCache = (gArgs.GetArg("-dbcache", nDefaultDbCache) << 20);
     nTotalCache = std::max(nTotalCache, nMinDbCache << 20); // total cache cannot be less than nMinDbCache
     nTotalCache = std::min(nTotalCache, nMaxDbCache << 20); // total cache cannot be greater than nMaxDbcache
-    int64_t nBlockTreeDBCache = nTotalCache / 8;
+    int64_t nBlockTreeDBCache = nTotalCache / 4;
     nBlockTreeDBCache = std::min(nBlockTreeDBCache, (gArgs.GetBoolArg("-txindex", DEFAULT_TXINDEX) ? nMaxBlockDBAndTxIndexCache : nMaxBlockDBCache) << 20);
     nTotalCache -= nBlockTreeDBCache;
-    int64_t nSidechainTreeDBCache = nTotalCache / 8;
-    if (nSidechainTreeDBCache > (1 << 21) && !gArgs.GetBoolArg("-txindex", DEFAULT_TXINDEX))
-        nSidechainTreeDBCache = (1 << 21);
+    int64_t nSidechainTreeDBCache = nTotalCache / 4;
     nTotalCache -= nSidechainTreeDBCache;
     int64_t nCoinDBCache = std::min(nTotalCache / 2, (nTotalCache / 4) + (1 << 23)); // use 25%-50% of the remainder for disk cache
     nCoinDBCache = std::min(nCoinDBCache, nMaxCoinsDBCache << 20); // cap total coins db cache
@@ -1448,6 +1438,7 @@ bool AppInitMain()
     LogPrintf("* Using %.1fMiB for in-memory UTXO set (plus up to %.1fMiB of unused mempool space)\n", nCoinCacheUsage * (1.0 / 1024 / 1024), nMempoolSizeMax * (1.0 / 1024 / 1024));
 
     bool fLoaded = false;
+    bool drivechainsEnabled = false;
     while (!fLoaded && !fRequestShutdown) {
         bool fReset = fReindex;
         std::string strLoadError;
@@ -1547,6 +1538,8 @@ bool AppInitMain()
                     assert(chainActive.Tip() != nullptr);
                 }
 
+    		    drivechainsEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
+
                 // Synchronize SCDB
                 if (skydogesEnabled && !fReindex && chainActive.Tip() && (chainActive.Tip()->GetBlockHash() != scdb.GetHashBlockLastSeen()))
                 {
@@ -1635,6 +1628,9 @@ bool AppInitMain()
                         LogPrintf("Error reading custom vote cache.\n");
                     }
                 }
+                // Load address book
+                if (!LoadAddressBook())
+                    LogPrintf("Failed to load address book!\n");
             } catch (const std::exception& e) {
                 LogPrintf("%s\n", e.what());
                 strLoadError = _("Error opening block database");
@@ -1683,7 +1679,6 @@ bool AppInitMain()
         ::feeEstimator.Read(est_filein);
     fFeeEstimatesInitialized = true;
 
-
     // ********************************************************* Step 9: load wallet
 #ifdef ENABLE_WALLET
     if (!OpenWallets())
@@ -1714,9 +1709,15 @@ bool AppInitMain()
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
     }
 
+if (nHeight < DrivechainHeight) {
     if (chainparams.GetConsensus().vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout != 0) {
         nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN);
     }
+} else {
+
+    // Show NODE_DRIVECHAIN after fork height
+    if (drivechainsEnabled)
+        nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN); }
 
     // ********************************************************* Step 11: import blocks
 
@@ -1826,7 +1827,7 @@ bool AppInitMain()
     */
 #endif
 
-    // ********************************************************* Step 13: start node
+    // ********************************************************* Step 12: start node
     uiInterface.InitMessage(_("Starting node..."));
 
     int chain_active_height;
@@ -1904,7 +1905,7 @@ bool AppInitMain()
     }
 
     // ********************************************************* Step 14: finished
-    uiInterface.InitMessage(_("Skydoge ready to TESTDRIVE"));
+    uiInterface.InitMessage(_("Skydoge ready"));
 
     SetRPCWarmupFinished();
 

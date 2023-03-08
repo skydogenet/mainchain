@@ -1,4 +1,4 @@
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2021 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -184,41 +184,6 @@ UniValue importprivkey(const JSONRPCRequest& request)
     if (fRescan) {
         pwallet->RescanFromTime(TIMESTAMP_MIN, reserver, true /* update */);
     }
-
-    // And also rescan loaded coins and start tracking those
-    std::vector<LoadedCoin> vLoadedCoin;
-    {
-        LOCK(cs_main);
-        std::unique_ptr<CCoinsViewLoadedCursor> i(pcoinsTip->LoadedCursor());
-        assert(i);
-
-        CWallet* const pwallet = GetWalletForJSONRPCRequest(request);
-        if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
-            return NullUniValue;
-        }
-
-        while (i->Valid()) {
-            LoadedCoin coin;
-            i->GetValue(coin);
-
-            if (pwallet->IsSpent(coin.out.hash, coin.out.n)) {
-                i->Next();
-                continue;
-            }
-
-            isminetype mine = pwallet->IsMine(coin.coin.out);
-            if (mine == ISMINE_NO) {
-                i->Next();
-                continue;
-            }
-
-            vLoadedCoin.push_back(coin);
-
-            i->Next();
-        }
-    }
-    if (vLoadedCoin.size())
-        pwallet->AddLoadedCoins(vLoadedCoin);
 
     return NullUniValue;
 }

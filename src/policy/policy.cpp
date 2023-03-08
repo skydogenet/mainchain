@@ -1,5 +1,5 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2017 The Bitcoin Core developers
+// Copyright (c) 2009-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -70,7 +70,8 @@ bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool w
             return false;
         if (m < 1 || m > n)
             return false;
-    } else if (whichType == TX_NULL_DATA) {
+    }
+    else if (whichType == TX_NULL_DATA) {
         if (!fAcceptDatacarrier)
             return false;
         if (!skydogeEnabled && scriptPubKey.size() > nMaxDatacarrierBytes)
@@ -79,6 +80,8 @@ bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool w
             return false;
     }
     else if (!witnessEnabled && (whichType == TX_WITNESS_V0_KEYHASH || whichType == TX_WITNESS_V0_SCRIPTHASH))
+        return false;
+    else if (!drivechainEnabled && whichType == TX_DRIVECHAIN)
         return false;
 
     return whichType != TX_NONSTANDARD && whichType != TX_WITNESS_UNKNOWN;

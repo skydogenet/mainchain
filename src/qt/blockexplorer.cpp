@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Bitcoin Core developers
+// Copyright (c) 2021-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -56,6 +56,9 @@ BlockExplorer::BlockExplorer(const PlatformStyle *_platformStyle, QWidget *paren
     style += "QTableView::item::selected { background-color: rgb(0, 139, 139, 180); }";
 
     ui->tableViewBlocks->setStyleSheet(style);
+
+    connect(this, SIGNAL(UpdateTable()), blockExplorerModel, SLOT(UpdateModel()));
+    connect(blockExplorerModel, SIGNAL(columnsInserted(QModelIndex, int, int)), this, SLOT(scrollRight()));
 }
 
 BlockExplorer::~BlockExplorer()
@@ -72,6 +75,10 @@ void BlockExplorer::numBlocksChanged(int nHeight, const QDateTime& time)
 {
     ui->labelNumBlocks->setText(QString::number(nHeight));
     ui->labelBlockTime->setText(time.toString("dd MMMM yyyy hh:mm"));
+
+    // Update the table model if the explorer is open
+    if (this->isVisible())
+        Q_EMIT(UpdateTable());
 }
 
 void BlockExplorer::setClientModel(ClientModel *model)
@@ -81,10 +88,6 @@ void BlockExplorer::setClientModel(ClientModel *model)
     {
         connect(model, SIGNAL(numBlocksChanged(int,QDateTime,double,bool)),
                 this, SLOT(numBlocksChanged(int, QDateTime)));
-
-        blockExplorerModel->setClientModel(model);
-
-        connect(blockExplorerModel, SIGNAL(columnsInserted(QModelIndex, int, int)), this, SLOT(scrollRight()));
 
         // Display current block time & height
         CBlockIndex *pindex = blockExplorerModel->GetTip();
@@ -133,6 +136,11 @@ void BlockExplorer::scrollRight()
 {
     int nMax = ui->tableViewBlocks->horizontalScrollBar()->maximum();
     ui->tableViewBlocks->horizontalScrollBar()->setValue(nMax);
+}
+
+void BlockExplorer::updateOnShow()
+{
+    Q_EMIT(UpdateTable());
 }
 
 void BlockExplorer::on_lineEditSearch_returnPressed()

@@ -1,4 +1,4 @@
-// Copyright (c) 2011-2017 The Bitcoin Core developers
+// Copyright (c) 2011-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -22,9 +22,9 @@
 
 static const uint64_t GB_BYTES = 1000000000LL;
 /* Minimum free space (in GB) needed for data directory */
-static const uint64_t BLOCK_CHAIN_SIZE = 0;
+static const uint64_t BLOCK_CHAIN_SIZE = 430;
 /* Minimum free space (in GB) needed for data directory when pruned; Does not include prune target */
-static const uint64_t CHAIN_STATE_SIZE = 3;
+static const uint64_t CHAIN_STATE_SIZE = 10;
 /* Total required space (in GB) depending on user choice (prune, not prune) */
 static uint64_t requiredSpace;
 
@@ -127,20 +127,14 @@ Intro::Intro(QWidget *parent) :
         .arg(tr(PACKAGE_NAME))
     );
 
-    // TODO
-    requiredSpace = BLOCK_CHAIN_SIZE;
-    QString storageRequiresMsg = tr("At least 5 GB of data will be stored in this directory, and it will grow over time.");
+    requiredSpace = BLOCK_CHAIN_SIZE + CHAIN_STATE_SIZE;
+    QString storageRequiresMsg = tr("At least %1 GB of data will be stored in this directory, and it will grow over time.").arg(requiredSpace);
 
-    requiredSpace += CHAIN_STATE_SIZE;
     ui->sizeWarningLabel->setText(
         storageRequiresMsg + " " +
         tr("The wallet will also be stored in this directory.")
     );
     startThread();
-
-    // TODO loaded coins are disabled
-    // Remove this to re-show the loaded coins notice on the intro page
-    ui->labelLoadedCoins->setHidden(true);
 }
 
 Intro::~Intro()

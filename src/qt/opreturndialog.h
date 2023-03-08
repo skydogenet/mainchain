@@ -1,4 +1,4 @@
-// Copyright (c) 2021 The Bitcoin Core developers
+// Copyright (c) 2021-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -38,8 +38,12 @@ private:
     CreateOPReturnDialog *createOPReturnDialog = nullptr;
     OPReturnTableModel *opReturnModel = nullptr;
     const PlatformStyle *platformStyle = nullptr;
+    ClientModel *clientModel = nullptr;
     QMenu *contextMenu;
     QSortFilterProxyModel *proxyModel;
+
+public Q_SLOTS:
+    void updateOnShow();
 
 private Q_SLOTS:
     void on_tableView_doubleClicked(const QModelIndex& index);
@@ -48,7 +52,11 @@ private Q_SLOTS:
     void copyDecode();
     void copyHex();
     void on_pushButtonCreate_clicked();
-    void on_spinBoxDays_valueChanged(int nDays);
+    void on_spinBoxDays_editingFinished();
+    void numBlocksChanged(int nHeight, const QDateTime& time);
+
+Q_SIGNALS:
+    void UpdateTable();
 };
 
 #endif // OPRETURNDIALOG_H

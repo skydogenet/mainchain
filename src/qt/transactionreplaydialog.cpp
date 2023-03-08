@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Bitcoin Core developers
+// Copyright (c) 2020-2022 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -192,40 +192,6 @@ void TransactionReplayDialog::Update()
         }
     }
 
-    // TODO display loaded coins?
-//    // Add loaded coins to the view
-//    std::vector<LoadedCoin> vLoadedCoin;
-//    vLoadedCoin = walletModel->getMyLoadedCoins();
-//    for (const LoadedCoin& c : vLoadedCoin) {
-//        if (walletModel->isSpent(c.out))
-//            continue;
-
-//        CCoinControlWidgetItem *itemOutput = new CCoinControlWidgetItem(ui->treeWidget);
-//        itemOutput->setFlags(flgCheckbox);
-//        itemOutput->setCheckState(COLUMN_CHECKBOX, Qt::Unchecked);
-//        CTxDestination outputAddress;
-//        QString sAddress = "";
-//        if (ExtractDestination(c.coin.out.scriptPubKey, outputAddress)) {
-//            sAddress = QString::fromStdString(EncodeDestination(outputAddress));
-//            // TODO use scriptPubKey from LoadedCoin class so that we can
-//            // guess what the address might have been...?
-//            //itemOutput->setText(COLUMN_ADDRESS, sAddress);
-//            itemOutput->setText(COLUMN_ADDRESS, tr("Loaded Coin (unknown address)"));
-//        }
-//        itemOutput->setText(COLUMN_LABEL, tr("(LOADED)"));
-//        // amount
-//        itemOutput->setText(COLUMN_AMOUNT, BitcoinUnits::format(nDisplayUnit, c.coin.out.nValue));
-//        itemOutput->setData(COLUMN_AMOUNT, Qt::UserRole, QVariant((qlonglong)c.coin.out.nValue));
-//        // TODO show other data that coincontroldialog displays
-//        // transaction hash
-//        itemOutput->setText(COLUMN_TXHASH, QString::fromStdString(c.out.hash.ToString()));
-//        // vout index
-//        itemOutput->setText(COLUMN_VOUT_INDEX, QString::number(c.out.n));
-//        // set checkbox
-//        if (coinControl()->IsSelected(c.out))
-//            itemOutput->setCheckState(COLUMN_CHECKBOX, Qt::Checked);
-//    }
-
     ui->tableWidgetCoins->setSortingEnabled(true);
     ui->tableWidgetCoins->setUpdatesEnabled(true);
 }
@@ -393,8 +359,6 @@ QIcon TransactionReplayDialog::GetReplayIcon(int nReplayStatus) const
         return QIcon(platformStyle->SingleColorIcon(":/icons/replay_unknown"));
     case REPLAY_FALSE:
         return QIcon(platformStyle->SingleColorIcon(":/icons/replay_not_replayed"));
-    case REPLAY_LOADED:
-        return QIcon(platformStyle->SingleColorIcon(":/icons/replay_loaded"));
     case REPLAY_TRUE:
         return QIcon(platformStyle->SingleColorIcon(":/icons/replay_replayed"));
     case REPLAY_SPLIT:
@@ -416,8 +380,6 @@ QString FormatReplayStatus(int nReplayStatus)
         return "Unknown";
     case REPLAY_FALSE:
         return "Not replayed";
-    case REPLAY_LOADED:
-        return "Loaded coin";
     case REPLAY_TRUE:
         return "Replayed";
     case REPLAY_SPLIT:
