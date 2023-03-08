@@ -3,7 +3,7 @@
 <<<<<<< HEAD
 #include <qt/skydogeamountfield.h>
 =======
-#include <qt/drivechainamountfield.h>
+#include <qt/skydogeamountfield.h>
 >>>>>>> master
 #include <qt/callback.h>
 #include <qt/optionsmodel.h>
