@@ -14,7 +14,7 @@
 #include <util.h>
 #include <validation.h>
 
-#include <test/test_drivechain.h>
+#include <test/test_skydoge.h>
 
 #include <stdint.h>
 

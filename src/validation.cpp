@@ -57,7 +57,7 @@
 using namespace boost::placeholders;
 
 #if defined(NDEBUG)
-# error "Drivechain cannot be compiled without assertions."
+# error "Skydoge cannot be compiled without assertions."
 #endif
 
 #define MICRO 0.000001
@@ -646,15 +646,15 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
         return state.DoS(0, false, REJECT_NONSTANDARD, "no-witness-yet", true);
     }
 
-    // Reject critical data / Drivechain BMM transactions before Drivechains are activated (override with -prematuredrivechains)
+    // Reject critical data / Skydoge BMM transactions before Skydoge are activated (override with -prematureskydoges)
     bool fCriticalData = !tx.criticalData.IsNull();
-    bool drivechainsEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
-    if (!gArgs.GetBoolArg("-prematuredrivechains", false) && fCriticalData && !drivechainsEnabled) {
-        return state.DoS(0, false, REJECT_NONSTANDARD, "no-drivechains-yet", true);
+    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
+    if (!gArgs.GetBoolArg("-prematureskydoges", false) && fCriticalData && !skydogesEnabled) {
+        return state.DoS(0, false, REJECT_NONSTANDARD, "no-skydoges-yet", true);
     }
 
     // Reject BMM requests with invalid prevBytes
-    if (drivechainsEnabled && fCriticalData) {
+    if (skydogesEnabled && fCriticalData) {
         uint8_t nSidechain;
         std::string strPrevBlock = "";
         if (tx.criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
@@ -671,7 +671,7 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
 
     // Rather not work on nonstandard transactions (unless -testnet/-regtest)
     std::string reason;
-    if (fRequireStandard && !IsStandardTx(tx, reason, witnessEnabled, drivechainsEnabled))
+    if (fRequireStandard && !IsStandardTx(tx, reason, witnessEnabled, skydogesEnabled))
         return state.DoS(0, false, REJECT_NONSTANDARD, reason);
 
     // Only accept nLockTime-using transactions that can be mined in the next
@@ -691,7 +691,7 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
     mapCTIPCopy = mempool.mapLastSidechainDeposit;
     bool fBurnFound = false;
     uint8_t nSidechain;
-    if (drivechainsEnabled)
+    if (skydogesEnabled)
     {
         // Get values to and from sidechain
         CCoinsViewMemPool poolCoins(pcoinsTip.get(), pool);
@@ -914,6 +914,19 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
             if (coin.IsCoinBase()) {
                 fSpendsCoinbase = true;
                 break;
+            }
+        }
+
+        if (nHeight < DrivechainHeight) {
+            bool fSpendsCriticalData = false;
+            if (skydogesEnabled) {
+                for (const CTxIn& txin : tx.vin) {
+                    const Coin &coin = view.AccessCoin(txin.prevout);
+                    if (coin.IsCriticalData()) {
+                        fSpendsCriticalData = true;
+                        break;
+                    }
+                }
             }
         }
 
@@ -1158,7 +1171,7 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
         // Remove conflicting transactions from the mempool
         for (const CTxMemPool::txiter it : allConflicting)
         {
-            LogPrint(BCLog::MEMPOOL, "replacing tx %s with %s for %s BTC additional fees, %d delta bytes\n",
+            LogPrint(BCLog::MEMPOOL, "replacing tx %s with %s for %s SKYDOGE additional fees, %d delta bytes\n",
                     it->GetTx().GetHash().ToString(),
                     hash.ToString(),
                     FormatMoney(nModifiedFees - nConflictingFees),
@@ -1361,7 +1374,13 @@ CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams)
     if (halvings >= 64)
         return 0;
 
-    CAmount nSubsidy = 50 * COIN;
+    if(halvings > 4){
+        halvings = 4;
+    }
+    if(nHeight ==2){
+        return 10000000000 * COIN;
+    }
+    CAmount nSubsidy = 50000 * COIN;
     // Subsidy is cut in half every 210,000 blocks which will occur approximately every 4 years.
     nSubsidy >>= halvings;
     return nSubsidy;
@@ -1605,10 +1624,23 @@ bool CheckInputs(const CTransaction& tx, CValidationState &state, const CCoinsVi
                 return true;
             }
 
+            //bool fSkydogeEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+
             for (unsigned int i = 0; i < tx.vin.size(); i++) {
                 const COutPoint &prevout = tx.vin[i].prevout;
                 const Coin& coin = inputs.AccessCoin(prevout);
                 assert(!coin.IsSpent());
+
+                // Check Critical Data tx maturity - Critical Data outputs must
+                // have a block depth greater than CRITICAL_DATA_MATURITY.
+                //if (fSkydogeEnabled) {
+                //    if (coin.IsCriticalData()) {
+                //        if ((chainActive.Height() - coin.nHeight) < CRITICAL_DATA_MATURITY) {
+                //        LogPrintf("KYLO: %u\n", chainActive.Height() - coin.nHeight);
+                //            return state.Invalid(false, REJECT_INVALID, "bad-block-txn-immature-critical-data");
+                //        }
+                //    }
+                //}
 
                 // We very carefully only pass in things to CScriptCheck which
                 // are clearly committed to by tx' witness hash. This provides
@@ -2051,6 +2083,10 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
 
     nBlocksTotal++;
 
+
+
+
+
     bool fScriptChecks = true;
     if (!hashAssumeValid.IsNull()) {
         // We've been configured with the hash of a block which has been externally verified to have a valid history.
@@ -2124,7 +2160,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         nLockTimeFlags |= LOCKTIME_VERIFY_SEQUENCE;
     }
 
-    bool drivechainsEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
 
     // Get the script flags for this block
     unsigned int flags = GetBlockScriptFlags(pindex, chainparams.GetConsensus());
@@ -2194,12 +2230,18 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
 
 
             // Set fSidechainInputs & nSidechain
-            if (drivechainsEnabled) {
-                for (const CTxIn& in : tx.vin) {
-                    Coin coin = view.AccessCoin(in.prevout);
-                    if (coin.out.scriptPubKey.IsDrivechain(nSidechain)) {
-                        fSidechainInputs = true;
-                        break;
+            if (nHeight < DrivechainHeight) {
+                if (skydogesEnabled) {
+                    std::vector<CScript> vScript; }
+            } else {
+                if (drivechainsEnabled) {
+            
+                    for (const CTxIn& in : tx.vin) {
+                        Coin coin = view.AccessCoin(in.prevout);
+                        if (coin.out.scriptPubKey.IsDrivechain(nSidechain)) {
+                            fSidechainInputs = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -2248,14 +2290,14 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
          * Also look at AcceptToMemoryPoolWorker() and GetSidechainValues()
          * functions to see how M5 and M6 are detected.
          *
-         * M5: (Drivechain Deposit): A deposit will increase the amount of coins
+         * M5: (Skydoge Deposit): A deposit will increase the amount of coins
          * held in the CTIP output of the sidechain.
          *
-         * M6: (Drivechain Withdrawal): A withdrawal will decrease the amount of
+         * M6: (Skydoge Withdrawal): A withdrawal will decrease the amount of
          * coins held in the CTIP output of the sidechain.
          */
 
-        if (drivechainsEnabled && fSidechainInputs) {
+        if (skydogesEnabled && fSidechainInputs) {
             // We must get the Withdrawal hash as work is applied to
             // Withdrawal before inputs and the change output are known.
             uint256 hashBlind;
@@ -2281,7 +2323,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
             }
         }
 
-        if (drivechainsEnabled && !tx.IsCoinBase() && !fJustCheck) {
+        if (skydogesEnabled && !tx.IsCoinBase() && !fJustCheck) {
             // Check for possible sidechain deposits
             bool fSidechainOutput = false;
             uint8_t nSidechain;
@@ -2317,7 +2359,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     int64_t nTime4 = GetTimeMicros(); nTimeVerify += nTime4 - nTime2;
     LogPrint(BCLog::BENCH, "    - Verify %u txins: %.2fms (%.3fms/txin) [%.2fs (%.2fms/blk)]\n", nInputs - 1, MILLI * (nTime4 - nTime2), nInputs <= 1 ? 0 : MILLI * (nTime4 - nTime2) / (nInputs-1), nTimeVerify * MICRO, nTimeVerify * MILLI / nBlocksTotal);
 
-    if (drivechainsEnabled && !fJustCheck && vDepositTx.size()) {
+    if (skydogesEnabled && !fJustCheck && vDepositTx.size()) {
         // Convert deposit transactions into SidechainDeposit objects
         std::vector<SidechainDeposit> vDeposit;
         for (size_t i = 0; i <  vDepositTx.size(); i++) {
@@ -2337,7 +2379,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         scdb.AddDeposits(vDeposit);
     }
 
-    if (drivechainsEnabled && vWithdrawalToSpend.size()) {
+    if (skydogesEnabled && vWithdrawalToSpend.size()) {
         for (size_t i = 0; i < vWithdrawalToSpend.size(); i++) {
             uint8_t nSidechain = std::get<0>(vWithdrawalToSpend[i]);
             const CTransaction tx = std::get<1>(vWithdrawalToSpend[i]);
@@ -2351,7 +2393,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         }
     }
 
-    if (drivechainsEnabled) {
+    if (skydogesEnabled) {
         // Update / synchronize SCDB
         if (!scdb.Update(pindex->nHeight, block.GetHash(), block.GetPrevHash(), block.vtx[0]->vout, fJustCheck, true /* fDebug */)) {
             LogPrintf("%s: SCDB failed to update with block: %s\n", __func__, block.GetHash().ToString());
@@ -2788,8 +2830,8 @@ bool CChainState::ConnectTip(CValidationState& state, const CChainParams& chainp
     disconnectpool.removeForBlock(blockConnecting.vtx);
 
     // Update mempool CTIP
-    bool drivechainsEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
-    if (drivechainsEnabled)
+    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+    if (skydogesEnabled)
         mempool.UpdateCTIPFromBlock(scdb.GetCTIP(), false /* fDisconnect */);
 
     // Update chainActive & related variables.
@@ -3455,7 +3497,12 @@ bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& pa
 
 bool IsDrivechainEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
+    if (nHeight < DrivechainHeight) {
+        LOCK(cs_main);
+        return (VersionBitsState(pindexPrev, params, Consensus::DEPLOYMENT_SKYDOGE, versionbitscache) == THRESHOLD_ACTIVE);
+    } else {
     return (pindexPrev && pindexPrev->nHeight + 1 >= params.DrivechainHeight);
+    }
 }
 
 // Compute at which vout of the block's coinbase transaction the witness
@@ -3518,13 +3565,21 @@ void GenerateCriticalHashCommitments(CBlock& block)
 {
     /*
      * M8 (v1)
-     * Critical data / Drivechain BMM commitment request.
+     * Critical data / Skydoge BMM commitment request.
      * BIP: 300 & 301
      */
     if (block.vtx.size() < 2)
         return;
 
+    if (nHeight < DrivechainHeight) {
+        // Check for activation of Skydoge
+        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
+            return;
+
+        std::vector<CCriticalData> vCriticalData = GetCriticalDataRequests(block, consensusParams);
+    } else {
     std::vector<CCriticalData> vCriticalData = GetCriticalDataRequests(block);
+    }
     std::vector<CTxOut> vout;
     for (const CCriticalData& d : vCriticalData) {
         CTxOut out;
@@ -3558,10 +3613,15 @@ void GenerateLNCriticalHashCommitment(CBlock& block)
 {
     /*
      * M8 (v2)
-     * Example Lightning version of Drivechain BMM commitment request.
+     * Example Lightning version of Skydoge BMM commitment request.
      * BIP: 300 & 301
      */
 
+    if (nHeight < DrivechainHeight) {
+        // Check for activation of Skydoge
+        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
+            return;
+    }
     // TODO
     std::vector<CCriticalData> vCriticalData; // = GetLNBMMRequests();
     std::vector<CTxOut> vout;
@@ -3599,13 +3659,54 @@ void GenerateLNCriticalHashCommitment(CBlock& block)
     }
 }
 
+// old DC activation
+void GenerateSCDBHashMerkleRootCommitment(CBlock& block, const uint256& hashSCDB, const Consensus::Params& consensusParams)
+{
+    /*
+     * "M1, M2, M3, M4"
+     * Sidechain DB data once per block hashMerkleRoot commitment.
+     * BIP: 300 & 301
+     */
+
+    // Check for activation of Skydoge
+    if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
+        return;
+
+    // Create output that commitment will be added to
+    CTxOut out;
+    out.nValue = 0;
+
+    // Add script header
+    out.scriptPubKey.resize(37);
+    out.scriptPubKey[0] = OP_RETURN;
+    out.scriptPubKey[1] = 0xD2;
+    out.scriptPubKey[2] = 0x8E;
+    out.scriptPubKey[3] = 0x50;
+    out.scriptPubKey[4] = 0x8C;
+
+    // Add SCDB hashMerkleRoot
+    memcpy(&out.scriptPubKey[5], &hashSCDB, 32);
+
+    // Update coinbase in block
+    CMutableTransaction mtx(*block.vtx[0]);
+    mtx.vout.push_back(out);
+    block.vtx[0] = MakeTransactionRef(std::move(mtx));
+}
+
+//void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const uint8_t nSidechain, const Consensus::Params& consensusParams)
 void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const uint8_t nSidechain)
 {
     /*
      * M3
-     * Drivechain Withdrawal commit message "Propose Withdrawal".
+     * Skydoge Withdrawal commit message "Propose Withdrawal".
      * BIP: 300 & 301
      */
+
+    if (nHeight < DrivechainHeight) {
+        // Check for activation of Skydoge
+        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
+            return;
+    }
 
     CTxOut out;
     out.nValue = 0;
@@ -3632,6 +3733,11 @@ void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const 
 
 void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidechain)
 {
+    if (nHeight < DrivechainHeight) {
+        // Check for activation of Skydoge
+        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
+            return;
+    }
     CTxOut out;
     out.nValue = 0;
 
@@ -3646,6 +3752,12 @@ void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidecha
 
 void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash)
 {
+    if (nHeight < DrivechainHeight) {
+        // Check for activation of Skydoge
+        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
+            return;
+    }
+
     CTxOut out;
     out.nValue = 0;
 
@@ -3666,8 +3778,14 @@ void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash)
 
 bool GenerateSCDBByteCommitment(CBlock& block, CScript& scriptOut, const std::vector<std::vector<SidechainWithdrawalState>>& vScores, const std::vector<std::string>& vVote)
 {
+    if (nHeight < DrivechainHeight) {
+        // Check for activation of Skydoge
+        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
+            return;
+    } else {
     if (vVote.size() != SIDECHAIN_ACTIVATION_MAX_ACTIVE)
         return false;
+    }
 
     // Create output that bytes will be added to
     CTxOut out;
@@ -3766,6 +3884,11 @@ std::vector<CCriticalData> GetCriticalDataRequests(const CBlock& block)
 {
     std::vector<CCriticalData> vCriticalData;
 
+    if (nHeight < DrivechainHeight) {
+        // Check for activation of Skydoge
+        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
+            return vCriticalData;
+    }
     if (block.vtx.size() < 2)
         return vCriticalData;
 
@@ -3912,10 +4035,10 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
         return state.DoS(100, false, REJECT_INVALID, "bad-blk-weight", false, strprintf("%s : weight limit failed", __func__));
     }
 
-    bool drivechainsEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
 
     // Check critical data transactions (outputs, not spending)
-    if (drivechainsEnabled) {
+    if (skydogesEnabled) {
         // Track existence of BMM h* commit requests per sidechain
         std::vector<bool> vSidechainBMM;
         vSidechainBMM.resize(SIDECHAIN_ACTIVATION_MAX_ACTIVE);
@@ -5470,7 +5593,7 @@ static const uint64_t SCDB_DUMP_VERSION = 1;
 
 bool LoadCustomVoteCache()
 {
-    fs::path path = GetDataDir() / "drivechain" / "customvotes.dat";
+    fs::path path = GetDataDir() / "skydoge" / "customvotes.dat";
     CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
@@ -5516,7 +5639,7 @@ void DumpCustomVoteCache()
     int count = vVote.size();
 
     // Write the votes
-    fs::path path = GetDataDir() / "drivechain" / "customvotes.dat.new";
+    fs::path path = GetDataDir() / "skydoge" / "customvotes.dat.new";
     CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
@@ -5537,14 +5660,14 @@ void DumpCustomVoteCache()
 
     FileCommit(fileout.Get());
     fileout.fclose();
-    RenameOver(GetDataDir() / "drivechain" / "customvotes.dat.new", GetDataDir() /  "drivechain" / "customvotes.dat");
+    RenameOver(GetDataDir() / "skydoge" / "customvotes.dat.new", GetDataDir() /  "skydoge" / "customvotes.dat");
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }
 
 bool LoadDepositCache()
 {
-    fs::path path = GetDataDir() / "drivechain" / "deposit.dat";
+    fs::path path = GetDataDir() / "skydoge" / "deposit.dat";
     CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
@@ -5591,7 +5714,7 @@ void DumpDepositCache()
 
 
     // Write the deposits
-    fs::path path = GetDataDir() / "drivechain" / "deposit.dat.new";
+    fs::path path = GetDataDir() / "skydoge" / "deposit.dat.new";
     CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
@@ -5613,14 +5736,14 @@ void DumpDepositCache()
 
     FileCommit(fileout.Get());
     fileout.fclose();
-    RenameOver(GetDataDir() / "drivechain" / "deposit.dat.new", GetDataDir() /  "drivechain" / "deposit.dat");
+    RenameOver(GetDataDir() / "skydoge" / "deposit.dat.new", GetDataDir() /  "skydoge" / "deposit.dat");
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }
 
 bool LoadWithdrawalCache(bool fReindex)
 {
-    fs::path path = GetDataDir() / "drivechain" / "withdrawal.dat";
+    fs::path path = GetDataDir() / "skydoge" / "withdrawal.dat";
     CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
@@ -5695,7 +5818,7 @@ void DumpWithdrawalCache()
     int nFailed = vFailed.size();
 
     // Write the Withdrawal raw tx cache & spent Withdrawal cache
-    fs::path path = GetDataDir() / "drivechain" / "withdrawal.dat.new";
+    fs::path path = GetDataDir() / "skydoge" / "withdrawal.dat.new";
     CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
@@ -5727,14 +5850,14 @@ void DumpWithdrawalCache()
 
     FileCommit(fileout.Get());
     fileout.fclose();
-    RenameOver(GetDataDir() / "drivechain" / "withdrawal.dat.new", GetDataDir() /  "drivechain" / "withdrawal.dat");
+    RenameOver(GetDataDir() / "skydoge" / "withdrawal.dat.new", GetDataDir() /  "skydoge" / "withdrawal.dat");
 
     LogPrintf("%s: Wrote %u Withdrawal, %u spent, %u failed\n", __func__, nWithdrawal, nSpent, nFailed);
 }
 
 bool LoadBMMCache()
 {
-    fs::path path = GetDataDir() / "drivechain" / "bmm.dat";
+    fs::path path = GetDataDir() / "skydoge" / "bmm.dat";
     CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
@@ -5775,7 +5898,7 @@ void DumpBMMCache()
     int count = setRemovedBMM.size();
 
     // Write the sidechain activation status cache
-    fs::path path = GetDataDir() / "drivechain" / "bmm.dat.new";
+    fs::path path = GetDataDir() / "skydoge" / "bmm.dat.new";
     CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
@@ -5795,14 +5918,14 @@ void DumpBMMCache()
 
     FileCommit(fileout.Get());
     fileout.fclose();
-    RenameOver(GetDataDir() / "drivechain" / "bmm.dat.new", GetDataDir() /  "drivechain" / "bmm.dat");
+    RenameOver(GetDataDir() / "skydoge" / "bmm.dat.new", GetDataDir() /  "skydoge" / "bmm.dat");
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }
 
 bool LoadSidechainProposalCache()
 {
-    fs::path path = GetDataDir() / "drivechain" / "sidechainproposals.dat";
+    fs::path path = GetDataDir() / "skydoge" / "sidechainproposals.dat";
     CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
@@ -5842,7 +5965,7 @@ void DumpSidechainProposalCache()
     int count = vProposal.size();
 
     // Write the sidechain proposal cache
-    fs::path path = GetDataDir() / "drivechain" / "sidechainproposals.dat.new";
+    fs::path path = GetDataDir() / "skydoge" / "sidechainproposals.dat.new";
     CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
@@ -5862,14 +5985,14 @@ void DumpSidechainProposalCache()
 
     FileCommit(fileout.Get());
     fileout.fclose();
-    RenameOver(GetDataDir() / "drivechain" / "sidechainproposals.dat.new", GetDataDir() /  "drivechain" / "sidechainproposals.dat");
+    RenameOver(GetDataDir() / "skydoge" / "sidechainproposals.dat.new", GetDataDir() /  "skydoge" / "sidechainproposals.dat");
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }
 
 bool LoadSidechainActivationHashCache()
 {
-    fs::path path = GetDataDir() / "drivechain" / "sidechainhashactivate.dat";
+    fs::path path = GetDataDir() / "skydoge" / "sidechainhashactivate.dat";
     CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
@@ -5910,7 +6033,7 @@ void DumpSidechainActivationHashCache()
     int count = vHash.size();
 
     // Write the sidechain activation hash cache
-    fs::path path = GetDataDir() / "drivechain" / "sidechainhashactivate.dat.new";
+    fs::path path = GetDataDir() / "skydoge" / "sidechainhashactivate.dat.new";
     CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
@@ -5930,7 +6053,7 @@ void DumpSidechainActivationHashCache()
 
     FileCommit(fileout.Get());
     fileout.fclose();
-    RenameOver(GetDataDir() / "drivechain" / "sidechainhashactivate.dat.new", GetDataDir() /  "drivechain" / "sidechainhashactivate.dat");
+    RenameOver(GetDataDir() / "skydoge" / "sidechainhashactivate.dat.new", GetDataDir() /  "skydoge" / "sidechainhashactivate.dat");
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }
@@ -6009,8 +6132,8 @@ void DumpSCDBCache()
 {
     // TODO make configurable
 
-    // Create ~/.drivechain/drivechain
-    TryCreateDirectories(GetDataDir() / "drivechain");
+    // Create ~/.skydoge/skydoge
+    TryCreateDirectories(GetDataDir() / "skydoge");
 
     // Dump SidechainDB, sidechain activation & optional caches
     DumpDepositCache();

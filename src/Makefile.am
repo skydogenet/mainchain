@@ -23,23 +23,23 @@ DRIVECHAIN_INCLUDES=-I$(builddir) $(BDB_CPPFLAGS) $(BOOST_CPPFLAGS) $(LEVELDB_CP
 DRIVECHAIN_INCLUDES += -I$(srcdir)/secp256k1/include
 DRIVECHAIN_INCLUDES += $(UNIVALUE_CFLAGS)
 
-LIBDRIVECHAIN_SERVER=libdrivechain_server.a
-LIBDRIVECHAIN_COMMON=libdrivechain_common.a
-LIBDRIVECHAIN_CONSENSUS=libdrivechain_consensus.a
-LIBDRIVECHAIN_CLI=libdrivechain_cli.a
-LIBDRIVECHAIN_UTIL=libdrivechain_util.a
-LIBDRIVECHAIN_CRYPTO=crypto/libdrivechain_crypto.a
-LIBDRIVECHAINQT=qt/libdrivechainqt.a
+LIBDRIVECHAIN_SERVER=libskydoge_server.a
+LIBDRIVECHAIN_COMMON=libskydoge_common.a
+LIBDRIVECHAIN_CONSENSUS=libskydoge_consensus.a
+LIBDRIVECHAIN_CLI=libskydoge_cli.a
+LIBDRIVECHAIN_UTIL=libskydoge_util.a
+LIBDRIVECHAIN_CRYPTO=crypto/libskydoge_crypto.a
+LIBDRIVECHAINQT=qt/libskydogeqt.a
 LIBSECP256K1=secp256k1/libsecp256k1.la
 
 if ENABLE_ZMQ
-LIBDRIVECHAIN_ZMQ=libdrivechain_zmq.a
+LIBDRIVECHAIN_ZMQ=libskydoge_zmq.a
 endif
 if BUILD_DRIVECHAIN_LIBS
-LIBDRIVECHAINCONSENSUS=libdrivechainconsensus.la
+LIBDRIVECHAINCONSENSUS=libskydogeconsensus.la
 endif
 if ENABLE_WALLET
-LIBDRIVECHAIN_WALLET=libdrivechain_wallet.a
+LIBDRIVECHAIN_WALLET=libskydoge_wallet.a
 endif
 
 $(LIBSECP256K1): $(wildcard secp256k1/src/*) $(wildcard secp256k1/include/*)
@@ -65,15 +65,16 @@ TESTS =
 BENCHMARKS =
 
 if BUILD_DRIVECHAIND
-  bin_PROGRAMS += drivechaind
+  bin_PROGRAMS += skydoged
 endif
 
 if BUILD_DRIVECHAIN_UTILS
-  bin_PROGRAMS += drivechain-cli drivechain-tx
+  bin_PROGRAMS += skydoge-cli skydoge-tx
 endif
 
 .PHONY: FORCE check-symbols check-security
-# drivechain core #
+# skydoge core #
+
 DRIVECHAIN_CORE_H = \
   addressbook.h \
   addrdb.h \
@@ -186,12 +187,12 @@ obj/build.h: FORCE
 	@$(MKDIR_P) $(builddir)/obj
 	@$(top_srcdir)/share/genbuild.sh "$(abs_top_builddir)/src/obj/build.h" \
 	  "$(abs_top_srcdir)"
-libdrivechain_util_a-clientversion.$(OBJEXT): obj/build.h
+libskydoge_util_a-clientversion.$(OBJEXT): obj/build.h
 
-# server: shared between drivechaind and drivechain-qt
-libdrivechain_server_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
-libdrivechain_server_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivechain_server_a_SOURCES = \
+# server: shared between skydoged and skydoge-qt
+libskydoge_server_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
+libskydoge_server_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_server_a_SOURCES = \
   addressbook.cpp \
   addrdb.cpp \
   addrman.cpp \
@@ -237,20 +238,20 @@ libdrivechain_server_a_SOURCES = \
   $(DRIVECHAIN_CORE_H)
 
 if ENABLE_ZMQ
-libdrivechain_zmq_a_CPPFLAGS = $(DRIVECHAIN_INCLUDES) $(ZMQ_CFLAGS)
-libdrivechain_zmq_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivechain_zmq_a_SOURCES = \
+libskydoge_zmq_a_CPPFLAGS = $(DRIVECHAIN_INCLUDES) $(ZMQ_CFLAGS)
+libskydoge_zmq_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_zmq_a_SOURCES = \
   zmq/zmqabstractnotifier.cpp \
   zmq/zmqnotificationinterface.cpp \
   zmq/zmqpublishnotifier.cpp
 endif
 
 
-# wallet: shared between drivechaind and drivechain-qt, but only linked
+# wallet: shared between skydoged and skydoge-qt, but only linked
 # when wallet enabled
-libdrivechain_wallet_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libdrivechain_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivechain_wallet_a_SOURCES = \
+libskydoge_wallet_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
+libskydoge_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_wallet_a_SOURCES = \
   wallet/crypter.cpp \
   wallet/db.cpp \
   wallet/feebumper.cpp \
@@ -264,35 +265,75 @@ libdrivechain_wallet_a_SOURCES = \
   $(DRIVECHAIN_CORE_H)
 
 # crypto primitives library
-crypto_libdrivechain_crypto_a_CPPFLAGS = $(AM_CPPFLAGS)
-crypto_libdrivechain_crypto_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-crypto_libdrivechain_crypto_a_SOURCES = \
+crypto_libskydoge_crypto_a_CPPFLAGS = $(AM_CPPFLAGS)
+crypto_libskydoge_crypto_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+crypto_libskydoge_crypto_a_SOURCES = \
   crypto/aes.cpp \
   crypto/aes.h \
+  crypto/common.h \
   crypto/chacha20.h \
   crypto/chacha20.cpp \
-  crypto/common.h \
   crypto/hmac_sha256.cpp \
   crypto/hmac_sha256.h \
   crypto/hmac_sha512.cpp \
   crypto/hmac_sha512.h \
   crypto/ripemd160.cpp \
+  crypto/aes_helper.c \
   crypto/ripemd160.h \
   crypto/sha1.cpp \
   crypto/sha1.h \
   crypto/sha256.cpp \
   crypto/sha256.h \
   crypto/sha512.cpp \
+  crypto/sha512.h \
+  crypto/blake.c \
+  crypto/bmw.c \
+  crypto/cubehash.c \
+  crypto/echo.c \
+  crypto/fugue.c \
+  crypto/groestl.c \
+  crypto/hamsi.c \
+  crypto/haval.c \
+  crypto/jh.c \
+  crypto/keccak.c \
+  crypto/luffa.c \
+  crypto/sph_sha2big.c \
+  crypto/shabal.c \
+  crypto/shavite.c \
+  crypto/simd.c \
+  crypto/skein.c \
+  crypto/whirlpool.c \
+  crypto/sph_blake.h \
+  crypto/sph_bmw.h \
+  crypto/sph_cubehash.h \
+  crypto/sph_echo.h \
+  crypto/sph_fugue.h \
+  crypto/sph_groestl.h \
+  crypto/sph_hamsi.h \
+  crypto/sph_haval.h \
+  crypto/sph_jh.h \
+  crypto/sph_keccak.h \
+  crypto/sph_luffa.h \
+  crypto/sph_sha2.h \
+  crypto/sha2.c \
+  crypto/sph_shabal.h \
+  crypto/sph_shavite.h \
+  crypto/sph_simd.h \
+  crypto/sph_skein.h \
+  crypto/sph_types.h \
+  crypto/sph_whirlpool.h \
+  crypto/sph_tiger.h \
+  crypto/tiger.cpp \
   crypto/sha512.h
 
 if USE_ASM
-crypto_libdrivechain_crypto_a_SOURCES += crypto/sha256_sse4.cpp
+crypto_libskydoge_crypto_a_SOURCES += crypto/sha256_sse4.cpp
 endif
 
 # consensus: shared between all executables that validate any consensus rules.
-libdrivechain_consensus_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libdrivechain_consensus_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivechain_consensus_a_SOURCES = \
+libskydoge_consensus_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
+libskydoge_consensus_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_consensus_a_SOURCES = \
   amount.h \
   arith_uint256.cpp \
   arith_uint256.h \
@@ -309,7 +350,7 @@ libdrivechain_consensus_a_SOURCES = \
   primitives/transaction.h \
   pubkey.cpp \
   pubkey.h \
-  script/drivechainconsensus.cpp \
+  script/skydogeconsensus.cpp \
   script/interpreter.cpp \
   script/interpreter.h \
   script/script.cpp \
@@ -324,10 +365,10 @@ libdrivechain_consensus_a_SOURCES = \
   utilstrencodings.h \
   version.h
 
-# common: shared between drivechaind, and drivechain-qt and non-server tools
-libdrivechain_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libdrivechain_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivechain_common_a_SOURCES = \
+# common: shared between skydoged, and skydoge-qt and non-server tools
+libskydoge_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
+libskydoge_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_common_a_SOURCES = \
   base58.cpp \
   bech32.cpp \
   chainparams.cpp \
@@ -350,9 +391,9 @@ libdrivechain_common_a_SOURCES = \
 # util: shared between all executables.
 # This library *must* be included to make sure that the glibc
 # backward-compatibility objects and their sanity checks are linked.
-libdrivechain_util_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libdrivechain_util_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivechain_util_a_SOURCES = \
+libskydoge_util_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
+libskydoge_util_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_util_a_SOURCES = \
   support/lockedpool.cpp \
   chainparamsbase.cpp \
   clientversion.cpp \
@@ -373,30 +414,30 @@ libdrivechain_util_a_SOURCES = \
   $(DRIVECHAIN_CORE_H)
 
 if GLIBC_BACK_COMPAT
-libdrivechain_util_a_SOURCES += compat/glibc_compat.cpp
+libskydoge_util_a_SOURCES += compat/glibc_compat.cpp
 endif
 
-# cli: shared between drivechain-cli and drivechain-qt
-libdrivechain_cli_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libdrivechain_cli_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-libdrivechain_cli_a_SOURCES = \
+# cli: shared between skydoge-cli and skydoge-qt
+libskydoge_cli_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
+libskydoge_cli_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_cli_a_SOURCES = \
   rpc/client.cpp \
   $(DRIVECHAIN_CORE_H)
 
-nodist_libdrivechain_util_a_SOURCES = $(srcdir)/obj/build.h
+nodist_libskydoge_util_a_SOURCES = $(srcdir)/obj/build.h
 #
 
-# drivechaind binary #
-drivechaind_SOURCES = drivechaind.cpp
-drivechaind_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-drivechaind_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-drivechaind_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+# skydoged binary #
+skydoged_SOURCES = skydoged.cpp
+skydoged_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
+skydoged_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+skydoged_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 if TARGET_WINDOWS
-drivechaind_SOURCES += drivechaind-res.rc
+skydoged_SOURCES += skydoged-res.rc
 endif
 
-drivechaind_LDADD = \
+skydoged_LDADD = \
   $(LIBDRIVECHAIN_SERVER) \
   $(LIBDRIVECHAIN_COMMON) \
   $(LIBUNIVALUE) \
@@ -410,38 +451,38 @@ drivechaind_LDADD = \
   $(LIBMEMENV) \
   $(LIBSECP256K1)
 
-drivechaind_LDADD += $(BOOST_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(ZMQ_LIBS)
+skydoged_LDADD += $(BOOST_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(ZMQ_LIBS)
 
-# drivechain-cli binary #
-drivechain_cli_SOURCES = drivechain-cli.cpp
-drivechain_cli_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(EVENT_CFLAGS)
-drivechain_cli_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-drivechain_cli_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+# skydoge-cli binary #
+skydoge_cli_SOURCES = skydoge-cli.cpp
+skydoge_cli_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(EVENT_CFLAGS)
+skydoge_cli_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+skydoge_cli_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 if TARGET_WINDOWS
-drivechain_cli_SOURCES += drivechain-cli-res.rc
+skydoge_cli_SOURCES += skydoge-cli-res.rc
 endif
 
-drivechain_cli_LDADD = \
+skydoge_cli_LDADD = \
   $(LIBDRIVECHAIN_CLI) \
   $(LIBUNIVALUE) \
   $(LIBDRIVECHAIN_UTIL) \
   $(LIBDRIVECHAIN_CRYPTO)
 
-drivechain_cli_LDADD += $(BOOST_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(EVENT_LIBS)
+skydoge_cli_LDADD += $(BOOST_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(EVENT_LIBS)
 #
 
-# drivechain-tx binary #
-drivechain_tx_SOURCES = drivechain-tx.cpp
-drivechain_tx_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-drivechain_tx_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-drivechain_tx_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+# skydoge-tx binary #
+skydoge_tx_SOURCES = skydoge-tx.cpp
+skydoge_tx_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
+skydoge_tx_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+skydoge_tx_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 if TARGET_WINDOWS
-drivechain_tx_SOURCES += drivechain-tx-res.rc
+skydoge_tx_SOURCES += skydoge-tx-res.rc
 endif
 
-drivechain_tx_LDADD = \
+skydoge_tx_LDADD = \
   $(LIBUNIVALUE) \
   $(LIBDRIVECHAIN_COMMON) \
   $(LIBDRIVECHAIN_UTIL) \
@@ -449,22 +490,22 @@ drivechain_tx_LDADD = \
   $(LIBDRIVECHAIN_CRYPTO) \
   $(LIBSECP256K1)
 
-drivechain_tx_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
+skydoge_tx_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
 #
 
-# drivechainconsensus library #
+# skydogeconsensus library #
 if BUILD_DRIVECHAIN_LIBS
-include_HEADERS = script/drivechainconsensus.h
-libdrivechainconsensus_la_SOURCES = $(crypto_libdrivechain_crypto_a_SOURCES) $(libdrivechain_consensus_a_SOURCES)
+include_HEADERS = script/skydogeconsensus.h
+libskydogeconsensus_la_SOURCES = $(crypto_libskydoge_crypto_a_SOURCES) $(libskydoge_consensus_a_SOURCES)
 
 if GLIBC_BACK_COMPAT
-  libdrivechainconsensus_la_SOURCES += compat/glibc_compat.cpp
+  libskydogeconsensus_la_SOURCES += compat/glibc_compat.cpp
 endif
 
-libdrivechainconsensus_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS)
-libdrivechainconsensus_la_LIBADD = $(LIBSECP256K1)
-libdrivechainconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1/include -DBUILD_DRIVECHAIN_INTERNAL
-libdrivechainconsensus_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydogeconsensus_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS)
+libskydogeconsensus_la_LIBADD = $(LIBSECP256K1)
+libskydogeconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1/include -DBUILD_DRIVECHAIN_INTERNAL
+libskydogeconsensus_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 
 endif
 #
@@ -494,12 +535,12 @@ CLEANFILES += obj/build.h
 EXTRA_DIST = $(CTAES_DIST)
 
 
-config/drivechain-config.h: config/stamp-h1
+config/skydoge-config.h: config/stamp-h1
 	@$(MAKE) -C $(top_builddir) $(subdir)/$(@)
-config/stamp-h1: $(top_srcdir)/$(subdir)/config/drivechain-config.h.in $(top_builddir)/config.status
+config/stamp-h1: $(top_srcdir)/$(subdir)/config/skydoge-config.h.in $(top_builddir)/config.status
 	$(AM_V_at)$(MAKE) -C $(top_builddir) $(subdir)/$(@)
-$(top_srcdir)/$(subdir)/config/drivechain-config.h.in:  $(am__configure_deps)
-	$(AM_V_at)$(MAKE) -C $(top_srcdir) $(subdir)/config/drivechain-config.h.in
+$(top_srcdir)/$(subdir)/config/skydoge-config.h.in:  $(am__configure_deps)
+	$(AM_V_at)$(MAKE) -C $(top_srcdir) $(subdir)/config/skydoge-config.h.in
 
 clean-local:
 	-$(MAKE) -C secp256k1 clean

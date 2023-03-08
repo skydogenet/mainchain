@@ -291,7 +291,7 @@
       <string>  Propose Sidechain</string>
      </property>
      <property name="icon">
-      <iconset resource="../drivechain.qrc">
+      <iconset resource="../skydoge.qrc">
        <normaloff>:/icons/add</normaloff>:/icons/add</iconset>
      </property>
      <property name="iconSize">
@@ -305,7 +305,7 @@
   </layout>
  </widget>
  <resources>
-  <include location="../drivechain.qrc"/>
+  <include location="../skydoge.qrc"/>
  </resources>
  <connections/>
 </ui>

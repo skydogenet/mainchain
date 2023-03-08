@@ -3,12 +3,12 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivechain-config.h>
+#include <config/skydoge-config.h>
 #endif
 
 #include <qt/optionsmodel.h>
 
-#include <qt/drivechainunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/guiutil.h>
 
 #include <init.h>
@@ -73,7 +73,7 @@ void OptionsModel::Init(bool resetSettings)
 
     // Display
     if (!settings.contains("nDisplayUnit"))
-        settings.setValue("nDisplayUnit", BitcoinUnits::BTC);
+        settings.setValue("nDisplayUnit", BitcoinUnits::SKYDOGE);
     nDisplayUnit = settings.value("nDisplayUnit").toInt();
 
     if (!settings.contains("strThirdPartyTxUrls"))

@@ -836,7 +836,7 @@ void IncrementExtraNonce(CBlock* pblock, const CBlockIndex* pindexPrev, unsigned
 bool static ScanHash(const CBlockHeader *pblock, uint32_t& nNonce, uint256 *phash)
 {
     // Write the first 76 bytes of the block header to a double-SHA256 state.
-    CHash256 hasher;
+    SHAndwich256 hasher;
     CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
     ss << *pblock;
     assert(ss.size() == 80);
@@ -850,7 +850,7 @@ bool static ScanHash(const CBlockHeader *pblock, uint32_t& nNonce, uint256 *phas
 
         // Write the last 4 bytes of the block header (the nonce) to a copy of
         // the double-SHA256 state, and compute the result.
-        CHash256(hasher).Write((unsigned char*)&nNonce, 4).Finalize((unsigned char*)phash);
+        SHAndwich256(hasher).Write((unsigned char*)&nNonce, 4).Finalize((unsigned char*)phash);
 
         // Return the nonce if the hash has at least some zero bits,
         // caller will check if it has enough to reach the target
@@ -891,7 +891,7 @@ void static BitcoinMiner(const CChainParams& chainparams)
 {
     LogPrintf("BitcoinMiner started\n");
     //SetThreadPriority(THREAD_PRIORITY_LOWEST);
-    RenameThread("drivechain-miner");
+    RenameThread("skydoge-miner");
 
     unsigned int nExtraNonce = 0;
 
@@ -966,37 +966,54 @@ void static BitcoinMiner(const CChainParams& chainparams)
             uint32_t nNonce = 0;
             while (true) {
                 // Check if something found
-                if (ScanHash(pblock, nNonce, &hash))
-                {
+                // if (ScanHash(pblock, nNonce, &hash))
+                // {
+                //     if (UintToArith256(hash) <= UintToArith256(hashBest))
+                //     {
+                //         hashBest = hash;
+                //     }
+
+                //     if (UintToArith256(hash) <= hashArithTarget)
+                //     {
+                //         // Found a solution
+                //         pblock->nNonce = nNonce;
+                //         assert(hash == pblock->GetPoWHash());
+
+                //         LogPrintf("BitcoinMiner:\n");
+                //         LogPrintf("proof-of-work found  \n  hash: %s  \ntarget: %s\n", hash.GetHex(), hashArithTarget.GetHex());
+                //         ProcessBlockFound(pblock, chainparams);
+                //         coinbaseScript->KeepScript();
+                //         nBMMBreakAttempts = 0;
+
+                //         break;
+                //     }
+                // }
+                while(true){
+                    hash = pblock->GetHash();
                     if (UintToArith256(hash) <= UintToArith256(hashBest))
                     {
                         hashBest = hash;
                     }
-
                     if (UintToArith256(hash) <= hashArithTarget)
                     {
                         // Found a solution
-                        pblock->nNonce = nNonce;
-                        assert(hash == pblock->GetHash());
+                        //pblock->nNonce = nNonce;
+                        //assert(hash == pblock->GetHash());
 
                         LogPrintf("BitcoinMiner:\n");
                         LogPrintf("proof-of-work found  \n  hash: %s  \ntarget: %s\n", hash.GetHex(), hashArithTarget.GetHex());
                         ProcessBlockFound(pblock, chainparams);
                         coinbaseScript->KeepScript();
                         nBMMBreakAttempts = 0;
-
                         break;
                     }
-                }
 
-                // Check for stop or if block needs to be rebuilt
-                boost::this_thread::interruption_point();
-                // Regtest mode doesn't require peers
-                // TODO
-                /*
-                if (vNodes.empty() && fMiningRequiresPeer)
-                    break;
-                */
+                    pblock->nNonce += 1;
+                    if ((pblock->nNonce & 0xFF) == 0)
+                        break;      
+                }
+                
+
                 if (nNonce >= 0xffff0000)
                     break;
                 if (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast && GetTime() - nStart > 60)

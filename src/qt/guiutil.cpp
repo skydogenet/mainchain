@@ -4,8 +4,8 @@
 
 #include <qt/guiutil.h>
 
-#include <qt/drivechainaddressvalidator.h>
-#include <qt/drivechainunits.h>
+#include <qt/skydogeaddressvalidator.h>
+#include <qt/skydogeunits.h>
 #include <qt/qvalidatedlineedit.h>
 #include <qt/walletmodel.h>
 
@@ -132,7 +132,7 @@ void setupAddressWidget(QValidatedLineEdit *widget, QWidget *parent)
 #if QT_VERSION >= 0x040700
     // We don't want translators to use own addresses in translations
     // and this is the only place, where this address is supplied.
-    widget->setPlaceholderText(QObject::tr("Enter a Drivechain address (e.g. %1)").arg(
+    widget->setPlaceholderText(QObject::tr("Enter a Skydoge address (e.g. %1)").arg(
         QString::fromStdString(DummyAddress(Params()))));
 #endif
     widget->setValidator(new BitcoinAddressEntryValidator(parent));
@@ -191,7 +191,7 @@ bool parseBitcoinURI(const QUrl &uri, SendCoinsRecipient *out)
         {
             if(!i->second.isEmpty())
             {
-                if(!BitcoinUnits::parse(BitcoinUnits::BTC, i->second, &rv.amount))
+                if(!BitcoinUnits::parse(BitcoinUnits::SKYDOGE, i->second, &rv.amount))
                 {
                     return false;
                 }
@@ -230,7 +230,7 @@ QString formatBitcoinURI(const SendCoinsRecipient &info)
 
     if (info.amount)
     {
-        ret += QString("?amount=%1").arg(BitcoinUnits::format(BitcoinUnits::BTC, info.amount, false, BitcoinUnits::separatorNever));
+        ret += QString("?amount=%1").arg(BitcoinUnits::format(BitcoinUnits::SKYDOGE, info.amount, false, BitcoinUnits::separatorNever));
         paramCount++;
     }
 
@@ -620,10 +620,10 @@ fs::path static StartupShortcutPath()
 {
     std::string chain = ChainNameFromCommandLine();
     if (chain == CBaseChainParams::MAIN)
-        return GetSpecialFolderPath(CSIDL_STARTUP) / "Drivechain.lnk";
+        return GetSpecialFolderPath(CSIDL_STARTUP) / "Skydoge.lnk";
     if (chain == CBaseChainParams::TESTNET) // Remove this special case when CBaseChainParams::TESTNET = "testnet4"
-        return GetSpecialFolderPath(CSIDL_STARTUP) / "Drivechain (testnet).lnk";
-    return GetSpecialFolderPath(CSIDL_STARTUP) / strprintf("Drivechain (%s).lnk", chain);
+        return GetSpecialFolderPath(CSIDL_STARTUP) / "Skydoge (testnet).lnk";
+    return GetSpecialFolderPath(CSIDL_STARTUP) / strprintf("Skydoge (%s).lnk", chain);
 }
 
 bool GetStartOnSystemStartup()
@@ -718,8 +718,8 @@ fs::path static GetAutostartFilePath()
 {
     std::string chain = ChainNameFromCommandLine();
     if (chain == CBaseChainParams::MAIN)
-        return GetAutostartDir() / "Drivechain.desktop";
-    return GetAutostartDir() / strprintf("Drivechain-%s.lnk", chain);
+        return GetAutostartDir() / "Skydoge.desktop";
+    return GetAutostartDir() / strprintf("Skydoge-%s.lnk", chain);
 }
 
 bool GetStartOnSystemStartup()
@@ -763,9 +763,9 @@ bool SetStartOnSystemStartup(bool fAutoStart)
         optionFile << "[Desktop Entry]\n";
         optionFile << "Type=Application\n";
         if (chain == CBaseChainParams::MAIN)
-            optionFile << "Name=Drivechain\n";
+            optionFile << "Name=Skydoge\n";
         else
-            optionFile << strprintf("Name=Drivechain (%s)\n", chain);
+            optionFile << strprintf("Name=Skydoge (%s)\n", chain);
         optionFile << "Exec=" << pszExePath << strprintf(" -min -testnet=%d -regtest=%d\n", gArgs.GetBoolArg("-testnet", false), gArgs.GetBoolArg("-regtest", false));
         optionFile << "Terminal=false\n";
         optionFile << "Hidden=false\n";
@@ -932,7 +932,7 @@ QString formatServicesStr(quint64 mask)
                 strList.append("WITNESS");
                 break;
             case NODE_DRIVECHAIN:
-                strList.append("DRIVECHAIN");
+                strList.append("SKYDOGE");
             case NODE_XTHIN:
                 strList.append("XTHIN");
                 break;

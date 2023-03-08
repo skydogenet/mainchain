@@ -22,7 +22,7 @@ packages:
 - "ca-certificates"
 - "python"
 remotes:
-- "url": "https://github.com/drivechain-project/mainchain.git"
+- "url": "https://github.com/skydoge-project/mainchain.git"
   "dir": "mainchain"
 files: []
 script: |

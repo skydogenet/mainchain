@@ -5,7 +5,7 @@
 #ifndef BITCOIN_QT_TRANSACTIONTABLEMODEL_H
 #define BITCOIN_QT_TRANSACTIONTABLEMODEL_H
 
-#include <qt/drivechainunits.h>
+#include <qt/skydogeunits.h>
 
 #include <QAbstractTableModel>
 #include <QStringList>

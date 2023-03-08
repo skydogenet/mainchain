@@ -52,7 +52,7 @@
         </size>
        </property>
        <property name="pixmap">
-        <pixmap resource="../drivechain.qrc">:/icons/drivechain</pixmap>
+        <pixmap resource="../skydoge.qrc">:/icons/skydoge</pixmap>
        </property>
        <property name="scaledContents">
         <bool>true</bool>
@@ -150,7 +150,7 @@
   </layout>
  </widget>
  <resources>
-  <include location="../drivechain.qrc"/>
+  <include location="../skydoge.qrc"/>
  </resources>
  <connections>
   <connection>

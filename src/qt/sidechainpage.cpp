@@ -6,7 +6,7 @@
 #include <qt/forms/ui_sidechainpage.h>
 
 #include <qt/clientmodel.h>
-#include <qt/drivechainunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
@@ -203,9 +203,9 @@ void SidechainPage::SetupSidechainList(const std::vector<Sidechain>& vSidechain)
 
             SidechainCTIP ctip;
             if (!scdb.GetCTIP(s.nSidechain, ctip))
-                title += " (" + BitcoinUnits::formatWithUnit(BitcoinUnit::BTC, CAmount(0), false, BitcoinUnits::separatorAlways) + ")";
+                title += " (" + BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, CAmount(0), false, BitcoinUnits::separatorAlways) + ")";
             else
-                title += " (" + BitcoinUnits::formatWithUnit(BitcoinUnit::BTC, ctip.amount, false, BitcoinUnits::separatorAlways) + ")";
+                title += " (" + BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, ctip.amount, false, BitcoinUnits::separatorAlways) + ")";
 
             item->setText(title);
             QFont font = item->font();
@@ -255,7 +255,7 @@ void SidechainPage::on_pushButtonDeposit_clicked()
         // Invalid deposit amount message box
         messageBox.setWindowTitle("Invalid deposit amount!");
         QString error = "Check the amount you have entered and try again.\n\n";
-        error += "Your deposit must be > 0.00001 BTC to cover the sidechain ";
+        error += "Your deposit must be > 0.00001 SKYDOGE to cover the sidechain ";
         error += "deposit fee. If the output amount is dust after paying the ";
         error += "fee, you will not receive anything on the sidechain.\n";
         messageBox.setText(error);
@@ -308,8 +308,8 @@ void SidechainPage::on_pushButtonDeposit_clicked()
 
     // Format strings for confirmation dialog
     QString strSidechain = QString::fromStdString(scdb.GetSidechainName(nSidechain));
-    QString strValue = BitcoinUnits::formatWithUnit(BitcoinUnit::BTC, nValue, false, BitcoinUnits::separatorAlways);
-    QString strFee = BitcoinUnits::formatWithUnit(BitcoinUnit::BTC, nFee, false, BitcoinUnits::separatorAlways);
+    QString strValue = BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, nValue, false, BitcoinUnits::separatorAlways);
+    QString strFee = BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, nFee, false, BitcoinUnits::separatorAlways);
 
     // Once we've made it to this point and validated what we can, show the
     // deposit confirmation dialog and check the result.
@@ -366,7 +366,7 @@ void SidechainPage::on_pushButtonDeposit_clicked()
     result += "txid: " + QString::fromStdString(tx->GetHash().ToString());
     result += "\n";
     result += "Amount deposited: ";
-    result += BitcoinUnits::formatWithUnit(BitcoinUnit::BTC, nValue, false, BitcoinUnits::separatorAlways);
+    result += BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, nValue, false, BitcoinUnits::separatorAlways);
     messageBox.setText(result);
     messageBox.exec();
 
@@ -521,7 +521,7 @@ void SidechainPage::on_pushButtonWithdrawalVote_clicked()
 
 void SidechainPage::on_pushButtonWTDoubleClickHelp_clicked()
 {
-    QMessageBox::information(this, tr("Drivechain - information"),
+    QMessageBox::information(this, tr("Skydoge - information"),
         tr("If you have a sidechain full node, and have granted it RPC-access, "
            "then your mainchain node will periodically receive a cache of raw "
            "Withdrawal transactions. From this cache, the Withdrawal transaction-details can "
@@ -536,8 +536,8 @@ void SidechainPage::on_pushButtonWTDoubleClickHelp_clicked()
 
 void SidechainPage::on_pushButtonRecentDepositHelp_clicked()
 {
-    QMessageBox::information(this, tr("Drivechain - information"),
-        tr("Hello, from the creators of Drivechain! We wrote Drivechain "
+    QMessageBox::information(this, tr("Skydoge - information"),
+        tr("Hello, from the creators of Skydoge! We wrote Skydoge "
            "(the software you are using right now), and we wrote you this "
            "message. \n\n"
            "But the sidechain software (ie, the software that "
@@ -549,7 +549,7 @@ void SidechainPage::on_pushButtonRecentDepositHelp_clicked()
            "up immediately. We don't know because we didn't write that "
            "software.\n\n"
            "But we can nonetheless give you our expert opinion: "
-           "Drivechain Deposits likely require one mainchain confirmation, "
+           "Skydoge Deposits likely require one mainchain confirmation, "
            "and one sidechain confirmation. Probably, this means that two "
            "Mainchain confirmations should do the trick.\n"),
         QMessageBox::Ok);

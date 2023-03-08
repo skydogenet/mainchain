@@ -14,7 +14,7 @@
    <string>Mining</string>
   </property>
   <property name="windowIcon">
-   <iconset resource="../drivechain.qrc">
+   <iconset resource="../skydoge.qrc">
     <normaloff>:/icons/tx_mined</normaloff>:/icons/tx_mined</iconset>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -139,7 +139,7 @@
         <string>Start Mining</string>
        </property>
        <property name="icon">
-        <iconset resource="../drivechain.qrc">
+        <iconset resource="../skydoge.qrc">
          <normaloff>:/icons/tx_mined</normaloff>:/icons/tx_mined</iconset>
        </property>
       </widget>
@@ -156,7 +156,7 @@
         <string>Stop Mining</string>
        </property>
        <property name="icon">
-        <iconset resource="../drivechain.qrc">
+        <iconset resource="../skydoge.qrc">
          <normaloff>:/icons/quit</normaloff>:/icons/quit</iconset>
        </property>
       </widget>
@@ -183,7 +183,7 @@
         <string>Manage Sidechains</string>
        </property>
        <property name="icon">
-        <iconset resource="../drivechain.qrc">
+        <iconset resource="../skydoge.qrc">
          <normaloff>:/icons/options</normaloff>:/icons/options</iconset>
        </property>
       </widget>
@@ -266,7 +266,7 @@
   </layout>
  </widget>
  <resources>
-  <include location="../drivechain.qrc"/>
+  <include location="../skydoge.qrc"/>
  </resources>
  <connections/>
 </ui>

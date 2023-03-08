@@ -6,7 +6,7 @@
 
 #include <qt/addresstablemodel.h>
 #include <qt/coinsplitconfirmationdialog.h>
-#include <qt/drivechainunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/csvmodelwriter.h>
 #include <qt/editaddressdialog.h>
 #include <qt/optionsmodel.h>

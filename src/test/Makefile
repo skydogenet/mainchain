@@ -1,6 +1,6 @@
 all:
-	$(MAKE) -C .. drivechain_test
+	$(MAKE) -C .. skydoge_test
 clean:
-	$(MAKE) -C .. drivechain_test_clean
+	$(MAKE) -C .. skydoge_test_clean
 check:
-	$(MAKE) -C .. drivechain_test_check
+	$(MAKE) -C .. skydoge_test_check

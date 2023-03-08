@@ -7,14 +7,14 @@
 
 #include <qt/forms/ui_receivecoinsdialog.h>
 
-#include <qt/drivechainunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/paymentrequestdialog.h>
 #include <qt/platformstyle.h>
 #include <qt/receivecoinsdialog.h>
 #include <qt/walletmodel.h>
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivechain-config.h> /* for USE_QRCODE */
+#include <config/skydoge-config.h> /* for USE_QRCODE */
 #endif
 
 #ifdef USE_QRCODE

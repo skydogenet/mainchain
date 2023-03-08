@@ -6,7 +6,7 @@
 #include <qt/forms/ui_newsqrdialog.h>
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivechain-config.h> /* for USE_QRCODE */
+#include <config/skydoge-config.h> /* for USE_QRCODE */
 #endif
 
 #ifdef USE_QRCODE

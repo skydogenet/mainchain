@@ -2,11 +2,11 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-TESTS += test/test_drivechain
-bin_PROGRAMS += test/test_drivechain
-noinst_PROGRAMS += test/test_drivechain_fuzzy
+TESTS += test/test_skydoge
+bin_PROGRAMS += test/test_skydoge
+noinst_PROGRAMS += test/test_skydoge_fuzzy
 TEST_SRCDIR = test
-TEST_BINARY=test/test_drivechain$(EXEEXT)
+TEST_BINARY=test/test_skydoge$(EXEEXT)
 
 JSON_TEST_FILES = \
   test/data/script_tests.json \
@@ -21,7 +21,7 @@ RAW_TEST_FILES =
 
 GENERATED_TEST_FILES = $(JSON_TEST_FILES:.json=.json.h) $(RAW_TEST_FILES:.raw=.raw.h)
 
-# test_drivechain binary #
+# test_skydoge binary #
 DRIVECHAIN_TESTS =\
   test/arith_uint256_tests.cpp \
   test/scriptnum10.h \
@@ -79,9 +79,9 @@ DRIVECHAIN_TESTS =\
   test/sigopcount_tests.cpp \
   test/skiplist_tests.cpp \
   test/streams_tests.cpp \
-  test/test_drivechain.cpp \
-  test/test_drivechain.h \
-  test/test_drivechain_main.cpp \
+  test/test_skydoge.cpp \
+  test/test_skydoge.h \
+  test/test_skydoge_main.cpp \
   test/timedata_tests.cpp \
   test/torcontrol_tests.cpp \
   test/transaction_tests.cpp \
@@ -101,31 +101,31 @@ DRIVECHAIN_TESTS += \
   wallet/test/crypto_tests.cpp
 endif
 
-test_test_drivechain_SOURCES = $(DRIVECHAIN_TESTS) $(JSON_TEST_FILES) $(RAW_TEST_FILES)
-test_test_drivechain_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(TESTDEFS) $(EVENT_CFLAGS)
-test_test_drivechain_LDADD =
+test_test_skydoge_SOURCES = $(DRIVECHAIN_TESTS) $(JSON_TEST_FILES) $(RAW_TEST_FILES)
+test_test_skydoge_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(TESTDEFS) $(EVENT_CFLAGS)
+test_test_skydoge_LDADD =
 if ENABLE_WALLET
-test_test_drivechain_LDADD += $(LIBDRIVECHAIN_WALLET)
+test_test_skydoge_LDADD += $(LIBDRIVECHAIN_WALLET)
 endif
-test_test_drivechain_LDADD += $(LIBDRIVECHAIN_SERVER) $(LIBDRIVECHAIN_CLI) $(LIBDRIVECHAIN_COMMON) $(LIBDRIVECHAIN_UTIL) $(LIBDRIVECHAIN_CONSENSUS) $(LIBDRIVECHAIN_CRYPTO) $(LIBUNIVALUE) \
+test_test_skydoge_LDADD += $(LIBDRIVECHAIN_SERVER) $(LIBDRIVECHAIN_CLI) $(LIBDRIVECHAIN_COMMON) $(LIBDRIVECHAIN_UTIL) $(LIBDRIVECHAIN_CONSENSUS) $(LIBDRIVECHAIN_CRYPTO) $(LIBUNIVALUE) \
   $(LIBLEVELDB) $(LIBLEVELDB_SSE42) $(LIBMEMENV) $(BOOST_LIBS) $(BOOST_UNIT_TEST_FRAMEWORK_LIB) $(LIBSECP256K1) $(EVENT_LIBS) $(EVENT_PTHREADS_LIBS)
-test_test_drivechain_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+test_test_skydoge_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 
-test_test_drivechain_LDADD += $(LIBDRIVECHAIN_CONSENSUS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS)
-test_test_drivechain_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) -static
+test_test_skydoge_LDADD += $(LIBDRIVECHAIN_CONSENSUS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS)
+test_test_skydoge_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) -static
 
 if ENABLE_ZMQ
-test_test_drivechain_LDADD += $(ZMQ_LIBS)
+test_test_dskydoge_LDADD += $(ZMQ_LIBS)
 endif
 #
 
-# test_drivechain_fuzzy binary #
-test_test_drivechain_fuzzy_SOURCES = test/test_drivechain_fuzzy.cpp
-test_test_drivechain_fuzzy_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-test_test_drivechain_fuzzy_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-test_test_drivechain_fuzzy_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+# test_skydoge_fuzzy binary #
+test_test_skydoge_fuzzy_SOURCES = test/test_skydoge_fuzzy.cpp
+test_test_skydoge_fuzzy_CPPFLAGS = $(AM_CPPFLAGS) $(skydoge_INCLUDES)
+test_test_skydoge_fuzzy_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+test_test_skydoge_fuzzy_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
-test_test_drivechain_fuzzy_LDADD = \
+test_test_skydoge_fuzzy_LDADD = \
   $(LIBUNIVALUE) \
   $(LIBDRIVECHAIN_SERVER) \
   $(LIBDRIVECHAIN_COMMON) \
@@ -134,10 +134,10 @@ test_test_drivechain_fuzzy_LDADD = \
   $(LIBDRIVECHAIN_CRYPTO) \
   $(LIBSECP256K1)
 
-test_test_drivechain_fuzzy_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
+test_test_skydoge_fuzzy_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
 #
 
-nodist_test_test_drivechain_SOURCES = $(GENERATED_TEST_FILES)
+nodist_test_test_skydoge_SOURCES = $(GENERATED_TEST_FILES)
 
 $(DRIVECHAIN_TESTS): $(GENERATED_TEST_FILES)
 
@@ -145,18 +145,18 @@ CLEAN_DRIVECHAIN_TEST = test/*.gcda test/*.gcno $(GENERATED_TEST_FILES)
 
 CLEANFILES += $(CLEAN_DRIVECHAIN_TEST)
 
-drivechain_test: $(TEST_BINARY)
+skydoge_test: $(TEST_BINARY)
 
-drivechain_test_check: $(TEST_BINARY) FORCE
+skydoge_test_check: $(TEST_BINARY) FORCE
 	$(MAKE) check-TESTS TESTS=$^
 
-drivechain_test_clean : FORCE
+skydoge_test_clean : FORCE
 	rm -f $(CLEAN_DRIVECHAIN_TEST) $(test_test_drivechain_OBJECTS) $(TEST_BINARY)
 
 check-local:
 if BUILD_DRIVECHAIN_UTILS
-	@echo "Running test/util/drivechain-util-test.py..."
-	$(PYTHON) $(top_builddir)/test/util/drivechain-util-test.py
+	@echo "Running test/util/skydoge-util-test.py..."
+	$(PYTHON) $(top_builddir)/test/util/skydoge-util-test.py
 endif
 	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C secp256k1 check
 if EMBEDDED_UNIVALUE

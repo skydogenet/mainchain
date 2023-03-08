@@ -5,7 +5,7 @@
 #include <random.h>
 #include <scheduler.h>
 
-#include <test/test_drivechain.h>
+#include <test/test_skydoge.h>
 
 #include <boost/bind.hpp>
 #include <boost/thread.hpp>

@@ -165,7 +165,7 @@ void HashCalcDialog::on_pushButtonPaste_clicked()
 
 void HashCalcDialog::on_pushButtonHelp_clicked()
 {
-    QMessageBox::information(this, tr("Drivechain - information"),
+    QMessageBox::information(this, tr("Skydoge - information"),
         tr(""
            "Hex:\n"
            "The hexadecimal (base 16) representation.\n\n"
@@ -185,8 +185,8 @@ void HashCalcDialog::on_pushButtonHelp_clicked()
 
 void HashCalcDialog::on_pushButtonHelpInvalidHex_clicked()
 {
-    QMessageBox::information(this, tr("Drivechain - information"),
-        tr("Please enter valid Hex without spaces or 0x prefix."),
+    QMessageBox::information(this, tr("Skydoge - information"),
+        tr("Please enter valid Hex without spaces or 0x."),
         QMessageBox::Ok);
 }
 

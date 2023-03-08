@@ -4,7 +4,7 @@
 
 #include <chain.h>
 #include <util.h>
-#include <test/test_drivechain.h>
+#include <test/test_skydoge.h>
 
 #include <vector>
 

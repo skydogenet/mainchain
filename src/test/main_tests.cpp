@@ -6,7 +6,7 @@
 #include <validation.h>
 #include <net.h>
 
-#include <test/test_drivechain.h>
+#include <test/test_skydoge.h>
 
 #include <boost/signals2/signal.hpp>
 #include <boost/test/unit_test.hpp>

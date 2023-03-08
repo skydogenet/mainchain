@@ -7,7 +7,7 @@
 #define BITCOIN_VALIDATION_H
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivechain-config.h>
+#include <config/skydoge-config.h>
 #endif
 
 #include <amount.h>
@@ -433,7 +433,7 @@ bool TestBlockValidity(CValidationState& state, const CChainParams& chainparams,
 /** Check whether witness commitments are required for block. */
 bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params);
 
-/** Check whether Drivechains are activated. */
+/** Check whether Skydoge are activated. */
 bool IsDrivechainEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params);
 
 int GetWitnessCommitmentIndex(const CBlock& block);

@@ -7,17 +7,16 @@ define(_CLIENT_VERSION_BUILD, 0)
 define(_CLIENT_VERSION_IS_RELEASE, true)
 define(_COPYRIGHT_YEAR, 2022)
 define(_COPYRIGHT_HOLDERS,[The %s developers])
-define(_COPYRIGHT_HOLDERS_SUBSTITUTION,[[Drivechain]])
-AC_INIT([Drivechain],[_CLIENT_VERSION_MAJOR._CLIENT_VERSION_MINOR._CLIENT_VERSION_REVISION],[https://github.com/DrivechainTESTDRIVE/drivechain/issues],[mainchain],[http://drivechain.info/])
+define(_COPYRIGHT_HOLDERS_SUBSTITUTION,[[Skydoge]])
+AC_INIT([skydoge],[_CLIENT_VERSION_MAJOR._CLIENT_VERSION_MINOR._CLIENT_VERSION_REVISION],[https://github.com/skydogenet/mainchain/issues],[mainchain],[http://skydoge.net/])
 AC_CONFIG_SRCDIR([src/validation.cpp])
-AC_CONFIG_HEADERS([src/config/drivechain-config.h])
+AC_CONFIG_HEADERS([src/config/skydoge-config.h])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR([build-aux/m4])
-
-DRIVECHAIN_DAEMON_NAME=drivechaind
-DRIVECHAIN_GUI_NAME=drivechain-qt
-DRIVECHAIN_CLI_NAME=drivechain-cli
-DRIVECHAIN_TX_NAME=drivechain-tx
+DRIVECHAIN_DAEMON_NAME=skydoged
+DRIVECHAIN_GUI_NAME=skydoge-qt
+DRIVECHAIN_CLI_NAME=skydoge-cli
+DRIVECHAIN_TX_NAME=skydoge-tx
 
 dnl Unless the user specified ARFLAGS, force it to be cr
 AC_ARG_VAR(ARFLAGS, [Flags for the archiver, defaults to <cr> if not set])
@@ -293,21 +292,21 @@ CPPFLAGS="$CPPFLAGS -DHAVE_BUILD_INFO -D__STDC_FORMAT_MACROS"
 
 AC_ARG_WITH([utils],
   [AS_HELP_STRING([--with-utils],
-  [build drivechain-cli drivechain-tx (default=yes)])],
-  [build_drivechain_utils=$withval],
-  [build_drivechain_utils=yes])
+  [build skydoge-cli skydoge-tx (default=yes)])],
+  [build_skydoge_utils=$withval],
+  [build_skydoge_utils=yes])
 
 AC_ARG_WITH([libs],
   [AS_HELP_STRING([--with-libs],
   [build libraries (default=yes)])],
-  [build_drivechain_libs=$withval],
-  [build_drivechain_libs=yes])
+  [build_skydoge_libs=$withval],
+  [build_skydoge_libs=yes])
 
 AC_ARG_WITH([daemon],
   [AS_HELP_STRING([--with-daemon],
-  [build drivechaind daemon (default=yes)])],
-  [build_drivechaind=$withval],
-  [build_drivechaind=yes])
+  [build skydoged daemon (default=yes)])],
+  [build_skydoged=$withval],
+  [build_skydoged=yes])
 
 use_pkgconfig=yes
 case $host in
@@ -505,7 +504,7 @@ AC_C_BIGENDIAN
 dnl Check for pthread compile/link requirements
 AX_PTHREAD
 
-# The following macro will add the necessary defines to drivechain-config.h, but
+# The following macro will add the necessary defines to skydoge-config.h, but
 # they also need to be passed down to any subprojects. Pull the results out of
 # the cache and add them to CPPFLAGS.
 AC_SYS_LARGEFILE
@@ -748,10 +747,10 @@ fi
 
 DRIVECHAIN_QT_INIT
 
-dnl sets $drivechain_enable_qt, $drivechain_enable_qt_test, $drivechain_enable_qt_dbus
+dnl sets $skydoge_enable_qt, $skydoge_enable_qt_test, $skydoge_enable_qt_dbus
 DRIVECHAIN_QT_CONFIGURE([$use_pkgconfig], [qt5])
 
-if test x$build_drivechain_utils$build_drivechaind$drivechain_enable_qt$use_tests$use_bench = xnonononono; then
+if test x$build_skydoge_utils$build_skydoged$skydoge_enable_qt$use_tests$use_bench = xnonononono; then
     use_boost=no
 else
     use_boost=yes
@@ -765,7 +764,7 @@ define(MINIMUM_REQUIRED_BOOST, 1.47.0)
 dnl Check for boost libs
 AX_BOOST_BASE([MINIMUM_REQUIRED_BOOST])
 if test x$want_boost = xno; then
-    AC_MSG_ERROR([[only libdrivechainconsensus can be built without boost]])
+    AC_MSG_ERROR([[only libskydogeconsensus can be built without boost]])
 fi
 AX_BOOST_SYSTEM
 AX_BOOST_FILESYSTEM
@@ -940,7 +939,7 @@ if test x$use_pkgconfig = xyes; then
       if test x$use_qr != xno; then
         DRIVECHAIN_QT_CHECK([PKG_CHECK_MODULES([QR], [libqrencode], [have_qrencode=yes], [have_qrencode=no])])
       fi
-      if test x$build_drivechain_utils$build_drivechaind$drivechain_enable_qt$use_tests != xnononono; then
+      if test x$build_skydoge_utils$build_skydoged$skydoge_enable_qt$use_tests != xnononono; then
         PKG_CHECK_MODULES([EVENT], [libevent],, [AC_MSG_ERROR(libevent not found.)])
         if test x$TARGET_OS != xwindows; then
           PKG_CHECK_MODULES([EVENT_PTHREADS], [libevent_pthreads],, [AC_MSG_ERROR(libevent_pthreads not found.)])
@@ -965,7 +964,7 @@ else
   AC_CHECK_HEADER([openssl/ssl.h],, AC_MSG_ERROR(libssl headers missing),)
   AC_CHECK_LIB([ssl],         [main],SSL_LIBS=-lssl, AC_MSG_ERROR(libssl missing))
 
-  if test x$build_drivechain_utils$build_drivechaind$drivechain_enable_qt$use_tests != xnononono; then
+  if test x$build_skydoge_utils$build_skydoged$skydoge_enable_qt$use_tests != xnononono; then
     AC_CHECK_HEADER([event2/event.h],, AC_MSG_ERROR(libevent headers missing),)
     AC_CHECK_LIB([event],[main],EVENT_LIBS=-levent,AC_MSG_ERROR(libevent missing))
     if test x$TARGET_OS != xwindows; then
@@ -1014,7 +1013,7 @@ dnl univalue check
 
 need_bundled_univalue=yes
 
-if test x$build_drivechain_utils$build_drivechaind$drivechain_enable_qt$use_tests$use_bench = xnonononono; then
+if test x$build_skydoge_utils$build_skydoged$skydoge_enable_qt$use_tests$use_bench = xnonononono; then
   need_bundled_univalue=no
 else
 
@@ -1060,21 +1059,22 @@ AC_SUBST(UNIVALUE_LIBS)
 
 DRIVECHAIN_QT_PATH_PROGS([PROTOC], [protoc],$protoc_bin_path)
 
-AC_MSG_CHECKING([whether to build drivechaind])
-AM_CONDITIONAL([BUILD_DRIVECHAIND], [test x$build_drivechaind = xyes])
-AC_MSG_RESULT($build_drivechaind)
+AC_MSG_CHECKING([whether to build skydoged])
+AM_CONDITIONAL([BUILD_DRIVECHAIND], [test x$build_skydoged = xyes])
+AC_MSG_RESULT($build_skydoged)
 
-AC_MSG_CHECKING([whether to build utils (drivechain-cli drivechain-tx)])
-AM_CONDITIONAL([BUILD_DRIVECHAIN_UTILS], [test x$build_drivechain_utils = xyes])
-AC_MSG_RESULT($build_drivechain_utils)
+AC_MSG_CHECKING([whether to build utils (skydoge-cli skydoge-tx)])
+AM_CONDITIONAL([BUILD_DRIVECHAIN_UTILS], [test x$build_skydoge_utils = xyes])
+AC_MSG_RESULT($build_skydoge_utils)
 
 AC_MSG_CHECKING([whether to build libraries])
-AM_CONDITIONAL([BUILD_DRIVECHAIN_LIBS], [test x$build_drivechain_libs = xyes])
-if test x$build_drivechain_libs = xyes; then
+AM_CONDITIONAL([BUILD_DRIVECHAIN_LIBS], [test x$build_skydoge_libs = xyes])
+if test x$build_skydoge_libs = xyes; then
   AC_DEFINE(HAVE_CONSENSUS_LIB, 1, [Define this symbol if the consensus lib has been built])
-  AC_CONFIG_FILES([libdrivechainconsensus.pc:libdrivechainconsensus.pc.in])
+  AC_CONFIG_FILES([libskydogeconsensus.pc:libskydogeconsensus.pc.in])
 fi
-AC_MSG_RESULT($build_drivechain_libs)
+AC_MSG_RESULT($build_skydoge_libs)
+
 
 AC_LANG_POP
 
@@ -1136,13 +1136,13 @@ fi
 
 dnl these are only used when qt is enabled
 BUILD_TEST_QT=""
-if test x$drivechain_enable_qt != xno; then
+if test x$skydoge_enable_qt != xno; then
   dnl enable dbus support
   AC_MSG_CHECKING([whether to build GUI with support for D-Bus])
-  if test x$drivechain_enable_qt_dbus != xno; then
+  if test x$skydoge_enable_qt_dbus != xno; then
     AC_DEFINE([USE_DBUS],[1],[Define if dbus support should be compiled in])
   fi
-  AC_MSG_RESULT($drivechain_enable_qt_dbus)
+  AC_MSG_RESULT($skydoge_enable_qt_dbus)
 
   dnl enable qr support
   AC_MSG_CHECKING([whether to build GUI with support for QR codes])
@@ -1165,8 +1165,8 @@ if test x$drivechain_enable_qt != xno; then
     AC_MSG_WARN("xgettext is required to update qt translations")
   fi
 
-  AC_MSG_CHECKING([whether to build test_drivechain-qt])
-  if test x$use_gui_tests$drivechain_enable_qt_test = xyesyes; then
+  AC_MSG_CHECKING([whether to build test_skydoge-qt])
+  if test x$use_gui_tests$skydoge_enable_qt_test = xyesyes; then
     AC_MSG_RESULT([yes])
     BUILD_TEST_QT="yes"
   else
@@ -1176,7 +1176,7 @@ fi
 
 AM_CONDITIONAL([ENABLE_ZMQ], [test "x$use_zmq" = "xyes"])
 
-AC_MSG_CHECKING([whether to build test_drivechain])
+AC_MSG_CHECKING([whether to build test_skydoge])
 if test x$use_tests = xyes; then
   AC_MSG_RESULT([yes])
   BUILD_TEST="yes"
@@ -1192,7 +1192,7 @@ else
   AC_MSG_RESULT([no])
 fi
 
-if test x$build_drivechain_utils$build_drivechain_libs$build_drivechaind$drivechain_enable_qt$use_bench$use_tests = xnononononono; then
+if test x$build_skydoge_utils$build_skydoge_libs$build_skydoged$skydoge_enable_qt$use_bench$use_tests = xnononononono; then
   AC_MSG_ERROR([No targets! Please specify at least one of: --with-utils --with-libs --with-daemon --with-gui --enable-bench or --enable-tests])
 fi
 
@@ -1201,7 +1201,7 @@ AM_CONDITIONAL([BUILD_DARWIN], [test x$BUILD_OS = xdarwin])
 AM_CONDITIONAL([TARGET_WINDOWS], [test x$TARGET_OS = xwindows])
 AM_CONDITIONAL([ENABLE_WALLET],[test x$enable_wallet = xyes])
 AM_CONDITIONAL([ENABLE_TESTS],[test x$BUILD_TEST = xyes])
-AM_CONDITIONAL([ENABLE_QT],[test x$drivechain_enable_qt = xyes])
+AM_CONDITIONAL([ENABLE_QT],[test x$skydoge_enable_qt = xyes])
 AM_CONDITIONAL([ENABLE_QT_TESTS],[test x$BUILD_TEST_QT = xyes])
 AM_CONDITIONAL([ENABLE_BENCH],[test x$use_bench = xyes])
 AM_CONDITIONAL([USE_QRCODE], [test x$use_qr = xyes])
@@ -1263,7 +1263,7 @@ AC_CONFIG_FILES([contrib/devtools/split-debug.sh],[chmod +x contrib/devtools/spl
 AC_CONFIG_FILES([doc/Doxyfile])
 AC_CONFIG_LINKS([contrib/filter-lcov.py:contrib/filter-lcov.py])
 AC_CONFIG_LINKS([test/functional/test_runner.py:test/functional/test_runner.py])
-AC_CONFIG_LINKS([test/util/drivechain-util-test.py:test/util/drivechain-util-test.py])
+AC_CONFIG_LINKS([test/util/skydoge-util-test.py:test/util/skydoge-util-test.py])
 
 dnl boost's m4 checks do something really nasty: they export these vars. As a
 dnl result, they leak into secp256k1's configure and crazy things happen.
@@ -1319,9 +1319,9 @@ esac
 echo
 echo "Options used to compile and link:"
 echo "  with wallet   = $enable_wallet"
-echo "  with gui / qt = $drivechain_enable_qt"
-if test x$drivechain_enable_qt != xno; then
-    echo "    qt version  = $drivechain_qt_got_major_vers"
+echo "  with gui / qt = $skydoge_enable_qt"
+if test x$skydoge_enable_qt != xno; then
+    echo "    qt version  = $skydoge_qt_got_major_vers"
     echo "    with qr     = $use_qr"
 fi
 echo "  with zmq      = $use_zmq"

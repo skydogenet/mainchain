@@ -166,7 +166,7 @@ std::string CInv::GetCommand() const
     if (type & MSG_WITNESS_FLAG)
         cmd.append("witness-");
     if (type & MSG_DRIVECHAIN_FLAG)
-        cmd.append("drivechain-");
+        cmd.append("skydoge-");
 
     int masked = type & MSG_TYPE_MASK;
 

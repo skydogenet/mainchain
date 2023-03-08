@@ -39,6 +39,123 @@ HEADERS += src/addrdb.h \
            src/compressor.h \
            src/core_io.h \
            src/core_memusage.h \
+           src/crypto/sph/aes.h \
+           src/crypto/sph/blake2b.h \
+           src/crypto/sph/blake2s.h \
+           src/crypto/sph/common.h \
+           src/crypto/sph/hmac_sha256.h \
+           src/crypto/sph/hmac_sha512.h \
+           src/crypto/sph/ripemd160.h \
+           src/crypto/sph/sha1.h \
+           src/crypto/sph/sha256.h \
+           src/crypto/sph/sha512.h \
+           src/crypto/sph/sm3.h \
+           src/crypto/sph/sph_blake.h \
+           src/crypto/sph/sph_bmw.h \
+           src/crypto/sph/sph_cubehash.h \
+           src/crypto/sph/sph_echo.h \
+           src/crypto/sph/sph_fugue.h \
+           src/crypto/sph/sph_groestl.h \
+           src/crypto/sph/sph_hamsi.h \
+           src/crypto/sph/sph_haval.h \
+           src/crypto/sph/sph_jh.h \
+           src/crypto/sph/sph_keccak.h \
+           src/crypto/sph/sph_luffa.h \
+           src/crypto/sph/sph_sha2.h \
+           src/crypto/sph/sph_shabal.h \
+           src/crypto/sph/sph_shavite.h \
+           src/crypto/sph/sph_simd.h \
+           src/crypto/sph/sph_skein.h \
+           src/crypto/sph/sph_tiger.h \
+           src/crypto/sph/sph_types.h \
+           src/crypto/sph/sph_whirlpool.h \
+           src/crypto/sph/新建文件夹/aes.h \
+           src/crypto/sph/新建文件夹/aes.h \
+           src/crypto/sph/新建文件夹/blake2b.h \
+           src/crypto/sph/新建文件夹/blake2b.h \
+           src/crypto/sph/新建文件夹/blake2s.h \
+           src/crypto/sph/新建文件夹/blake2s.h \
+           src/crypto/sph/新建文件夹/common.h \
+           src/crypto/sph/新建文件夹/common.h \
+           src/crypto/sph/新建文件夹/hmac_sha256.h \
+           src/crypto/sph/新建文件夹/hmac_sha256.h \
+           src/crypto/sph/新建文件夹/hmac_sha512.h \
+           src/crypto/sph/新建文件夹/hmac_sha512.h \
+           src/crypto/sph/新建文件夹/ripemd160.h \
+           src/crypto/sph/新建文件夹/ripemd160.h \
+           src/crypto/sph/新建文件夹/sha1.h \
+           src/crypto/sph/新建文件夹/sha1.h \
+           src/crypto/sph/新建文件夹/sha256.h \
+           src/crypto/sph/新建文件夹/sha256.h \
+           src/crypto/sph/新建文件夹/sha512.h \
+           src/crypto/sph/新建文件夹/sha512.h \
+           src/crypto/sph/新建文件夹/sm3.h \
+           src/crypto/sph/新建文件夹/sm3.h \
+           src/crypto/sph/新建文件夹/sph_blake.h \
+           src/crypto/sph/新建文件夹/sph_blake.h \
+           src/crypto/sph/新建文件夹/sph_bmw.h \
+           src/crypto/sph/新建文件夹/sph_bmw.h \
+           src/crypto/sph/新建文件夹/sph_cubehash.h \
+           src/crypto/sph/新建文件夹/sph_cubehash.h \
+           src/crypto/sph/新建文件夹/sph_echo.h \
+           src/crypto/sph/新建文件夹/sph_echo.h \
+           src/crypto/sph/新建文件夹/sph_fugue.h \
+           src/crypto/sph/新建文件夹/sph_fugue.h \
+           src/crypto/sph/新建文件夹/sph_groestl.h \
+           src/crypto/sph/新建文件夹/sph_groestl.h \
+           src/crypto/sph/新建文件夹/sph_hamsi.h \
+           src/crypto/sph/新建文件夹/sph_hamsi.h \
+           src/crypto/sph/新建文件夹/sph_haval.h \
+           src/crypto/sph/新建文件夹/sph_haval.h \
+           src/crypto/sph/新建文件夹/sph_jh.h \
+           src/crypto/sph/新建文件夹/sph_jh.h \
+           src/crypto/sph/新建文件夹/sph_keccak.h \
+           src/crypto/sph/新建文件夹/sph_keccak.h \
+           src/crypto/sph/新建文件夹/sph_luffa.h \
+           src/crypto/sph/新建文件夹/sph_luffa.h \
+           src/crypto/sph/新建文件夹/sph_sha2.h \
+           src/crypto/sph/新建文件夹/sph_sha2.h \
+           src/crypto/sph/新建文件夹/sph_shabal.h \
+           src/crypto/sph/新建文件夹/sph_shabal.h \
+           src/crypto/sph/新建文件夹/sph_shavite.h \
+           src/crypto/sph/新建文件夹/sph_shavite.h \
+           src/crypto/sph/新建文件夹/sph_simd.h \
+           src/crypto/sph/新建文件夹/sph_simd.h \
+           src/crypto/sph/新建文件夹/sph_skein.h \
+           src/crypto/sph/新建文件夹/sph_skein.h \
+           src/crypto/sph/新建文件夹/sph_tiger.h \
+           src/crypto/sph/新建文件夹/sph_tiger.h \
+           src/crypto/sph/新建文件夹/sph_types.h \
+           src/crypto/sph/新建文件夹/sph_types.h \
+           src/crypto/sph/新建文件夹/sph_whirlpool.h \
+           src/crypto/sph/新建文件夹/sph_whirlpool.h \
+           src/crypto/sph_blake.h \
+           src/crypto/sph_bmw.h \
+           src/crypto/sph_cubehash.h \
+           src/crypto/sph_echo.h \
+           src/crypto/sph_fugue.h \
+           src/crypto/sph_groestl.h \
+           src/crypto/sph_hamsi.h \
+           src/crypto/sph_haval.h \
+           src/crypto/sph_jh.h \
+           src/crypto/sph_keccak.h \
+           src/crypto/sph_luffa.h \
+           src/crypto/sph_sha2.h \
+           src/crypto/sph_shabal.h \
+           src/crypto/sph_shavite.h \
+           src/crypto/sph_simd.h \
+           src/crypto/sph_skein.h \
+           src/crypto/sph_types.h \
+           src/crypto/sph_whirlpool.h \
+           src/crypto/新建文件夹/aes.h \
+           src/crypto/新建文件夹/chacha20.h \
+           src/crypto/新建文件夹/common.h \
+           src/crypto/新建文件夹/hmac_sha256.h \
+           src/crypto/新建文件夹/hmac_sha512.h \
+           src/crypto/新建文件夹/ripemd160.h \
+           src/crypto/新建文件夹/sha1.h \
+           src/crypto/新建文件夹/sha256.h \
+           src/crypto/新建文件夹/sha512.h \
            src/cuckoocache.h \
            src/dbwrapper.h \
            src/fs.h \
@@ -130,10 +247,10 @@ HEADERS += src/addrdb.h \
            src/qt/coinsplitconfirmationdialog.h \
            src/qt/createnewsdialog.h \
            src/qt/csvmodelwriter.h \
-           src/qt/drivechainaddressvalidator.h \
-           src/qt/drivechainamountfield.h \
-           src/qt/drivechaingui.h \
-           src/qt/drivechainunits.h \
+           src/qt/skydogeaddressvalidator.h \
+           src/qt/skydogeamountfield.h \
+           src/qt/skydogegui.h \
+           src/qt/skydogeunits.h \
            src/qt/editaddressdialog.h \
            src/qt/guiconstants.h \
            src/qt/guiutil.h \
@@ -204,7 +321,7 @@ HEADERS += src/addrdb.h \
            src/rpc/safemode.h \
            src/rpc/server.h \
            src/rpc/util.h \
-           src/script/drivechainconsensus.h \
+           src/script/skydogeconsensus.h \
            src/script/interpreter.h \
            src/script/ismine.h \
            src/script/script.h \
@@ -216,7 +333,7 @@ HEADERS += src/addrdb.h \
            src/support/events.h \
            src/support/lockedpool.h \
            src/test/scriptnum10.h \
-           src/test/test_drivechain.h \
+           src/test/test_skydoge.h \
            src/wallet/coincontrol.h \
            src/wallet/crypter.h \
            src/wallet/db.h \
@@ -400,10 +517,206 @@ SOURCES += src/addrdb.cpp \
            src/compressor.cpp \
            src/core_read.cpp \
            src/core_write.cpp \
+           src/crypto/aes_helper.c \
+           src/crypto/blake.c \
+           src/crypto/bmw.c \
+           src/crypto/cubehash.c \
+           src/crypto/echo.c \
+           src/crypto/fugue.c \
+           src/crypto/groestl.c \
+           src/crypto/hamsi.c \
+           src/crypto/hamsi_helper.c \
+           src/crypto/haval.c \
+           src/crypto/haval_helper.c \
+           src/crypto/jh.c \
+           src/crypto/keccak.c \
+           src/crypto/luffa.c \
+           src/crypto/md_helper.c \
+           src/crypto/sha2.c \
+           src/crypto/shabal.c \
+           src/crypto/shavite.c \
+           src/crypto/simd.c \
+           src/crypto/skein.c \
+           src/crypto/sph/aes.cpp \
+           src/crypto/sph/aes_helper.c \
+           src/crypto/sph/blake.c \
+           src/crypto/sph/blake2b.c \
+           src/crypto/sph/blake2s.c \
+           src/crypto/sph/bmw.c \
+           src/crypto/sph/cubehash.c \
+           src/crypto/sph/echo.c \
+           src/crypto/sph/fugue.c \
+           src/crypto/sph/groestl.c \
+           src/crypto/sph/hamsi.c \
+           src/crypto/sph/hamsi_helper.c \
+           src/crypto/sph/haval.c \
+           src/crypto/sph/haval_helper.c \
+           src/crypto/sph/hmac_sha256.cpp \
+           src/crypto/sph/hmac_sha512.cpp \
+           src/crypto/sph/jh.c \
+           src/crypto/sph/keccak.c \
+           src/crypto/sph/luffa.c \
+           src/crypto/sph/md_helper.c \
+           src/crypto/sph/ripemd.c \
+           src/crypto/sph/ripemd160.cpp \
+           src/crypto/sph/sha1.cpp \
+           src/crypto/sph/sha2.c \
+           src/crypto/sph/sha256.cpp \
+           src/crypto/sph/sha2big.c \
+           src/crypto/sph/sha512.cpp \
+           src/crypto/sph/shabal.c \
+           src/crypto/sph/shavite.c \
+           src/crypto/sph/simd.c \
+           src/crypto/sph/skein.c \
+           src/crypto/sph/sm3.c \
+           src/crypto/sph/sph_blake.c \
+           src/crypto/sph/sph_bmw.c \
+           src/crypto/sph/sph_cubehash.c \
+           src/crypto/sph/sph_echo.c \
+           src/crypto/sph/sph_fugue.c \
+           src/crypto/sph/sph_groestl.c \
+           src/crypto/sph/sph_hamsi.c \
+           src/crypto/sph/sph_hamsi_helper.c \
+           src/crypto/sph/sph_haval.c \
+           src/crypto/sph/sph_jh.c \
+           src/crypto/sph/sph_keccak.c \
+           src/crypto/sph/sph_luffa.c \
+           src/crypto/sph/sph_md_helper.c \
+           src/crypto/sph/sph_sha2.c \
+           src/crypto/sph/sph_sha2big.c \
+           src/crypto/sph/sph_shabal.c \
+           src/crypto/sph/sph_shavite.c \
+           src/crypto/sph/sph_simd.c \
+           src/crypto/sph/sph_skein.c \
+           src/crypto/sph/sph_tiger.c \
+           src/crypto/sph/sph_whirlpool.c \
+           src/crypto/sph/whirlpool.c \
+           src/crypto/sph/新建文件夹/aes.cpp \
+           src/crypto/sph/新建文件夹/aes.cpp \
+           src/crypto/sph/新建文件夹/aes_helper.c \
+           src/crypto/sph/新建文件夹/aes_helper.c \
+           src/crypto/sph/新建文件夹/blake.c \
+           src/crypto/sph/新建文件夹/blake.c \
+           src/crypto/sph/新建文件夹/blake2b.c \
+           src/crypto/sph/新建文件夹/blake2b.c \
+           src/crypto/sph/新建文件夹/blake2s.c \
+           src/crypto/sph/新建文件夹/blake2s.c \
+           src/crypto/sph/新建文件夹/bmw.c \
+           src/crypto/sph/新建文件夹/bmw.c \
+           src/crypto/sph/新建文件夹/cubehash.c \
+           src/crypto/sph/新建文件夹/cubehash.c \
+           src/crypto/sph/新建文件夹/echo.c \
+           src/crypto/sph/新建文件夹/echo.c \
+           src/crypto/sph/新建文件夹/fugue.c \
+           src/crypto/sph/新建文件夹/fugue.c \
+           src/crypto/sph/新建文件夹/groestl.c \
+           src/crypto/sph/新建文件夹/groestl.c \
+           src/crypto/sph/新建文件夹/hamsi.c \
+           src/crypto/sph/新建文件夹/hamsi.c \
+           src/crypto/sph/新建文件夹/hamsi_helper.c \
+           src/crypto/sph/新建文件夹/hamsi_helper.c \
+           src/crypto/sph/新建文件夹/haval.c \
+           src/crypto/sph/新建文件夹/haval.c \
+           src/crypto/sph/新建文件夹/haval_helper.c \
+           src/crypto/sph/新建文件夹/haval_helper.c \
+           src/crypto/sph/新建文件夹/hmac_sha256.cpp \
+           src/crypto/sph/新建文件夹/hmac_sha256.cpp \
+           src/crypto/sph/新建文件夹/hmac_sha512.cpp \
+           src/crypto/sph/新建文件夹/hmac_sha512.cpp \
+           src/crypto/sph/新建文件夹/jh.c \
+           src/crypto/sph/新建文件夹/jh.c \
+           src/crypto/sph/新建文件夹/keccak.c \
+           src/crypto/sph/新建文件夹/keccak.c \
+           src/crypto/sph/新建文件夹/luffa.c \
+           src/crypto/sph/新建文件夹/luffa.c \
+           src/crypto/sph/新建文件夹/md_helper.c \
+           src/crypto/sph/新建文件夹/md_helper.c \
+           src/crypto/sph/新建文件夹/ripemd.c \
+           src/crypto/sph/新建文件夹/ripemd.c \
+           src/crypto/sph/新建文件夹/ripemd160.cpp \
+           src/crypto/sph/新建文件夹/ripemd160.cpp \
+           src/crypto/sph/新建文件夹/sha1.cpp \
+           src/crypto/sph/新建文件夹/sha1.cpp \
+           src/crypto/sph/新建文件夹/sha2.c \
+           src/crypto/sph/新建文件夹/sha2.c \
+           src/crypto/sph/新建文件夹/sha256.cpp \
+           src/crypto/sph/新建文件夹/sha256.cpp \
+           src/crypto/sph/新建文件夹/sha2big.c \
+           src/crypto/sph/新建文件夹/sha2big.c \
+           src/crypto/sph/新建文件夹/sha512.cpp \
+           src/crypto/sph/新建文件夹/sha512.cpp \
+           src/crypto/sph/新建文件夹/shabal.c \
+           src/crypto/sph/新建文件夹/shabal.c \
+           src/crypto/sph/新建文件夹/shavite.c \
+           src/crypto/sph/新建文件夹/shavite.c \
+           src/crypto/sph/新建文件夹/simd.c \
+           src/crypto/sph/新建文件夹/simd.c \
+           src/crypto/sph/新建文件夹/skein.c \
+           src/crypto/sph/新建文件夹/skein.c \
+           src/crypto/sph/新建文件夹/sm3.c \
+           src/crypto/sph/新建文件夹/sm3.c \
+           src/crypto/sph/新建文件夹/sph_blake.c \
+           src/crypto/sph/新建文件夹/sph_blake.c \
+           src/crypto/sph/新建文件夹/sph_bmw.c \
+           src/crypto/sph/新建文件夹/sph_bmw.c \
+           src/crypto/sph/新建文件夹/sph_cubehash.c \
+           src/crypto/sph/新建文件夹/sph_cubehash.c \
+           src/crypto/sph/新建文件夹/sph_echo.c \
+           src/crypto/sph/新建文件夹/sph_echo.c \
+           src/crypto/sph/新建文件夹/sph_fugue.c \
+           src/crypto/sph/新建文件夹/sph_fugue.c \
+           src/crypto/sph/新建文件夹/sph_groestl.c \
+           src/crypto/sph/新建文件夹/sph_groestl.c \
+           src/crypto/sph/新建文件夹/sph_hamsi.c \
+           src/crypto/sph/新建文件夹/sph_hamsi.c \
+           src/crypto/sph/新建文件夹/sph_hamsi_helper.c \
+           src/crypto/sph/新建文件夹/sph_hamsi_helper.c \
+           src/crypto/sph/新建文件夹/sph_haval.c \
+           src/crypto/sph/新建文件夹/sph_haval.c \
+           src/crypto/sph/新建文件夹/sph_jh.c \
+           src/crypto/sph/新建文件夹/sph_jh.c \
+           src/crypto/sph/新建文件夹/sph_keccak.c \
+           src/crypto/sph/新建文件夹/sph_keccak.c \
+           src/crypto/sph/新建文件夹/sph_luffa.c \
+           src/crypto/sph/新建文件夹/sph_luffa.c \
+           src/crypto/sph/新建文件夹/sph_md_helper.c \
+           src/crypto/sph/新建文件夹/sph_md_helper.c \
+           src/crypto/sph/新建文件夹/sph_sha2.c \
+           src/crypto/sph/新建文件夹/sph_sha2.c \
+           src/crypto/sph/新建文件夹/sph_sha2big.c \
+           src/crypto/sph/新建文件夹/sph_sha2big.c \
+           src/crypto/sph/新建文件夹/sph_shabal.c \
+           src/crypto/sph/新建文件夹/sph_shabal.c \
+           src/crypto/sph/新建文件夹/sph_shavite.c \
+           src/crypto/sph/新建文件夹/sph_shavite.c \
+           src/crypto/sph/新建文件夹/sph_simd.c \
+           src/crypto/sph/新建文件夹/sph_simd.c \
+           src/crypto/sph/新建文件夹/sph_skein.c \
+           src/crypto/sph/新建文件夹/sph_skein.c \
+           src/crypto/sph/新建文件夹/sph_tiger.c \
+           src/crypto/sph/新建文件夹/sph_tiger.c \
+           src/crypto/sph/新建文件夹/sph_whirlpool.c \
+           src/crypto/sph/新建文件夹/sph_whirlpool.c \
+           src/crypto/sph/新建文件夹/tiger.c \
+           src/crypto/sph/新建文件夹/tiger.c \
+           src/crypto/sph/新建文件夹/whirlpool.c \
+           src/crypto/sph/新建文件夹/whirlpool.c \
+           src/crypto/sph_md_helper.c \
+           src/crypto/sph_sha2big.c \
+           src/crypto/whirlpool.c \
+           src/crypto/新建文件夹/aes.cpp \
+           src/crypto/新建文件夹/chacha20.cpp \
+           src/crypto/新建文件夹/hmac_sha256.cpp \
+           src/crypto/新建文件夹/hmac_sha512.cpp \
+           src/crypto/新建文件夹/ripemd160.cpp \
+           src/crypto/新建文件夹/sha1.cpp \
+           src/crypto/新建文件夹/sha256.cpp \
+           src/crypto/新建文件夹/sha256_sse4.cpp \
+           src/crypto/新建文件夹/sha512.cpp \
            src/dbwrapper.cpp \
-           src/drivechain-cli.cpp \
-           src/drivechain-tx.cpp \
-           src/drivechaind.cpp \
+           src/skydoge-cli.cpp \
+           src/skydoge-tx.cpp \
+           src/skydoged.cpp \
            src/fs.cpp \
            src/hash.cpp \
            src/httprpc.cpp \
@@ -491,12 +804,12 @@ SOURCES += src/addrdb.cpp \
            src/qt/coinsplitconfirmationdialog.cpp \
            src/qt/createnewsdialog.cpp \
            src/qt/csvmodelwriter.cpp \
-           src/qt/drivechain.cpp \
-           src/qt/drivechainaddressvalidator.cpp \
-           src/qt/drivechainamountfield.cpp \
-           src/qt/drivechaingui.cpp \
-           src/qt/drivechainstrings.cpp \
-           src/qt/drivechainunits.cpp \
+           src/qt/skydoge.cpp \
+           src/qt/skydogeaddressvalidator.cpp \
+           src/qt/skydogeamountfield.cpp \
+           src/qt/skydogegui.cpp \
+           src/qt/skydogestrings.cpp \
+           src/qt/skydogeunits.cpp \
            src/qt/editaddressdialog.cpp \
            src/qt/guiutil.cpp \
            src/qt/hashcalcdialog.cpp \
@@ -566,7 +879,7 @@ SOURCES += src/addrdb.cpp \
            src/rpc/safemode.cpp \
            src/rpc/server.cpp \
            src/rpc/util.cpp \
-           src/script/drivechainconsensus.cpp \
+           src/script/skydogeconsensus.cpp \
            src/script/interpreter.cpp \
            src/script/ismine.cpp \
            src/script/script.cpp \
@@ -631,9 +944,9 @@ SOURCES += src/addrdb.cpp \
            src/test/sigopcount_tests.cpp \
            src/test/skiplist_tests.cpp \
            src/test/streams_tests.cpp \
-           src/test/test_drivechain.cpp \
-           src/test/test_drivechain_fuzzy.cpp \
-           src/test/test_drivechain_main.cpp \
+           src/test/test_skydoge.cpp \
+           src/test/test_skydoge_fuzzy.cpp \
+           src/test/test_skydoge_main.cpp \
            src/test/timedata_tests.cpp \
            src/test/torcontrol_tests.cpp \
            src/test/transaction_criticaldata_tests.cpp \
@@ -765,7 +1078,7 @@ SOURCES += src/addrdb.cpp \
            src/leveldb/helpers/memenv/memenv_test.cc \
            src/secp256k1/src/java/org_bitcoin_NativeSecp256k1.c \
            src/secp256k1/src/java/org_bitcoin_Secp256k1Context.c
-RESOURCES += src/qt/drivechain.qrc src/qt/drivechain_locale.qrc
+RESOURCES += src/qt/skydoge.qrc src/qt/skydoge_locale.qrc
 TRANSLATIONS += src/qt/locale/bitcoin_af.ts \
                 src/qt/locale/bitcoin_af_ZA.ts \
                 src/qt/locale/bitcoin_ar.ts \
@@ -852,3 +1165,7 @@ TRANSLATIONS += src/qt/locale/bitcoin_af.ts \
                 src/qt/locale/bitcoin_zh_CN.ts \
                 src/qt/locale/bitcoin_zh_HK.ts \
                 src/qt/locale/bitcoin_zh_TW.ts
+
+DISTFILES += \
+    src/crypto/ctaes/COPYING \
+    src/crypto/ctaes/README.md

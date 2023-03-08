@@ -4,7 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivechain-config.h>
+#include <config/skydoge-config.h>
 #endif
 
 #include "init.h"
@@ -185,7 +185,7 @@ void Shutdown()
     /// for example if the data directory was found to be locked.
     /// Be sure that anything that writes files or flushes caches only does this if the respective
     /// module was initialized.
-    RenameThread("drivechain-shutoff");
+    RenameThread("skydoge-shutoff");
     mempool.AddTransactionsUpdated(1);
 
     StopHTTPRPC();
@@ -529,8 +529,8 @@ std::string HelpMessage(HelpMessageMode mode)
 
 std::string LicenseInfo()
 {
-    const std::string URL_SOURCE_CODE = "<https://github.com/drivechain-project/mainchain>";
-    const std::string URL_WEBSITE = "<http://drivechain.info>";
+    const std::string URL_SOURCE_CODE = "<https://github.com/skydoge-project/mainchain>";
+    const std::string URL_WEBSITE = "<http://skydoge.info>";
 
     return CopyrightHolders(strprintf(_("Copyright (C) %i-%i"), 2009, COPYRIGHT_YEAR) + " ") + "\n" +
            "\n" +
@@ -634,7 +634,7 @@ void CleanupBlockRevFiles()
 void ThreadImport(std::vector<fs::path> vImportFiles)
 {
     const CChainParams& chainparams = Params();
-    RenameThread("drivechain-loadblk");
+    RenameThread("skydoge-loadblk");
 
     {
     CImportingNow imp;
@@ -1405,6 +1405,9 @@ bool AppInitMain()
     // ********************************************************* Step 7: load caches
     fReindex = gArgs.GetBoolArg("-reindex", false);
 
+//old DC
+    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
+
     std::string strFailSCDAT;
     strFailSCDAT = "Failed to load sidechain database files!\n";
     strFailSCDAT += "They may corrupt or need to be updated.\n";
@@ -1538,7 +1541,7 @@ bool AppInitMain()
     		    drivechainsEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
 
                 // Synchronize SCDB
-                if (drivechainsEnabled && !fReindex && chainActive.Tip() && (chainActive.Tip()->GetBlockHash() != scdb.GetHashBlockLastSeen()))
+                if (skydogesEnabled && !fReindex && chainActive.Tip() && (chainActive.Tip()->GetBlockHash() != scdb.GetHashBlockLastSeen()))
                 {
                     uiInterface.InitMessage(_("Synchronizing sidechain database..."));
                     if (!ResyncSCDB(chainActive.Tip())) {
@@ -1551,7 +1554,7 @@ bool AppInitMain()
                     }
                 }
 
-                if (drivechainsEnabled && !fReindex) {
+                if (skydogesEnabled && !fReindex) {
                     if (!LoadDepositCache()) {
                         // Ask to reindex to fix issue loading DAT
                         bool fRet = uiInterface.ThreadSafeQuestion(
@@ -1609,8 +1612,8 @@ bool AppInitMain()
                     }
                 }
 
-                // Load user's drivechain data
-                if (drivechainsEnabled) {
+                // Load user's skydoge data
+                if (skydogesEnabled) {
                     // We want to read the user's data even if reindexing - this data
                     // was created by the user and is not in any block
                     if (!LoadSidechainProposalCache() ||
@@ -1706,9 +1709,15 @@ bool AppInitMain()
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
     }
 
+if (nHeight < DrivechainHeight) {
+    if (chainparams.GetConsensus().vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout != 0) {
+        nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN);
+    }
+} else {
+
     // Show NODE_DRIVECHAIN after fork height
     if (drivechainsEnabled)
-        nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN);
+        nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN); }
 
     // ********************************************************* Step 11: import blocks
 
@@ -1756,6 +1765,66 @@ bool AppInitMain()
 
 #ifdef ENABLE_WALLET
     StartWallets(scheduler);
+
+    // ********************************************************* Step 12: load coins
+
+    bool fReadLoadedCoins = gArgs.GetBoolArg("-loadedcoins", true);
+
+    // TODO loaded coins are disabled for this release. Setting fReadLoadedCoins
+    // to false no matter what settings are applied means that loaded coins will
+    // not be read and cannot be used by other nodes without violating consensus
+    // rules.
+    //
+    // If loaded coins are to be removed entirely the code should be deleted.
+    // Or if loaded coins are to be re-enabled the next line can be deleted.
+    fReadLoadedCoins = false;
+
+    // TODO improve this check... Right now we're just checking if the last
+    // loaded coin that will be written can currently be looked up by pcoinsTip.
+    // That does basically ensure that we have loaded all of the coins, but I'm
+    // sure there's a better way of doing this. The loaded_coins.dat file itself
+    // should be checksum verified by the user after download. However, most
+    // people will not read or follow those instructions so maybe we can just do
+    // our own checksum comparison here.
+    //
+    // Note that we only load coins for main network.
+    //
+    // Check if we have already imported loaded coins, try to load them if not
+    if (chainparams.NetworkIDString() == "main" && fReadLoadedCoins &&
+            !pcoinsTip->HaveCoin(COutPoint(uint256S(LAST_LOADED_OUTPOINT), LAST_LOADED_N)))
+    {
+        uiInterface.InitMessage(_("Importing UTXO set. First time only (~10 minutes)."));
+
+        // Try to read loaded coins
+        if (!pcoinsTip->ReadLoadedCoins()) {
+            // Failed to read loaded coins, abort
+            // TODO add link to website with setup guide
+            std::string strError = "Error reading loading coins!\n\n";
+            strError += "Skydoge needs to import a UTXO set (loaded coins) before starting for the first time.";
+            strError += "\n\n";
+            strError += "You must move loaded_coins.dat to your Skydoge datadir.";
+            strError += "\n\n";
+            strError += "Shutting down.";
+            uiInterface.ThreadSafeMessageBox(_(strError.c_str()), "", CClientUIInterface::MSG_ERROR);
+            LogPrintf("Error reading loaded coins, aborting init");
+            return false;
+        }
+    }
+
+    //
+    // TODO
+    // Loaded coins disabled in this release, so don't show ui message
+    // about loaded coins or scan for wallet's loaded coins.
+    /*
+    if (!vpwallets.empty()) {
+        uiInterface.InitMessage(_("Reading wallet's loaded coins."));
+        CWalletRef pwallet = vpwallets.front();
+        std::vector<LoadedCoin> vLoadedCoin;
+        LOCK2(cs_main, pwallet->cs_wallet);
+        vLoadedCoin = pcoinsTip->ReadMyLoadedCoins();
+        pwallet->AddLoadedCoins(vLoadedCoin);
+    }
+    */
 #endif
 
     // ********************************************************* Step 12: start node
@@ -1835,8 +1904,8 @@ bool AppInitMain()
         return false;
     }
 
-    // ********************************************************* Step 13: finished
-    uiInterface.InitMessage(_("Drivechain ready"));
+    // ********************************************************* Step 14: finished
+    uiInterface.InitMessage(_("Skydoge ready"));
 
     SetRPCWarmupFinished();
 

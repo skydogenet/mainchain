@@ -7,7 +7,7 @@
 #define BITCOIN_COMPAT_H
 
 #if defined(HAVE_CONFIG_H)
-#include <config/drivechain-config.h>
+#include <config/skydoge-config.h>
 #endif
 
 #ifdef WIN32

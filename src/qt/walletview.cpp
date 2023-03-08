@@ -6,7 +6,11 @@
 
 #include <qt/addressbookpage.h>
 #include <qt/askpassphrasedialog.h>
+<<<<<<< HEAD
+#include <qt/skydogegui.h>
+=======
 #include <qt/drivechaingui.h>
+>>>>>>> master
 #include <qt/clientmodel.h>
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>

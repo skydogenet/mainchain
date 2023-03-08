@@ -12,7 +12,7 @@
 
 #include <support/events.h>
 
-#include <test/test_drivechain.h>
+#include <test/test_skydoge.h>
 
 #include <vector>
 

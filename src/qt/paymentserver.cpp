@@ -4,7 +4,7 @@
 
 #include <qt/paymentserver.h>
 
-#include <qt/drivechainunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
 
