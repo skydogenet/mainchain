@@ -2219,9 +2219,6 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
 
             // Set fSidechainInputs & nSidechain
                 if (skydogesEnabled) {
-                    std::vector<CScript> vScript; }
-                if (IsDrivechainEnabled) {
-            
                     for (const CTxIn& in : tx.vin) {
                         Coin coin = view.AccessCoin(in.prevout);
                         if (coin.out.scriptPubKey.IsDrivechain(nSidechain)) {
@@ -3482,7 +3479,7 @@ bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& pa
 
 bool IsDrivechainEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
-        LOCK(cs_main);
+    LOCK(cs_main);
     return (pindexPrev && pindexPrev->nHeight + 1 >= params.DrivechainHeight);
 }
 

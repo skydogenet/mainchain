@@ -81,7 +81,7 @@ bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool w
     }
     else if (!witnessEnabled && (whichType == TX_WITNESS_V0_KEYHASH || whichType == TX_WITNESS_V0_SCRIPTHASH))
         return false;
-    else if (!IsDrivechainEnabled && whichType == TX_DRIVECHAIN)
+    else if (!skydogeEnabled && whichType == TX_DRIVECHAIN)
         return false;
 
     return whichType != TX_NONSTANDARD && whichType != TX_WITNESS_UNKNOWN;

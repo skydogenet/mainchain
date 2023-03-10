@@ -134,8 +134,8 @@ public:
 
         // Deployment of SegWit (BIP141, BIP143, and BIP147)
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].bit = 1;
-        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = 1479168000;
-        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = 1510704000;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime =  Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // Deployment of Skydoge old DC (BIPX hashrate escrow, BIPY BMM)
         consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].bit = 4;
@@ -147,7 +147,7 @@ public:
 
         // By default assume that the signatures in ancestors of this block are valid.
         consensus.defaultAssumeValid = uint256S("0x5a86f07cf871fb4d8125aa6f8701e3ba3e876bddfcb6d11754cfb459eedf2e8c");
-        consensus.DrivechainHeight = 222222;
+        consensus.DrivechainHeight = 1;
 
         /**
          * The message start string is designed to be unlikely to occur in normal data.
