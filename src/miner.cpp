@@ -171,7 +171,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     // transaction (which in most cases can be a no-op).
     fIncludeWitness = IsWitnessEnabled(pindexPrev, chainparams.GetConsensus()) && fMineWitnessTx;
 
-    bool fDrivechainEnabled = IsDrivechainEnabled(pindexPrev, chainparams.GetConsensus());
+    bool fDrivechainEnabled = skydogeEnabled(pindexPrev, chainparams.GetConsensus());
 
 #ifdef ENABLE_WALLET
     if (fDrivechainEnabled) {
@@ -517,7 +517,7 @@ bool BlockAssembler::CreateWithdrawalPayout(uint8_t nSidechain, CMutableTransact
     CMutableTransaction mtx;
     mtx.nVersion = 2;
 
-    if (!IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus()))
+    if (!skydogeEnabled(chainActive.Tip(), chainparams.GetConsensus()))
         return false;
 
 #ifdef ENABLE_WALLET

@@ -434,7 +434,7 @@ bool TestBlockValidity(CValidationState& state, const CChainParams& chainparams,
 bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params);
 
 /** Check whether Skydoge are activated. */
-bool IsDrivechainEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params);
+bool skydogeEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params);
 
 int GetWitnessCommitmentIndex(const CBlock& block);
 

@@ -648,7 +648,7 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
 
     // Reject critical data / Skydoge BMM transactions before Skydoge are activated (override with -prematureskydoges)
     bool fCriticalData = !tx.criticalData.IsNull();
-    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
+    bool skydogesEnabled = skydogeEnabled(chainActive.Tip(), chainparams.GetConsensus());
     if (!gArgs.GetBoolArg("-prematureskydoges", false) && fCriticalData && !skydogesEnabled) {
         return state.DoS(0, false, REJECT_NONSTANDARD, "no-skydoges-yet", true);
     }
@@ -1612,7 +1612,7 @@ bool CheckInputs(const CTransaction& tx, CValidationState &state, const CCoinsVi
                 return true;
             }
 
-            //bool fSkydogeEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+            //bool fSkydogeEnabled = skydogeEnabled(chainActive.Tip(), Params().GetConsensus());
 
             for (unsigned int i = 0; i < tx.vin.size(); i++) {
                 const COutPoint &prevout = tx.vin[i].prevout;
@@ -2148,7 +2148,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         nLockTimeFlags |= LOCKTIME_VERIFY_SEQUENCE;
     }
 
-    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+    bool skydogesEnabled = skydogeEnabled(chainActive.Tip(), Params().GetConsensus());
 
     // Get the script flags for this block
     unsigned int flags = GetBlockScriptFlags(pindex, chainparams.GetConsensus());
@@ -2812,7 +2812,7 @@ bool CChainState::ConnectTip(CValidationState& state, const CChainParams& chainp
     disconnectpool.removeForBlock(blockConnecting.vtx);
 
     // Update mempool CTIP
-    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+    bool skydogesEnabled = skydogeEnabled(chainActive.Tip(), Params().GetConsensus());
     if (skydogesEnabled)
         mempool.UpdateCTIPFromBlock(scdb.GetCTIP(), false /* fDisconnect */);
 
@@ -3477,7 +3477,7 @@ bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& pa
     return (VersionBitsState(pindexPrev, params, Consensus::DEPLOYMENT_SEGWIT, versionbitscache) == THRESHOLD_ACTIVE);
 }
 
-bool IsDrivechainEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
+bool skydogeEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
     LOCK(cs_main);
     return (pindexPrev && pindexPrev->nHeight + 1 >= params.DrivechainHeight);
@@ -3635,7 +3635,7 @@ void GenerateSCDBHashMerkleRootCommitment(CBlock& block, const uint256& hashSCDB
      */
 
     // Check for activation of Skydoge
-    if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
+    if (!skydogeEnabled(chainActive.Tip(), consensusParams))
         return;
 
     // Create output that commitment will be added to
@@ -3976,7 +3976,7 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
         return state.DoS(100, false, REJECT_INVALID, "bad-blk-weight", false, strprintf("%s : weight limit failed", __func__));
     }
 
-    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+    bool skydogesEnabled = skydogeEnabled(chainActive.Tip(), Params().GetConsensus());
 
     // Check critical data transactions (outputs, not spending)
     if (skydogesEnabled) {

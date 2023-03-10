@@ -1406,7 +1406,7 @@ bool AppInitMain()
     fReindex = gArgs.GetBoolArg("-reindex", false);
 
 //old DC
-    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
+    bool skydogesEnabled = skydogeEnabled(chainActive.Tip(), chainparams.GetConsensus());
 
     std::string strFailSCDAT;
     strFailSCDAT = "Failed to load sidechain database files!\n";
@@ -1538,7 +1538,7 @@ bool AppInitMain()
                     assert(chainActive.Tip() != nullptr);
                 }
 
-    		    drivechainsEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
+    		    drivechainsEnabled = skydogeEnabled(chainActive.Tip(), chainparams.GetConsensus());
 
                 // Synchronize SCDB
                 if (skydogesEnabled && !fReindex && chainActive.Tip() && (chainActive.Tip()->GetBlockHash() != scdb.GetHashBlockLastSeen()))
