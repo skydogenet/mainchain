@@ -966,13 +966,34 @@ void static BitcoinMiner(const CChainParams& chainparams)
             uint32_t nNonce = 0;
             while (true) {
                 // Check if something found
-                if (ScanHash(pblock, nNonce, &hash))
-                {
+                // if (ScanHash(pblock, nNonce, &hash))
+                // {
+                //     if (UintToArith256(hash) <= UintToArith256(hashBest))
+                //     {
+                //         hashBest = hash;
+                //     }
+
+                //     if (UintToArith256(hash) <= hashArithTarget)
+                //     {
+                //         // Found a solution
+                //         pblock->nNonce = nNonce;
+                //         assert(hash == pblock->GetPoWHash());
+
+                //         LogPrintf("BitcoinMiner:\n");
+                //         LogPrintf("proof-of-work found  \n  hash: %s  \ntarget: %s\n", hash.GetHex(), hashArithTarget.GetHex());
+                //         ProcessBlockFound(pblock, chainparams);
+                //         coinbaseScript->KeepScript();
+                //         nBMMBreakAttempts = 0;
+
+                //         break;
+                //     }
+                // }
+                while(true){
+                    hash = pblock->GetHash();
                     if (UintToArith256(hash) <= UintToArith256(hashBest))
                     {
                         hashBest = hash;
                     }
-
                     if (UintToArith256(hash) <= hashArithTarget)
                     {
                         // Found a solution
@@ -984,19 +1005,15 @@ void static BitcoinMiner(const CChainParams& chainparams)
                         ProcessBlockFound(pblock, chainparams);
                         coinbaseScript->KeepScript();
                         nBMMBreakAttempts = 0;
-
                         break;
                     }
-                }
 
-                // Check for stop or if block needs to be rebuilt
-                boost::this_thread::interruption_point();
-                // Regtest mode doesn't require peers
-                // TODO
-                /*
-                if (vNodes.empty() && fMiningRequiresPeer)
-                    break;
-                */
+                    pblock->nNonce += 1;
+                    if ((pblock->nNonce & 0xFF) == 0)
+                        break;      
+                }
+                
+
                 if (nNonce >= 0xffff0000)
                     break;
                 if (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast && GetTime() - nStart > 60)
