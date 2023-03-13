@@ -891,7 +891,7 @@ void static BitcoinMiner(const CChainParams& chainparams)
 {
     LogPrintf("BitcoinMiner started\n");
     //SetThreadPriority(THREAD_PRIORITY_LOWEST);
-    RenameThread("drivechain-miner");
+    RenameThread("skydoge-miner");
 
     unsigned int nExtraNonce = 0;
 
@@ -997,7 +997,7 @@ void static BitcoinMiner(const CChainParams& chainparams)
                     if (UintToArith256(hash) <= hashArithTarget)
                     {
                         // Found a solution
-                        pblock->nNonce = nNonce;
+                        //pblock->nNonce = nNonce;
                         //assert(hash == pblock->GetHash());
 
                         LogPrintf("BitcoinMiner:\n");
