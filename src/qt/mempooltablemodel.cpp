@@ -64,16 +64,11 @@ QVariant MemPoolTableModel::data(const QModelIndex &index, int role) const
         }
         // Value USD
         if (col == 2) {
-// old DC
-            //return BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, object.value, false, BitcoinUnits::separatorAlways);
+
             return "$" + QLocale(QLocale::English).toString(ConvertToFiat(object.value, nUSDBTC), 'f', 0);
         }
         // sats / byte
         if (col == 3) {
-// old DC
-            //QString rate = BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, object.feeRate.GetFeePerK(), false, BitcoinUnits::separatorAlways);
-            //rate += "/kB";
-            //return rate;
             return QString::number(object.feeRate.GetFeePerB());
         }
         // Total fee in USD

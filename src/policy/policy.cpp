@@ -55,7 +55,7 @@ bool IsDust(const CTxOut& txout, const CFeeRate& dustRelayFeeIn)
     return (txout.nValue < GetDustThreshold(txout, dustRelayFeeIn));
 }
 
-bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool witnessEnabled, const bool skydogeEnabled)
+bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool witnessEnabled, const bool IsSkydogeEnabled)
 {
     std::vector<std::vector<unsigned char> > vSolutions;
     if (!Solver(scriptPubKey, whichType, vSolutions))
@@ -74,20 +74,20 @@ bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool w
     else if (whichType == TX_NULL_DATA) {
         if (!fAcceptDatacarrier)
             return false;
-        if (!skydogeEnabled && scriptPubKey.size() > nMaxDatacarrierBytes)
+        if (!IsSkydogeEnabled && scriptPubKey.size() > nMaxDatacarrierBytes)
             return false;
-        if (skydogeEnabled && scriptPubKey.size() > MAX_DRIVECHAIN_DATA_BYTES)
+        if (IsSkydogeEnabled && scriptPubKey.size() > MAX_DRIVECHAIN_DATA_BYTES)
             return false;
     }
     else if (!witnessEnabled && (whichType == TX_WITNESS_V0_KEYHASH || whichType == TX_WITNESS_V0_SCRIPTHASH))
         return false;
-    else if (!skydogeEnabled && whichType == TX_DRIVECHAIN)
+    else if (!IsSkydogeEnabled && whichType == TX_DRIVECHAIN)
         return false;
 
     return whichType != TX_NONSTANDARD && whichType != TX_WITNESS_UNKNOWN;
 }
 
-bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnessEnabled, const bool skydogeEnabled)
+bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnessEnabled, const bool IsSkydogeEnabled)
 {
     if (tx.nVersion > CTransaction::MAX_STANDARD_VERSION || tx.nVersion < 1) {
         reason = "version";
@@ -126,7 +126,7 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnes
     unsigned int nDataOut = 0;
     txnouttype whichType;
     for (const CTxOut& txout : tx.vout) {
-        if (!::IsStandard(txout.scriptPubKey, whichType, witnessEnabled, skydogeEnabled)) {
+        if (!::IsStandard(txout.scriptPubKey, whichType, witnessEnabled, IsSkydogeEnabled)) {
             reason = "scriptpubkey";
             return false;
         }
@@ -142,7 +142,7 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnes
         }
     }
 
-    if (!(skydogeEnabled && tx.IsCoinBase()) && nDataOut > 1) {
+    if (!(IsSkydogeEnabled && tx.IsCoinBase()) && nDataOut > 1) {
         reason = "multi-op-return";
         return false;
     }

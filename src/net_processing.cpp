@@ -532,7 +532,7 @@ void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vector<con
                 // We wouldn't download this block or its descendants from this peer.
                 return;
             }
-            if (!State(nodeid)->fHaveDrivechain && skydogeEnabled(pindex->pprev, consensusParams)) {
+            if (!State(nodeid)->fHaveDrivechain && IsSkydogeEnabled(pindex->pprev, consensusParams)) {
                 // We would rather download this block from a Skydoge node
                 return;
             }
@@ -874,7 +874,7 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
     nHighestFastAnnounce = pindex->nHeight;
 
     bool fWitnessEnabled = IsWitnessEnabled(pindex->pprev, Params().GetConsensus());
-    bool fDrivechainEnabled = skydogeEnabled(pindex->pprev, Params().GetConsensus());
+    bool fDrivechainEnabled = IsSkydogeEnabled(pindex->pprev, Params().GetConsensus());
     uint256 hashBlock(pblock->GetHash());
 
     {

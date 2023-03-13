@@ -1405,8 +1405,7 @@ bool AppInitMain()
     // ********************************************************* Step 7: load caches
     fReindex = gArgs.GetBoolArg("-reindex", false);
 
-//old DC
-    bool skydogesEnabled = skydogeEnabled(chainActive.Tip(), chainparams.GetConsensus());
+
 
     std::string strFailSCDAT;
     strFailSCDAT = "Failed to load sidechain database files!\n";
@@ -1438,7 +1437,7 @@ bool AppInitMain()
     LogPrintf("* Using %.1fMiB for in-memory UTXO set (plus up to %.1fMiB of unused mempool space)\n", nCoinCacheUsage * (1.0 / 1024 / 1024), nMempoolSizeMax * (1.0 / 1024 / 1024));
 
     bool fLoaded = false;
-    bool drivechainsEnabled = false;
+    bool skydogeEnabled = false;
     while (!fLoaded && !fRequestShutdown) {
         bool fReset = fReindex;
         std::string strLoadError;
@@ -1538,10 +1537,10 @@ bool AppInitMain()
                     assert(chainActive.Tip() != nullptr);
                 }
 
-    		    drivechainsEnabled = skydogeEnabled(chainActive.Tip(), chainparams.GetConsensus());
+    		    skydogeEnabled = IsSkydogeEnabled(chainActive.Tip(), chainparams.GetConsensus());
 
                 // Synchronize SCDB
-                if (skydogesEnabled && !fReindex && chainActive.Tip() && (chainActive.Tip()->GetBlockHash() != scdb.GetHashBlockLastSeen()))
+                if (skydogeEnabled && !fReindex && chainActive.Tip() && (chainActive.Tip()->GetBlockHash() != scdb.GetHashBlockLastSeen()))
                 {
                     uiInterface.InitMessage(_("Synchronizing sidechain database..."));
                     if (!ResyncSCDB(chainActive.Tip())) {
@@ -1554,7 +1553,7 @@ bool AppInitMain()
                     }
                 }
 
-                if (skydogesEnabled && !fReindex) {
+                if (skydogeEnabled && !fReindex) {
                     if (!LoadDepositCache()) {
                         // Ask to reindex to fix issue loading DAT
                         bool fRet = uiInterface.ThreadSafeQuestion(
@@ -1613,7 +1612,7 @@ bool AppInitMain()
                 }
 
                 // Load user's skydoge data
-                if (skydogesEnabled) {
+                if (skydogeEnabled) {
                     // We want to read the user's data even if reindexing - this data
                     // was created by the user and is not in any block
                     if (!LoadSidechainProposalCache() ||
@@ -1708,13 +1707,10 @@ bool AppInitMain()
         // doing so is that after activation, no upgraded nodes will fetch from you.
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
     }
-// old DC
-    if (chainparams.GetConsensus().vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout != 0) {
-        nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN);
-    }
+
 
     // Show NODE_DRIVECHAIN after fork height
-    if (drivechainsEnabled)
+    if (skydogeEnabled)
         nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN); 
 
     // ********************************************************* Step 11: import blocks

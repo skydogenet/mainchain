@@ -171,7 +171,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     // transaction (which in most cases can be a no-op).
     fIncludeWitness = IsWitnessEnabled(pindexPrev, chainparams.GetConsensus()) && fMineWitnessTx;
 
-    bool fDrivechainEnabled = skydogeEnabled(pindexPrev, chainparams.GetConsensus());
+    bool fDrivechainEnabled = IsSkydogeEnabled(pindexPrev, chainparams.GetConsensus());
 
 #ifdef ENABLE_WALLET
     if (fDrivechainEnabled) {
@@ -517,7 +517,7 @@ bool BlockAssembler::CreateWithdrawalPayout(uint8_t nSidechain, CMutableTransact
     CMutableTransaction mtx;
     mtx.nVersion = 2;
 
-    if (!skydogeEnabled(chainActive.Tip(), chainparams.GetConsensus()))
+    if (!IsSkydogeEnabled(chainActive.Tip(), chainparams.GetConsensus()))
         return false;
 
 #ifdef ENABLE_WALLET
@@ -891,7 +891,7 @@ void static BitcoinMiner(const CChainParams& chainparams)
 {
     LogPrintf("BitcoinMiner started\n");
     //SetThreadPriority(THREAD_PRIORITY_LOWEST);
-    RenameThread("skydoge-miner");
+    RenameThread("drivechain-miner");
 
     unsigned int nExtraNonce = 0;
 
@@ -966,38 +966,17 @@ void static BitcoinMiner(const CChainParams& chainparams)
             uint32_t nNonce = 0;
             while (true) {
                 // Check if something found
-                // if (ScanHash(pblock, nNonce, &hash))
-                // {
-                //     if (UintToArith256(hash) <= UintToArith256(hashBest))
-                //     {
-                //         hashBest = hash;
-                //     }
-
-                //     if (UintToArith256(hash) <= hashArithTarget)
-                //     {
-                //         // Found a solution
-                //         pblock->nNonce = nNonce;
-                //         assert(hash == pblock->GetPoWHash());
-
-                //         LogPrintf("BitcoinMiner:\n");
-                //         LogPrintf("proof-of-work found  \n  hash: %s  \ntarget: %s\n", hash.GetHex(), hashArithTarget.GetHex());
-                //         ProcessBlockFound(pblock, chainparams);
-                //         coinbaseScript->KeepScript();
-                //         nBMMBreakAttempts = 0;
-
-                //         break;
-                //     }
-                // }
-                while(true){
-                    hash = pblock->GetHash();
+                if (ScanHash(pblock, nNonce, &hash))
+                {
                     if (UintToArith256(hash) <= UintToArith256(hashBest))
                     {
                         hashBest = hash;
                     }
+
                     if (UintToArith256(hash) <= hashArithTarget)
                     {
                         // Found a solution
-                        //pblock->nNonce = nNonce;
+                        pblock->nNonce = nNonce;
                         //assert(hash == pblock->GetHash());
 
                         LogPrintf("BitcoinMiner:\n");
@@ -1005,15 +984,19 @@ void static BitcoinMiner(const CChainParams& chainparams)
                         ProcessBlockFound(pblock, chainparams);
                         coinbaseScript->KeepScript();
                         nBMMBreakAttempts = 0;
+
                         break;
                     }
-
-                    pblock->nNonce += 1;
-                    if ((pblock->nNonce & 0xFF) == 0)
-                        break;      
                 }
-                
 
+                // Check for stop or if block needs to be rebuilt
+                boost::this_thread::interruption_point();
+                // Regtest mode doesn't require peers
+                // TODO
+                /*
+                if (vNodes.empty() && fMiningRequiresPeer)
+                    break;
+                */
                 if (nNonce >= 0xffff0000)
                     break;
                 if (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast && GetTime() - nStart > 60)

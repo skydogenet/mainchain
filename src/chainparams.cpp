@@ -129,18 +129,14 @@ public:
 
         // Deployment of BIP68, BIP112, and BIP113.
         consensus.vDeployments[Consensus::DEPLOYMENT_CSV].bit = 0;
-        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nStartTime = 1462060800; // May 1st, 2016
-        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nTimeout = 1493596800; // May 1st, 2017
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // Deployment of SegWit (BIP141, BIP143, and BIP147)
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].bit = 1;
-        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime =  Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
-        // Deployment of Skydoge old DC (BIPX hashrate escrow, BIPY BMM)
-        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].bit = 4;
-        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
-        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000000000001d5fffff");
@@ -215,12 +211,11 @@ public:
         consensus.powLimit = uint256S("0000005fffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 60 * 60; // two weeks
         consensus.nPowTargetSpacing = 60;
-        consensus.fPowAllowMinDifficultyBlocks = false;
-        consensus.DrivechainHeight = 100;
+        consensus.DrivechainHeight = 1;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = false;
-        consensus.nRuleChangeActivationThreshold = 1512; // 75% for testchains
-        consensus.nMinerConfirmationWindow = 2016; // nPowTargetTimespan / nPowTargetSpacing
+        consensus.nRuleChangeActivationThreshold = 1; // 75% for testchains
+        consensus.nMinerConfirmationWindow = 1; // nPowTargetTimespan / nPowTargetSpacing
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 1199145601; // January 1, 2008
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = 1230767999; // December 31, 2008
@@ -235,10 +230,6 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
-        // Deployment of Skydoge old DC (BIPX hashrate escrow, BIPY BMM)
-        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].bit = 4;
-        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
-        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // The best chain should have at least this much work.
         consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000000000001d5fffff");
@@ -251,7 +242,7 @@ public:
         pchMessageStart[2] = 0xe8;
         pchMessageStart[3] = 0xf6;
 
-        nDefaultPort = 19243;
+        nDefaultPort = 18441;
         nPruneAfterHeight = 1000;
         genesis = CreateGenesisBlock(1670198460, 59539747, 0x1d5fffff, 1, 50 * COIN);
 
@@ -266,10 +257,10 @@ public:
         vFixedSeeds.clear();
         vSeeds.clear();
         // nodes with support for servicebits filtering should be at the top
-        vSeeds.emplace_back("testnet-seed.bitcoin.jonasschnelli.ch");
-        vSeeds.emplace_back("seed.tbtc.petertodd.org");
-        vSeeds.emplace_back("seed.testnet.bitcoin.sprovoost.nl");
-        vSeeds.emplace_back("testnet-seed.bluematt.me"); // Just a static list of stable node(s), only supports x9
+        //vSeeds.emplace_back("testnet-seed.bitcoin.jonasschnelli.ch");
+        //vSeeds.emplace_back("seed.tbtc.petertodd.org");
+        //vSeeds.emplace_back("seed.testnet.bitcoin.sprovoost.nl");
+        //vSeeds.emplace_back("testnet-seed.bluematt.me"); // Just a static list of stable node(s), only supports x9
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,111);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,196);
@@ -295,10 +286,9 @@ public:
         };
 
         chainTxData = ChainTxData{
-            // Data from rpc: getchaintxstats 4096 0000000000000037a8cd3e06cd5edbfe9dd1dbcc5dacab279376ef7cfc2b4c75
-            /* nTime    */ 1531929919,
-            /* nTxCount */ 19438708,
-            /* dTxRate  */ 0.626
+            0,
+            0,
+            0
         };
 
     }
@@ -311,20 +301,20 @@ class CRegTestParams : public CChainParams {
 public:
     CRegTestParams() {
         strNetworkID = "regtest";
-        consensus.nSubsidyHalvingInterval = 150;
-        consensus.BIP16Height = 0; // always enforce P2SH BIP16 on regtest
-        consensus.BIP34Height = 100000000; // BIP34 has not activated on regtest (far in the future so block v1 are not rejected in tests)
-        consensus.BIP34Hash = uint256();
-        consensus.BIP65Height = 1351; // BIP65 activated on regtest (Used in rpc activation tests)
-        consensus.BIP66Height = 1251; // BIP66 activated on regtest (Used in rpc activation tests)
-        consensus.DrivechainHeight = 0;
+        consensus.nSubsidyHalvingInterval = 2100000;
+        consensus.BIP16Height = 0; // P2SH
+        consensus.BIP34Height = 1; // Block height in coinbase scriptSig
+        consensus.BIP34Hash = uint256S("0x0000000000000000000000000000000000000000000000000000000000000000");
+        consensus.BIP65Height = 0; // CLTV
+        consensus.BIP66Height = 0; // Strict DER signatures
+        consensus.DrivechainHeight = 1;
         consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
-        consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
-        consensus.nPowTargetSpacing = 10 * 60;
+        consensus.nPowTargetTimespan = 60 * 60; // two weeks
+        consensus.nPowTargetSpacing = 60;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = true;
-        consensus.nRuleChangeActivationThreshold = 108; // 75% for testchains
-        consensus.nMinerConfirmationWindow = 144; // Faster than normal for regtest (144 instead of 2016)
+        consensus.nRuleChangeActivationThreshold = 1; // 75% for testchains
+        consensus.nMinerConfirmationWindow = 1; // Faster than normal for regtest (144 instead of 2016)
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 0;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
@@ -335,43 +325,42 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
         consensus.vDeployments[Consensus::DEPLOYMENT_SEGWIT].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
-// old DC
-        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].bit = 4;
-        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
-        consensus.vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
 
         // The best chain should have at least this much work.
-        consensus.nMinimumChainWork = uint256S("0x00");
+        consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000000000001d5fffff");
 
         // By default assume that the signatures in ancestors of this block are valid.
-        consensus.defaultAssumeValid = uint256S("0x00");
+        // By default assume that the signatures in ancestors of this block are valid.
+        consensus.defaultAssumeValid = uint256S("0x0738a06a8f21f36a14e071ce389d612d6ff487ed481e6c42a9e863f92c657868");
 
         pchMessageStart[0] = 0xa0;
         pchMessageStart[1] = 0x9d;
         pchMessageStart[2] = 0xed;
         pchMessageStart[3] = 0x83;
 
-        nDefaultPort = 19334;
+        nDefaultPort = 18442;
         nPruneAfterHeight = 1000;
 
-        genesis = CreateGenesisBlock(1670198470, 22806025, 0x1d5fffff, 1, 50000 * COIN);
+        genesis = CreateGenesisBlock(1670198460, 59539747, 0x1d5fffff, 1, 50 * COIN);
+
         //MineGenesis(genesis,consensus.powLimit,false);
         consensus.hashGenesisBlock = genesis.GetHash();
 
-        // PoW: 0000001f96ca6bf561489eee7630a3e8e002e4aebf46ef9f235f0469676a239f
-        assert(consensus.hashGenesisBlock == uint256S("0x0000002da261eb84458c88f65c2a9769f9a2e7da821ea54e21db2d64101fb882"));
-        assert(genesis.hashMerkleRoot == uint256S("0x160ace8d7230cd2879c999e1262333cca48d2fb87b67c06a6556d474f224fa80"));
+
+        // PoW: 000000007f35a199e3bd12f099078aa9ec69ce56b4e7d425303370633ba08c87
+        assert(consensus.hashGenesisBlock == uint256S("0x00000005e65ea5a412b10fce8e3e4b740c71ce00552efa492856d923a2e357c0"));
+        assert(genesis.hashMerkleRoot == uint256S("0xb04ef21971d8356eb6c8a3ed14eb84a8fafca3ecc8f103cb88e90778ef9b5e86"));
 
         vFixedSeeds.clear(); //!< Regtest mode doesn't have any fixed seeds.
         vSeeds.clear();      //!< Regtest mode doesn't have any DNS seeds.
 
-        fDefaultConsistencyChecks = true;
+        fDefaultConsistencyChecks =true;
         fRequireStandard = false;
         fMineBlocksOnDemand = true;
 
         checkpointData = {
             {
-                {0, uint256S("0x0000002da261eb84458c88f65c2a9769f9a2e7da821ea54e21db2d64101fb882")},
+                { 0, uint256S("0x00000005e65ea5a412b10fce8e3e4b740c71ce00552efa492856d923a2e357c0")},
             }
         };
 

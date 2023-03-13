@@ -645,10 +645,7 @@ public:
     bool IsPayToWitnessScriptHash() const;
     bool IsWitnessProgram(int& version, std::vector<unsigned char>& program) const;
 
-    /** Script formats for old DC */
-    //bool IsCriticalHashCommit(uint256& hash) const;
-    /** Script formats for old DC */
-    bool IsSCDBHashMerkleRootCommit(uint256& hashMerkleRoot) const;
+
     /** Script formats for Drivechains */
     bool IsDrivechain(uint8_t& nSidechain) const;
     bool IsCriticalHashCommit(uint256& hash, std::vector<unsigned char>& vBytes) const;

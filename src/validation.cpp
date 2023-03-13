@@ -648,13 +648,13 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
 
     // Reject critical data / Skydoge BMM transactions before Skydoge are activated (override with -prematureskydoges)
     bool fCriticalData = !tx.criticalData.IsNull();
-    bool skydogesEnabled = skydogeEnabled(chainActive.Tip(), chainparams.GetConsensus());
-    if (!gArgs.GetBoolArg("-prematureskydoges", false) && fCriticalData && !skydogesEnabled) {
+    bool skydogeEnabled = IsSkydogeEnabled(chainActive.Tip(), chainparams.GetConsensus());
+    if (!gArgs.GetBoolArg("-prematureskydoges", false) && fCriticalData && !skydogeEnabled) {
         return state.DoS(0, false, REJECT_NONSTANDARD, "no-skydoges-yet", true);
     }
 
     // Reject BMM requests with invalid prevBytes
-    if (skydogesEnabled && fCriticalData) {
+    if (skydogeEnabled && fCriticalData) {
         uint8_t nSidechain;
         std::string strPrevBlock = "";
         if (tx.criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
@@ -671,7 +671,7 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
 
     // Rather not work on nonstandard transactions (unless -testnet/-regtest)
     std::string reason;
-    if (fRequireStandard && !IsStandardTx(tx, reason, witnessEnabled, skydogesEnabled))
+    if (fRequireStandard && !IsStandardTx(tx, reason, witnessEnabled, skydogeEnabled))
         return state.DoS(0, false, REJECT_NONSTANDARD, reason);
 
     // Only accept nLockTime-using transactions that can be mined in the next
@@ -691,7 +691,7 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
     mapCTIPCopy = mempool.mapLastSidechainDeposit;
     bool fBurnFound = false;
     uint8_t nSidechain;
-    if (skydogesEnabled)
+    if (skydogeEnabled)
     {
         // Get values to and from sidechain
         CCoinsViewMemPool poolCoins(pcoinsTip.get(), pool);
@@ -1612,7 +1612,7 @@ bool CheckInputs(const CTransaction& tx, CValidationState &state, const CCoinsVi
                 return true;
             }
 
-            //bool fSkydogeEnabled = skydogeEnabled(chainActive.Tip(), Params().GetConsensus());
+            //bool fSkydogeEnabled = IsSkydogeEnabled(chainActive.Tip(), Params().GetConsensus());
 
             for (unsigned int i = 0; i < tx.vin.size(); i++) {
                 const COutPoint &prevout = tx.vin[i].prevout;
@@ -2148,7 +2148,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         nLockTimeFlags |= LOCKTIME_VERIFY_SEQUENCE;
     }
 
-    bool skydogesEnabled = skydogeEnabled(chainActive.Tip(), Params().GetConsensus());
+    bool skydogeEnabled = IsSkydogeEnabled(chainActive.Tip(), Params().GetConsensus());
 
     // Get the script flags for this block
     unsigned int flags = GetBlockScriptFlags(pindex, chainparams.GetConsensus());
@@ -2218,7 +2218,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
 
 
             // Set fSidechainInputs & nSidechain
-                if (skydogesEnabled) {
+                if (skydogeEnabled) {
                     for (const CTxIn& in : tx.vin) {
                         Coin coin = view.AccessCoin(in.prevout);
                         if (coin.out.scriptPubKey.IsDrivechain(nSidechain)) {
@@ -2279,7 +2279,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
          * coins held in the CTIP output of the sidechain.
          */
 
-        if (skydogesEnabled && fSidechainInputs) {
+        if (skydogeEnabled && fSidechainInputs) {
             // We must get the Withdrawal hash as work is applied to
             // Withdrawal before inputs and the change output are known.
             uint256 hashBlind;
@@ -2305,7 +2305,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
             }
         }
 
-        if (skydogesEnabled && !tx.IsCoinBase() && !fJustCheck) {
+        if (skydogeEnabled && !tx.IsCoinBase() && !fJustCheck) {
             // Check for possible sidechain deposits
             bool fSidechainOutput = false;
             uint8_t nSidechain;
@@ -2341,7 +2341,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     int64_t nTime4 = GetTimeMicros(); nTimeVerify += nTime4 - nTime2;
     LogPrint(BCLog::BENCH, "    - Verify %u txins: %.2fms (%.3fms/txin) [%.2fs (%.2fms/blk)]\n", nInputs - 1, MILLI * (nTime4 - nTime2), nInputs <= 1 ? 0 : MILLI * (nTime4 - nTime2) / (nInputs-1), nTimeVerify * MICRO, nTimeVerify * MILLI / nBlocksTotal);
 
-    if (skydogesEnabled && !fJustCheck && vDepositTx.size()) {
+    if (skydogeEnabled && !fJustCheck && vDepositTx.size()) {
         // Convert deposit transactions into SidechainDeposit objects
         std::vector<SidechainDeposit> vDeposit;
         for (size_t i = 0; i <  vDepositTx.size(); i++) {
@@ -2361,7 +2361,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         scdb.AddDeposits(vDeposit);
     }
 
-    if (skydogesEnabled && vWithdrawalToSpend.size()) {
+    if (skydogeEnabled && vWithdrawalToSpend.size()) {
         for (size_t i = 0; i < vWithdrawalToSpend.size(); i++) {
             uint8_t nSidechain = std::get<0>(vWithdrawalToSpend[i]);
             const CTransaction tx = std::get<1>(vWithdrawalToSpend[i]);
@@ -2375,7 +2375,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         }
     }
 
-    if (skydogesEnabled) {
+    if (skydogeEnabled) {
         // Update / synchronize SCDB
         if (!scdb.Update(pindex->nHeight, block.GetHash(), block.GetPrevHash(), block.vtx[0]->vout, fJustCheck, true /* fDebug */)) {
             LogPrintf("%s: SCDB failed to update with block: %s\n", __func__, block.GetHash().ToString());
@@ -2812,8 +2812,8 @@ bool CChainState::ConnectTip(CValidationState& state, const CChainParams& chainp
     disconnectpool.removeForBlock(blockConnecting.vtx);
 
     // Update mempool CTIP
-    bool skydogesEnabled = skydogeEnabled(chainActive.Tip(), Params().GetConsensus());
-    if (skydogesEnabled)
+    bool skydogeEnabled = IsSkydogeEnabled(chainActive.Tip(), Params().GetConsensus());
+    if (skydogeEnabled)
         mempool.UpdateCTIPFromBlock(scdb.GetCTIP(), false /* fDisconnect */);
 
     // Update chainActive & related variables.
@@ -3477,7 +3477,7 @@ bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& pa
     return (VersionBitsState(pindexPrev, params, Consensus::DEPLOYMENT_SEGWIT, versionbitscache) == THRESHOLD_ACTIVE);
 }
 
-bool skydogeEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
+bool IsSkydogeEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
     LOCK(cs_main);
     return (pindexPrev && pindexPrev->nHeight + 1 >= params.DrivechainHeight);
@@ -3625,39 +3625,7 @@ void GenerateLNCriticalHashCommitment(CBlock& block)
     }
 }
 
-// old DC activation
-void GenerateSCDBHashMerkleRootCommitment(CBlock& block, const uint256& hashSCDB, const Consensus::Params& consensusParams)
-{
-    /*
-     * "M1, M2, M3, M4"
-     * Sidechain DB data once per block hashMerkleRoot commitment.
-     * BIP: 300 & 301
-     */
 
-    // Check for activation of Skydoge
-    if (!skydogeEnabled(chainActive.Tip(), consensusParams))
-        return;
-
-    // Create output that commitment will be added to
-    CTxOut out;
-    out.nValue = 0;
-
-    // Add script header
-    out.scriptPubKey.resize(37);
-    out.scriptPubKey[0] = OP_RETURN;
-    out.scriptPubKey[1] = 0xD2;
-    out.scriptPubKey[2] = 0x8E;
-    out.scriptPubKey[3] = 0x50;
-    out.scriptPubKey[4] = 0x8C;
-
-    // Add SCDB hashMerkleRoot
-    memcpy(&out.scriptPubKey[5], &hashSCDB, 32);
-
-    // Update coinbase in block
-    CMutableTransaction mtx(*block.vtx[0]);
-    mtx.vout.push_back(out);
-    block.vtx[0] = MakeTransactionRef(std::move(mtx));
-}
 
 //void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const uint8_t nSidechain, const Consensus::Params& consensusParams)
 void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const uint8_t nSidechain)
@@ -3976,10 +3944,10 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
         return state.DoS(100, false, REJECT_INVALID, "bad-blk-weight", false, strprintf("%s : weight limit failed", __func__));
     }
 
-    bool skydogesEnabled = skydogeEnabled(chainActive.Tip(), Params().GetConsensus());
+    bool skydogeEnabled = IsSkydogeEnabled(chainActive.Tip(), Params().GetConsensus());
 
     // Check critical data transactions (outputs, not spending)
-    if (skydogesEnabled) {
+    if (skydogeEnabled) {
         // Track existence of BMM h* commit requests per sidechain
         std::vector<bool> vSidechainBMM;
         vSidechainBMM.resize(SIDECHAIN_ACTIVATION_MAX_ACTIVE);
