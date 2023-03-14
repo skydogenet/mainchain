@@ -183,11 +183,8 @@ CTxMemPoolEntry TestMemPoolEntryHelper::FromTx(const CMutableTransaction &tx) {
 
 CTxMemPoolEntry TestMemPoolEntryHelper::FromTx(const CTransaction &txn) {
     return CTxMemPoolEntry(MakeTransactionRef(txn), nFee, nTime, nHeight,
-                           if (nHeight < DrivechainHeight) {
-                           spendsCoinbase, spendsBMMRequest, false, 0,
-                           } else { 
+ 
                            spendsCoinbase, false, 0,
-                           }
 
                            sigOpCost, lp);
 }

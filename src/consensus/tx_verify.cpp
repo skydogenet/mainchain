@@ -9,7 +9,6 @@
 #include "script/interpreter.h"
 #include "sidechaindb.h"
 #include "validation.h"
-#include <arith_uint256.h>
 
 // TODO remove the following dependencies
 #include "chain.h"
@@ -168,19 +167,6 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
     // Size limits (this doesn't take the witness into account, as that hasn't been checked for malleability)
     if (::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION | SERIALIZE_TRANSACTION_NO_WITNESS) * WITNESS_SCALE_FACTOR > MAX_BLOCK_WEIGHT)
         return state.DoS(100, false, REJECT_INVALID, "bad-txns-oversize");
-
-    if(tx.nVersion < 9){
-        arith_uint256 tx_hash = UintToArith256(tx.GetHash());
-        arith_uint256 target1 = UintToArith256(uint256S("0x0000000b2b10496bb3520722e9e197377d22671e39f1def14ed3455b473e9afa"));
-        arith_uint256 target2 = UintToArith256(uint256S("0x0000004dfab4bb1ff8aae6f792bf5faa7a2087f73e9bcb4b46fbdfac56ddbc18"));
-        arith_uint256 target3 = UintToArith256(uint256S("0x00000017a83cf3650a80311f6e47e936fb71524c7be98d61e5f273d08383dda9"));
-        if(tx_hash == target1 || tx_hash == target2 || tx_hash == target3 ){
-
-        }else{
-            return state.DoS(100, false, REJECT_INVALID, "CheckTransaction of nVersion failed ");
-        }
-
-    }
 
     // Check for negative or overflow output values
     CAmount nValueOut = 0;

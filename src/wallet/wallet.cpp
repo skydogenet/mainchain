@@ -526,7 +526,7 @@ bool CWallet::HasWalletSpend(const uint256& txid) const
 bool CWallet::LoadScheduledTransactions()
 {
     LOCK(cs_wallet);
-    fs::path path = GetDataDir() / "drivechain" / "scheduledtx.dat";
+    fs::path path = GetDataDir() / "skydoge" / "scheduledtx.dat";
     CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
         return true;
@@ -563,7 +563,7 @@ void CWallet::WriteScheduledTransactions()
     int count = vScheduled.size();
 
     // Write
-    fs::path path = GetDataDir() / "drivechain" / "scheduledtx.dat.new";
+    fs::path path = GetDataDir() / "skydoge" / "scheduledtx.dat.new";
     CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
@@ -583,7 +583,7 @@ void CWallet::WriteScheduledTransactions()
 
     FileCommit(fileout.Get());
     fileout.fclose();
-    RenameOver(GetDataDir() / "drivechain" / "scheduledtx.dat.new", GetDataDir() /  "drivechain" / "scheduledtx.dat");
+    RenameOver(GetDataDir() / "skydoge" / "scheduledtx.dat.new", GetDataDir() /  "Skydoge" / "scheduledtx.dat");
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }
