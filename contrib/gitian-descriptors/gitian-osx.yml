@@ -28,7 +28,7 @@ packages:
 - "python-setuptools"
 - "fonts-tuffy"
 remotes:
-- "url": "https://github.com/skydoge-project/mainchain.git"
+- "url": "https://github.com/skydogenet/mainchain.git"
   "dir": "mainchain"
 files:
 - "MacOSX10.11.sdk.tar.gz"
