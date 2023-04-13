@@ -216,7 +216,7 @@ endif
 
 dist_noinst_SCRIPTS = autogen.sh
 
-EXTRA_DIST = $(DIST_SHARE) test/functional/test_runner.py test/functional $(DIST_CONTRIB) $(DIST_DOCS) $(WINDOWS_PACKAGING) $(OSX_PACKAGING) $(BIN_CHECKS) src/crypto/hamsi_helper.c
+EXTRA_DIST = $(DIST_SHARE) test/functional/test_runner.py test/functional $(DIST_CONTRIB) $(DIST_DOCS) $(WINDOWS_PACKAGING) $(OSX_PACKAGING) $(BIN_CHECKS) src/crypto/haval_helper.c src/crypto/sph_md_helper.c src/crypto/md_helper.c src/crypto/md_helper1.c src/crypto/hamsi_helper.c 
 
 EXTRA_DIST += \
     test/util/skydoge-util-test.py \
