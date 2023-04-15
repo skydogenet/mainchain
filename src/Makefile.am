@@ -505,7 +505,7 @@ endif
 libskydogeconsensus_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS)
 libskydogeconsensus_la_LIBADD = $(LIBSECP256K1)
 libskydogeconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1/include -DBUILD_DRIVECHAIN_INTERNAL
-libskydogeconsensus_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydogeconsensus_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 
 endif
 #
