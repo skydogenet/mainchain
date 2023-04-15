@@ -391,8 +391,8 @@ libskydoge_common_a_SOURCES = \
 # util: shared between all executables.
 # This library *must* be included to make sure that the glibc
 # backward-compatibility objects and their sanity checks are linked.
-libskydoge_util_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_util_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_util_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+libskydoge_util_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 libskydoge_util_a_SOURCES = \
   support/lockedpool.cpp \
   chainparamsbase.cpp \
@@ -418,8 +418,8 @@ libskydoge_util_a_SOURCES += compat/glibc_compat.cpp
 endif
 
 # cli: shared between skydoge-cli and skydoge-qt
-libskydoge_cli_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_cli_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_cli_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+libskydoge_cli_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 libskydoge_cli_a_SOURCES = \
   rpc/client.cpp \
   $(DRIVECHAIN_CORE_H)
@@ -455,9 +455,9 @@ skydoged_LDADD += $(BOOST_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPN
 
 # skydoge-cli binary #
 skydoge_cli_SOURCES = skydoge-cli.cpp
-skydoge_cli_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(EVENT_CFLAGS)
-skydoge_cli_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-skydoge_cli_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+skydoge_cli_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(EVENT_CFLAGS) -fPIC
+skydoge_cli_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
+skydoge_cli_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) -fPIC
 
 if TARGET_WINDOWS
 skydoge_cli_SOURCES += skydoge-cli-res.rc
@@ -474,9 +474,9 @@ skydoge_cli_LDADD += $(BOOST_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(EVENT_LIBS)
 
 # skydoge-tx binary #
 skydoge_tx_SOURCES = skydoge-tx.cpp
-skydoge_tx_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-skydoge_tx_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-skydoge_tx_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+skydoge_tx_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+skydoge_tx_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
+skydoge_tx_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) -fPIC
 
 if TARGET_WINDOWS
 skydoge_tx_SOURCES += skydoge-tx-res.rc
@@ -502,9 +502,9 @@ if GLIBC_BACK_COMPAT
   libskydogeconsensus_la_SOURCES += compat/glibc_compat.cpp
 endif
 
-libskydogeconsensus_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS)
+libskydogeconsensus_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS) -fPIC
 libskydogeconsensus_la_LIBADD = $(LIBSECP256K1)
-libskydogeconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1/include -DBUILD_DRIVECHAIN_INTERNAL
+libskydogeconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1/include -DBUILD_DRIVECHAIN_INTERNAL -fPIC
 libskydogeconsensus_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 
 endif
