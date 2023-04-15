@@ -190,8 +190,8 @@ obj/build.h: FORCE
 libskydoge_util_a-clientversion.$(OBJEXT): obj/build.h
 
 # server: shared between skydoged and skydoge-qt
-libskydoge_server_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
-libskydoge_server_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_server_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS) -fPIC
+libskydoge_server_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 libskydoge_server_a_SOURCES = \
   addressbook.cpp \
   addrdb.cpp \
@@ -249,8 +249,8 @@ endif
 
 # wallet: shared between skydoged and skydoge-qt, but only linked
 # when wallet enabled
-libskydoge_wallet_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) 
+libskydoge_wallet_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)  -fPIC
+libskydoge_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC  
 libskydoge_wallet_a_SOURCES = \
   wallet/crypter.cpp \
   wallet/db.cpp \
@@ -429,9 +429,9 @@ nodist_libskydoge_util_a_SOURCES = $(srcdir)/obj/build.h
 
 # skydoged binary #
 skydoged_SOURCES = skydoged.cpp
-skydoged_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-skydoged_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-skydoged_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+skydoged_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+skydoged_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
+skydoged_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) -fPIC
 
 if TARGET_WINDOWS
 skydoged_SOURCES += skydoged-res.rc
