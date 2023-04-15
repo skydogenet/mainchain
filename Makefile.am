@@ -275,7 +275,7 @@ CLEANFILES = $(OSX_DMG) $(DRIVECHAIN_WIN_INSTALLER)
 
 .INTERMEDIATE: $(COVERAGE_INFO)
 
-DISTCHECK_CONFIGURE_FLAGS = --enable-man
+DISTCHECK_CONFIGURE_FLAGS = --enable-man -fPIC
 
 clean-local:
 	rm -rf coverage_percent.txt test_skydoge.coverage/ total.coverage/ test/tmp/ cache/ $(OSX_APP)
