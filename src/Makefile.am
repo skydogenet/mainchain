@@ -331,8 +331,8 @@ crypto_libskydoge_crypto_a_SOURCES += crypto/sha256_sse4.cpp
 endif
 
 # consensus: shared between all executables that validate any consensus rules.
-libskydoge_consensus_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_consensus_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_consensus_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+libskydoge_consensus_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 libskydoge_consensus_a_SOURCES = \
   amount.h \
   arith_uint256.cpp \
@@ -366,8 +366,8 @@ libskydoge_consensus_a_SOURCES = \
   version.h
 
 # common: shared between skydoged, and skydoge-qt and non-server tools
-libskydoge_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+libskydoge_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 libskydoge_common_a_SOURCES = \
   base58.cpp \
   bech32.cpp \
