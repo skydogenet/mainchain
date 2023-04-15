@@ -250,7 +250,7 @@ endif
 # wallet: shared between skydoged and skydoge-qt, but only linked
 # when wallet enabled
 libskydoge_wallet_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) 
 libskydoge_wallet_a_SOURCES = \
   wallet/crypter.cpp \
   wallet/db.cpp \
@@ -265,7 +265,7 @@ libskydoge_wallet_a_SOURCES = \
   $(DRIVECHAIN_CORE_H)
 
 # crypto primitives library
-crypto_libskydoge_crypto_a_CPPFLAGS = $(AM_CPPFLAGS)
+crypto_libskydoge_crypto_a_CPPFLAGS = $(AM_CPPFLAGS)-fPIC
 crypto_libskydoge_crypto_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 crypto_libskydoge_crypto_a_SOURCES = \
   crypto/aes.cpp \
