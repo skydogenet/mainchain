@@ -266,7 +266,7 @@ libskydoge_wallet_a_SOURCES = \
 
 # crypto primitives library
 crypto_libskydoge_crypto_a_CPPFLAGS = $(AM_CPPFLAGS)
-crypto_libskydoge_crypto_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+crypto_libskydoge_crypto_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 crypto_libskydoge_crypto_a_SOURCES = \
   crypto/aes.cpp \
   crypto/aes.h \
