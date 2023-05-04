@@ -208,9 +208,9 @@ public:
         consensus.BIP34Hash = uint256S("0x0000000000000000000000000000000000000000000000000000000000000000");
         consensus.BIP65Height = 0; // CLTV
         consensus.BIP66Height = 0; // Strict DER signatures
-        consensus.powLimit = uint256S("0000005fffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        consensus.powLimit = uint256S("005fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 60 * 60; // two weeks
-        consensus.nPowTargetSpacing = 60;
+        consensus.nPowTargetSpacing = 1;
         consensus.DrivechainHeight = 1;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = false;
