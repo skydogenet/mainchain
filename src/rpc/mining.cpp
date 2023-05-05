@@ -26,6 +26,10 @@
 #include <validationinterface.h>
 #include <warnings.h>
 
+#ifdef ENABLE_WALLET
+#include "wallet/wallet.h"
+#endif
+
 #include <memory>
 #include <stdint.h>
 
