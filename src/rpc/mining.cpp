@@ -29,8 +29,6 @@
 #include <memory>
 #include <stdint.h>
 
-#include "../miner.h"
-
 #include "../coins.h"
 #include "../consensus/tx_verify.h"
 #include "../consensus/merkle.h"
