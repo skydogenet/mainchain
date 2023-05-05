@@ -549,7 +549,7 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
             {
                 throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
                 LogPrintf("Error in BitcoinMiner: Keypool ran out, please call keypoolrefill before restarting the mining thread\n");
-                return;
+                //return;
             }
 
         // Need to update only after we know CreateNewBlock succeeded
