@@ -544,7 +544,7 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
                 throw std::runtime_error("No coinbase script available (mining requires a wallet)");
             bool fAddedBMM = false;
 
-            pblocktemplate(BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM));
+            pblocktemplate = BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM);
             if (!pblocktemplate.get())
             {
                 throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
