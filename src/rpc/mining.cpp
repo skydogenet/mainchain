@@ -532,19 +532,19 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
 
         // Create new block
         CScript scriptDummy = CScript() << OP_TRUE;
-        // pblocktemplate = BlockAssembler(Params()).CreateNewBlock(scriptDummy, fSupportsSegwit);
-        // if (!pblocktemplate)
-           // throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
+         pblocktemplate = BlockAssembler(Params()).CreateNewBlock(scriptDummy, fSupportsSegwit);
+         if (!pblocktemplate)
+            throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
         //if (vpwallets.empty())
             //return; // TODO error message
 
-            std::shared_ptr<CReserveScript> coinbaseScript;
-            vpwallets[0]->GetScriptForMining(coinbaseScript);
-            if (!coinbaseScript || coinbaseScript->reserveScript.empty())
-                throw std::runtime_error("No coinbase script available (mining requires a wallet)");
-            bool fAddedBMM = false;
+          //  std::shared_ptr<CReserveScript> coinbaseScript;
+          //  vpwallets[0]->GetScriptForMining(coinbaseScript);
+          //  if (!coinbaseScript || coinbaseScript->reserveScript.empty())
+          //      throw std::runtime_error("No coinbase script available (mining requires a wallet)");
+           // bool fAddedBMM = false;
 
-            pblocktemplate = BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM);
+           // pblocktemplate = BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM);
             if (!pblocktemplate.get())
             {
                 throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
