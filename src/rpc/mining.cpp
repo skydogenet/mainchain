@@ -532,19 +532,19 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
 
         // Create new block
         CScript scriptDummy = CScript() << OP_TRUE;
-         pblocktemplate = BlockAssembler(Params()).CreateNewBlock(scriptDummy, fSupportsSegwit);
+         //pblocktemplate = BlockAssembler(Params()).CreateNewBlock(scriptDummy, fSupportsSegwit);
          if (!pblocktemplate)
             throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
         //if (vpwallets.empty())
             //return; // TODO error message
 
-          //  std::shared_ptr<CReserveScript> coinbaseScript;
-          //  vpwallets[0]->GetScriptForMining(coinbaseScript);
-          //  if (!coinbaseScript || coinbaseScript->reserveScript.empty())
-          //      throw std::runtime_error("No coinbase script available (mining requires a wallet)");
-           // bool fAddedBMM = false;
+            std::shared_ptr<CReserveScript> coinbaseScript;
+            vpwallets[0]->GetScriptForMining(coinbaseScript);
+           if (!coinbaseScript || coinbaseScript->reserveScript.empty())
+                throw std::runtime_error("No coinbase script available (mining requires a wallet)");
+            bool fAddedBMM = false;
 
-           // pblocktemplate = BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM);
+            pblocktemplate = BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM);
             if (!pblocktemplate.get())
             {
                 throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
@@ -781,18 +781,63 @@ UniValue submitblock(const JSONRPCRequest& request)
 
     submitblock_StateCatcher sc(block.GetHash());
     RegisterValidationInterface(&sc);
-    bool fAccepted = ProcessNewBlock(Params(), blockptr, true, nullptr);
-    UnregisterValidationInterface(&sc);
-    if (fBlockPresent) {
-        if (fAccepted && !sc.found) {
-            return "duplicate-inconclusive";
-        }
-        return "duplicate";
-    }
-    if (!sc.found) {
-        return "inconclusive";
-    }
-    return BIP22ValidationResult(sc.state);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    std::shared_ptr<CReserveScript> coinbaseScript;
+    vpwallets[0]->GetScriptForMining(coinbaseScript);
+
+    bool fBreakForBMM = gArgs.GetBoolArg("-minerbreakforbmm", false);
+    int nBMMBreakAttempts = 0;
+    try {
+        // Throw an error if no script was provided.  This can happen
+        // due to some internal error but also if the keypool is empty.
+        // In the latter case, already the pointer is NULL.
+        if (!coinbaseScript || coinbaseScript->reserveScript.empty())
+            throw std::runtime_error("No coinbase script available (mining requires a wallet)");
+
+
+
+
+            //
+            // Create new block
+            //
+            unsigned int nTransactionsUpdatedLast = mempool.GetTransactionsUpdated();
+            CBlockIndex* pindexPrev = chainActive.Tip();
+
+            bool fAddedBMM = false;
+
+            int nMinerSleep = gArgs.GetArg("-minersleep", 0);
+            if (nMinerSleep)
+                MilliSleep(nMinerSleep);
+
+            pblocktemplate(BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM));
+            if (!pblocktemplate.get())
+            {
+                LogPrintf("Error in BitcoinMiner: Keypool ran out, please call keypoolrefill before restarting the mining thread\n");
+                return;
+            }
+            CBlock *pblock = &pblocktemplate->block;
+
+                        ProcessBlockFound(pblock, chainparams);
+                        coinbaseScript->KeepScript();
+                        nBMMBreakAttempts = 0;
+                        break;
+                
+
 }
 
 UniValue estimatefee(const JSONRPCRequest& request)
