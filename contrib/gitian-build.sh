@@ -14,7 +14,7 @@ osx=false
 
 # Other Basic variables
 SIGNER=skydoge
-VERSION="df7253eb4a507e822448eed3fbd06d14f9fe0ada"
+VERSION="ff6ac710fa75649ffcbb8c103b22bce241a3a6da"
 commit=false
 url=https://github.com/bitcoin/bitcoin
 proc=8
@@ -221,7 +221,7 @@ fi
 # Add a "v" if no -c
 if [[ $commit = false ]]
 then
-	COMMIT="df7253eb4a507e822448eed3fbd06d14f9fe0ada"
+	COMMIT="ff6ac710fa75649ffcbb8c103b22bce241a3a6da"
 fi
 echo ${COMMIT}
 
@@ -270,7 +270,7 @@ then
 	then
             echo ""
 	    echo "Compiling ${VERSION} Linux"
-	    ./bin/gbuild -j ${proc} -m ${mem}  --commit mainchain="df7253eb4a507e822448eed3fbd06d14f9fe0ada" --url mainchain="https://github.com/skydogenet/mainchain"  ../../contrib/gitian-descriptors/gitian-linux.yml
+	    ./bin/gbuild -j ${proc} -m ${mem}  --commit mainchain="ff6ac710fa75649ffcbb8c103b22bce241a3a6da" --url mainchain="https://github.com/skydogenet/mainchain"  ../../contrib/gitian-descriptors/gitian-linux.yml
 	    #./bin/gsign -p $signProg --signer $SIGNER --release ${VERSION}-linux --destination ../gitian.sigs/ ../m/contrib/gitian-descriptors/gitian-linux.yml
 	    mv build/out/*.tar.gz build/out/src/*.tar.gz ../skydoge-binaries/${VERSION}
 	fi
@@ -280,7 +280,7 @@ then
 	    echo ""
 	    echo "Compiling ${VERSION} Windows"
 	    echo ""
-	    ./bin/gbuild -j ${proc} -m ${mem} --commit mainchain="df7253eb4a507e822448eed3fbd06d14f9fe0ada" --url mainchain="https://github.com/skydogenet/mainchain" ../../contrib/gitian-descriptors/gitian-win.yml
+	    ./bin/gbuild -j ${proc} -m ${mem} --commit mainchain="ff6ac710fa75649ffcbb8c103b22bce241a3a6da" --url mainchain="https://github.com/skydogenet/mainchain" ../../contrib/gitian-descriptors/gitian-win.yml
 	    #./bin/gsign -p $signProg --signer $SIGNER --release ${VERSION}-win-unsigned --destination ../gitian.sigs/ ../../contrib/gitian-descriptors/gitian-win.yml
 	    mv build/out/*-win-unsigned.tar.gz inputs/skydoge-win-unsigned.tar.gz
 	    mv build/out/*.zip build/out/*.exe ../skydoge-binaries/${VERSION}
@@ -291,7 +291,7 @@ then
 	    echo ""
 	    echo "Compiling ${VERSION} Mac OSX"
 	    echo ""
-	    ./bin/gbuild -j ${proc} -m ${mem} --commit mainchain="df7253eb4a507e822448eed3fbd06d14f9fe0ada" --url mainchain="https://github.com/skydogenet/mainchain" ../../contrib/gitian-descriptors/gitian-osx.yml
+	    ./bin/gbuild -j ${proc} -m ${mem} --commit mainchain="ff6ac710fa75649ffcbb8c103b22bce241a3a6da" --url mainchain="https://github.com/skydogenet/mainchain" ../../contrib/gitian-descriptors/gitian-osx.yml
 	    #./bin/gsign -p $signProg --signer $SIGNER --release ${VERSION}-osx-unsigned --destination ../gitian.sigs/ ../../contrib/gitian-descriptors/gitian-osx.yml
 	    mv build/out/*-osx-unsigned.tar.gz inputs/skydoge-osx-unsigned.tar.gz
 	    mv build/out/*.tar.gz build/out/*.dmg ../skydoge-binaries/${VERSION}

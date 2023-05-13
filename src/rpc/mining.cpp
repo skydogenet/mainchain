@@ -870,7 +870,7 @@ std::unique_ptr<CBlockTemplate> pblocktemplate(BlockAssembler(Params()).CreateNe
     catch (const std::runtime_error &e)
     {
         LogPrintf("SubmitBlock error: %s\n", e.what());
-        return;
+        //return;
     }
 }
 
