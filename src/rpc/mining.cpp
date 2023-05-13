@@ -830,6 +830,7 @@ std::unique_ptr<CBlockTemplate> pblocktemplate(BlockAssembler(Params()).CreateNe
                 LogPrintf("Error in BitcoinMiner: Keypool ran out, please call keypoolrefill before restarting the mining thread\n");
                 return;
             }
+		const CChainParams& chainparams;
             CBlock *pblock = &pblocktemplate->block;
 
                         ProcessBlockFound(pblock, chainparams);
