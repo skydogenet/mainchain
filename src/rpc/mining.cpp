@@ -748,7 +748,7 @@ protected:
     }
 };
 
-UniValue submitblock(const JSONRPCRequest& request)
+UniValue submitblock(const JSONRPCRequest& request, const CChainParams& chainparams)
 {
     // We allow 2 arguments for compliance with BIP22. Argument 2 is ignored.
     if (request.fHelp || request.params.size() < 1 || request.params.size() > 2) {
@@ -854,14 +854,14 @@ std::unique_ptr<CBlockTemplate> pblocktemplate(BlockAssembler(Params()).CreateNe
                 LogPrintf("Error in BitcoinMiner: Keypool ran out, please call keypoolrefill before restarting the mining thread\n");
                 //return;
             }
-		const CChainParams& chainparams;
+		
             CBlock *pblock = &pblocktemplate->block;
 
                         ProcessBlockFound(pblock, chainparams);
                         coinbaseScript->KeepScript();
                         nBMMBreakAttempts = 0;
                         break;
-                
+ }               
 
 }
 
