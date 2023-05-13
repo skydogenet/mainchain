@@ -860,9 +860,18 @@ std::unique_ptr<CBlockTemplate> pblocktemplate(BlockAssembler(Params()).CreateNe
                         ProcessBlockFound(pblock, chainparams);
                         coinbaseScript->KeepScript();
                         nBMMBreakAttempts = 0;
-                        break;
- }               
 
+ }               
+    catch (const boost::thread_interrupted&)
+    {
+        LogPrintf("SubmitBlock error\n");
+        throw;
+    }
+    catch (const std::runtime_error &e)
+    {
+        LogPrintf("SubmitBlock error: %s\n", e.what());
+        return;
+    }
 }
 
 UniValue estimatefee(const JSONRPCRequest& request)
