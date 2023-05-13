@@ -34,7 +34,7 @@
 #include <stdint.h>
 
 
-
+class CChainParams;
 
 unsigned int ParseConfirmTarget(const UniValue& value)
 {
@@ -268,6 +268,30 @@ UniValue prioritisetransaction(const JSONRPCRequest& request)
     }
 
     mempool.PrioritiseTransaction(hash, nAmount);
+    return true;
+}
+
+static bool ProcessBlockFound(const CBlock* pblock, const CChainParams& chainparams)
+{
+    LogPrintf("%s\n", pblock->ToString());
+    LogPrintf("generated %s\n", FormatMoney(pblock->vtx[0]->vout[0].nValue));
+
+    // Found a solution
+    {
+        LOCK(cs_main);
+        if (pblock->hashPrevBlock != chainActive.Tip()->GetBlockHash())
+            return error("BitcoinMiner: generated block is stale");
+    }
+
+    // Inform about the new block
+    GetMainSignals().BlockFound(pblock->GetHash());
+
+    // Process this block the same as if we had received it from another node
+    std::shared_ptr<const CBlock> block = std::make_shared<CBlock>(*pblock);
+    CValidationState state;
+    if (!ProcessNewBlock(Params(), block, true, nullptr))
+        return error("BitcoinMiner: ProcessNewBlock, block not accepted");
+
     return true;
 }
 
@@ -828,7 +852,7 @@ std::unique_ptr<CBlockTemplate> pblocktemplate(BlockAssembler(Params()).CreateNe
             if (!pblocktemplate.get())
             {
                 LogPrintf("Error in BitcoinMiner: Keypool ran out, please call keypoolrefill before restarting the mining thread\n");
-                return;
+                //return;
             }
 		const CChainParams& chainparams;
             CBlock *pblock = &pblocktemplate->block;
