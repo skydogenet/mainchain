@@ -783,8 +783,7 @@ UniValue submitblock(const JSONRPCRequest& request)
     if (block.vtx.empty() || !block.vtx[0]->IsCoinBase()) {
         throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Block does not start with a coinbase");
     }
-
-    uint256 hash = block.GetHash();
+    uint256 hash = request.params[0].get_str();
     bool fBlockPresent = false;
     {
         LOCK(cs_main);
@@ -810,7 +809,7 @@ UniValue submitblock(const JSONRPCRequest& request)
         }
     }
 
-    submitblock_StateCatcher sc(block.GetHash());
+    submitblock_StateCatcher sc(hash);
     RegisterValidationInterface(&sc);
 
 
@@ -863,8 +862,8 @@ UniValue submitblock(const JSONRPCRequest& request)
             }
 		
             CBlock *pblock = &pblocktemplate->block;
-                    hashpow = request.params[0].get_str();
-                        ProcessBlockFound(hashpow, chainparams);
+
+                        ProcessBlockFound(pblock, chainparams);
                         coinbaseScript->KeepScript();
                         nBMMBreakAttempts = 0;
 
