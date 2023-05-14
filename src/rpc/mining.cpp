@@ -863,8 +863,8 @@ UniValue submitblock(const JSONRPCRequest& request)
             }
 		
             CBlock *pblock = &pblocktemplate->block;
-
-                        ProcessBlockFound(pblock, chainparams);
+                    hashpow = request.params[0].get_str();
+                        ProcessBlockFound(hashpow, chainparams);
                         coinbaseScript->KeepScript();
                         nBMMBreakAttempts = 0;
 
