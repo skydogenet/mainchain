@@ -33,8 +33,15 @@
 #include <memory>
 #include <stdint.h>
 
+#include <algorithm>
+#include <queue>
+#include <utility>
 
-class CChainParams;
+#include <boost/thread.hpp>
+#include <boost/tuple/tuple.hpp>
+
+static const bool fMiningReqiresPeer = false;
+
 
 unsigned int ParseConfirmTarget(const UniValue& value)
 {
