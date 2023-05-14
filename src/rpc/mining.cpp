@@ -855,7 +855,7 @@ UniValue submitblock(const JSONRPCRequest& request)
             if (nMinerSleep)
                 MilliSleep(nMinerSleep);
 
-		pblocktemplate(BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM));
+		std::unique_ptr<CBlockTemplate> pblocktemplate(BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM));
             if (!pblocktemplate.get())
             {
                 LogPrintf("Error in BitcoinMiner: Keypool ran out, please call keypoolrefill before restarting the mining thread\n");
