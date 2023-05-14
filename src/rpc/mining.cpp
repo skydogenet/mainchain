@@ -754,8 +754,9 @@ protected:
     }
 };
 
-UniValue submitblock(const JSONRPCRequest& request, const CChainParams& chainparams)
+UniValue submitblock(const JSONRPCRequest& request)
 {
+ 	const CChainParams& chainparams = Params();
     // We allow 2 arguments for compliance with BIP22. Argument 2 is ignored.
     if (request.fHelp || request.params.size() < 1 || request.params.size() > 2) {
         throw std::runtime_error(
@@ -854,7 +855,7 @@ UniValue submitblock(const JSONRPCRequest& request, const CChainParams& chainpar
             if (nMinerSleep)
                 MilliSleep(nMinerSleep);
 
-std::unique_ptr<CBlockTemplate> pblocktemplate(BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM));
+		pblocktemplate(BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM));
             if (!pblocktemplate.get())
             {
                 LogPrintf("Error in BitcoinMiner: Keypool ran out, please call keypoolrefill before restarting the mining thread\n");
