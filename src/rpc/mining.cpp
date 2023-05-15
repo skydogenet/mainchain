@@ -773,8 +773,8 @@ UniValue submitblock(const JSONRPCRequest& request)
             + HelpExampleRpc("submitblock", "\"mydata\"")
         );
     }
-    const UniValue hmr = request.params[0];
-    const UniValue noncepool = request.params[1];
+    uint256 hmr = request.params[0];
+    uint32_t noncepool = request.params[1];
     std::shared_ptr<CBlock> blockptr = std::make_shared<CBlock>();
     CBlock& block = *blockptr;
     if (!DecodeHexBlk(block, request.params[0].get_str())) {
