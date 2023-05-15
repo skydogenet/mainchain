@@ -855,7 +855,7 @@ UniValue submitblock(const JSONRPCRequest& request)
             }
 	
 		CBlock *pblock = &pblocktemplate->block;
-		pblock->hashMerkleRoot = hmr;
+		//pblock->hashMerkleRoot = hmr;
         	pblock->nNonce = noncepool;
                 ProcessBlockFound(pblock, chainparams);
                 coinbaseScript->KeepScript();
