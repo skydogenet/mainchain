@@ -22,6 +22,7 @@
 #include <rpc/server.h>
 #include <txmempool.h>
 #include <util.h>
+#include <uint256.h>
 #include <utilstrencodings.h>
 #include <validationinterface.h>
 #include <warnings.h>
@@ -754,6 +755,9 @@ protected:
     }
 };
 
+
+uint256 hmr;
+unsigned int noncepool;
 UniValue submitblock(const JSONRPCRequest& request)
 {
 
@@ -774,8 +778,10 @@ UniValue submitblock(const JSONRPCRequest& request)
             + HelpExampleRpc("submitblock", "\"mydata\"")
         );
     }
-    std::string hmr = request.params[0].get_str();
-    std::string noncepool = request.params[1].get_str();
+
+    hmr = uint256S(request.params[0].get_str());
+    noncepool = request.params[1].get_int();
+
     std::shared_ptr<CBlock> blockptr = std::make_shared<CBlock>();
     CBlock& block = *blockptr;
     if (!DecodeHexBlk(block, request.params[0].get_str())) {
@@ -815,21 +821,6 @@ UniValue submitblock(const JSONRPCRequest& request)
     submitblock_StateCatcher sc(block.GetHash());
     RegisterValidationInterface(&sc);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     std::shared_ptr<CReserveScript> coinbaseScript;
     vpwallets[0]->GetScriptForMining(coinbaseScript);
 
@@ -867,9 +858,11 @@ UniValue submitblock(const JSONRPCRequest& request)
 		CBlock *pblock = &pblocktemplate->block;
 		pblock->hashMerkleRoot = hmr;
         	pblock->nNonce = noncepool;
-                        ProcessBlockFound(pblock, chainparams);
-                        coinbaseScript->KeepScript();
-                        nBMMBreakAttempts = 0;
+                ProcessBlockFound(pblock, chainparams);
+                coinbaseScript->KeepScript();
+                nBMMBreakAttempts = 0;
+
+                pblock->nNonce += 1;
 
  }               
     catch (const boost::thread_interrupted&)
