@@ -756,6 +756,7 @@ protected:
 
 UniValue submitblock(const JSONRPCRequest& request)
 {
+
  	const CChainParams& chainparams = Params();
     // We allow 2 arguments for compliance with BIP22. Argument 2 is ignored.
     if (request.fHelp || request.params.size() < 1 || request.params.size() > 2) {
@@ -773,8 +774,8 @@ UniValue submitblock(const JSONRPCRequest& request)
             + HelpExampleRpc("submitblock", "\"mydata\"")
         );
     }
-    hmr = request.params[0].get_str();
-    noncepool = request.params[1].get_str();
+    std::string hmr = request.params[0].get_str();
+    std::string noncepool = request.params[1].get_str();
     std::shared_ptr<CBlock> blockptr = std::make_shared<CBlock>();
     CBlock& block = *blockptr;
     if (!DecodeHexBlk(block, request.params[0].get_str())) {
