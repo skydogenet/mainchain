@@ -773,8 +773,8 @@ UniValue submitblock(const JSONRPCRequest& request)
             + HelpExampleRpc("submitblock", "\"mydata\"")
         );
     }
-    std::vector<std::string> hmr = request.params[0];
-    std::vector<std::string> noncepool = request.params[1];
+    const UniValue hmr = request.params[0];
+    const UniValue noncepool = request.params[1];
     std::shared_ptr<CBlock> blockptr = std::make_shared<CBlock>();
     CBlock& block = *blockptr;
     if (!DecodeHexBlk(block, request.params[0].get_str())) {
@@ -862,10 +862,10 @@ UniValue submitblock(const JSONRPCRequest& request)
                 LogPrintf("Error in BitcoinMiner: Keypool ran out, please call keypoolrefill before restarting the mining thread\n");
                 //return;
             }
-	pblock->hashMerkleRoot = hmr;
-        pblock->nNonce = noncepool;	
-            CBlock *pblock = &pblocktemplate->block;
-
+	
+		CBlock *pblock = &pblocktemplate->block;
+		pblock->hashMerkleRoot = hmr;
+        	pblock->nNonce = noncepool;
                         ProcessBlockFound(pblock, chainparams);
                         coinbaseScript->KeepScript();
                         nBMMBreakAttempts = 0;
