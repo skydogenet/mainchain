@@ -757,7 +757,7 @@ protected:
 
 
 uint256 hmr;
-unsigned int noncepool;
+uint32_t noncepool;
 UniValue submitblock(const JSONRPCRequest& request)
 {
 
@@ -780,8 +780,7 @@ UniValue submitblock(const JSONRPCRequest& request)
     }
 
     hmr = uint256S(request.params[0].get_str());
-    noncepool = request.params[1].get_int();
-
+    noncepool = atoi(request.params[1].get_str());
     std::shared_ptr<CBlock> blockptr = std::make_shared<CBlock>();
     CBlock& block = *blockptr;
     if (!DecodeHexBlk(block, request.params[0].get_str())) {
