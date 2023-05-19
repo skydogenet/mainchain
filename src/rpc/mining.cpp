@@ -330,7 +330,6 @@ std::string gbt_vb_name(const Consensus::DeploymentPos pos) {
     }
     return s;
 }
-
 UniValue getblocktemplate(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() > 1)
@@ -563,25 +562,9 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
 
         // Create new block
         CScript scriptDummy = CScript() << OP_TRUE;
-         //pblocktemplate = BlockAssembler(Params()).CreateNewBlock(scriptDummy, fSupportsSegwit);
-        // if (!pblocktemplate)
-         //   throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
-        //if (vpwallets.empty())
-            //return; // TODO error message
-
-            std::shared_ptr<CReserveScript> coinbaseScript;
-            vpwallets[0]->GetScriptForMining(coinbaseScript);
-           if (!coinbaseScript || coinbaseScript->reserveScript.empty())
-                throw std::runtime_error("No coinbase script available (mining requires a wallet)");
-            bool fAddedBMM = false;
-
-            pblocktemplate = BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM);
-            if (!pblocktemplate.get())
-            {
-                throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
-                LogPrintf("Error in BitcoinMiner: Keypool ran out, please call keypoolrefill before restarting the mining thread\n");
-                //return;
-            }
+        pblocktemplate = BlockAssembler(Params()).CreateNewBlock(scriptDummy, fSupportsSegwit);
+        if (!pblocktemplate)
+            throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
 
         // Need to update only after we know CreateNewBlock succeeded
         pindexPrev = pindexPrevNew;
@@ -708,6 +691,7 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     result.push_back(Pair("transactions", transactions));
     result.push_back(Pair("coinbaseaux", aux));
     result.push_back(Pair("coinbasevalue", (int64_t)pblock->vtx[0]->vout[0].nValue));
+    result.push_back(Pair("coinbasetxn", pblock->vtx[0]->ToString()));
     result.push_back(Pair("longpollid", chainActive.Tip()->GetBlockHash().GetHex() + i64tostr(nTransactionsUpdatedLast)));
     result.push_back(Pair("target", hashTarget.GetHex()));
     result.push_back(Pair("mintime", (int64_t)pindexPrev->GetMedianTimePast()+1));
@@ -755,13 +739,8 @@ protected:
     }
 };
 
-
-uint256 hmr;
-uint32_t noncepool;
 UniValue submitblock(const JSONRPCRequest& request)
 {
-
- 	const CChainParams& chainparams = Params();
     // We allow 2 arguments for compliance with BIP22. Argument 2 is ignored.
     if (request.fHelp || request.params.size() < 1 || request.params.size() > 2) {
         throw std::runtime_error(
@@ -779,8 +758,6 @@ UniValue submitblock(const JSONRPCRequest& request)
         );
     }
 
-    hmr = uint256S(request.params[0].get_str());
-    noncepool = atoi(request.params[1].get_str());
     std::shared_ptr<CBlock> blockptr = std::make_shared<CBlock>();
     CBlock& block = *blockptr;
     if (!DecodeHexBlk(block, request.params[0].get_str())) {
@@ -819,63 +796,19 @@ UniValue submitblock(const JSONRPCRequest& request)
 
     submitblock_StateCatcher sc(block.GetHash());
     RegisterValidationInterface(&sc);
-
-    std::shared_ptr<CReserveScript> coinbaseScript;
-    vpwallets[0]->GetScriptForMining(coinbaseScript);
-
-    bool fBreakForBMM = gArgs.GetBoolArg("-minerbreakforbmm", false);
-    int nBMMBreakAttempts = 0;
-    try {
-        // Throw an error if no script was provided.  This can happen
-        // due to some internal error but also if the keypool is empty.
-        // In the latter case, already the pointer is NULL.
-        if (!coinbaseScript || coinbaseScript->reserveScript.empty())
-            throw std::runtime_error("No coinbase script available (mining requires a wallet)");
-
-
-
-
-            //
-            // Create new block
-            //
-            unsigned int nTransactionsUpdatedLast = mempool.GetTransactionsUpdated();
-            CBlockIndex* pindexPrev = chainActive.Tip();
-
-            bool fAddedBMM = false;
-
-            int nMinerSleep = gArgs.GetArg("-minersleep", 0);
-            if (nMinerSleep)
-                MilliSleep(nMinerSleep);
-
-		std::unique_ptr<CBlockTemplate> pblocktemplate(BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, true /* mine segwit */, fAddedBMM));
-            if (!pblocktemplate.get())
-            {
-                LogPrintf("Error in BitcoinMiner: Keypool ran out, please call keypoolrefill before restarting the mining thread\n");
-                //return;
-            }
-	
-		CBlock *pblock = &pblocktemplate->block;
-		//pblock->hashMerkleRoot = hmr;
-        	pblock->nNonce = noncepool;
-                ProcessBlockFound(pblock, chainparams);
-                coinbaseScript->KeepScript();
-                nBMMBreakAttempts = 0;
-
-                pblock->nNonce += 1;
-
- }               
-    catch (const boost::thread_interrupted&)
-    {
-        LogPrintf("SubmitBlock error\n");
-        throw;
+    bool fAccepted = ProcessNewBlock(Params(), blockptr, true, nullptr);
+    UnregisterValidationInterface(&sc);
+    if (fBlockPresent) {
+        if (fAccepted && !sc.found) {
+            return "duplicate-inconclusive";
+        }
+        return "duplicate";
     }
-    catch (const std::runtime_error &e)
-    {
-        LogPrintf("SubmitBlock error: %s\n", e.what());
-        //return;
+    if (!sc.found) {
+        return "inconclusive";
     }
+    return BIP22ValidationResult(sc.state);
 }
-
 UniValue estimatefee(const JSONRPCRequest& request)
 {
     throw JSONRPCError(RPC_METHOD_DEPRECATED, "estimatefee was removed in v0.17.\n"
