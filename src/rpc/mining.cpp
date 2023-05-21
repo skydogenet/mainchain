@@ -736,10 +736,13 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     result.push_back(Pair("curtime", pblock->GetBlockTime()));
     result.push_back(Pair("bits", strprintf("%08x", pblock->nBits)));
     result.push_back(Pair("height", (int64_t)(pindexPrev->nHeight+1)));
+
+   std::string strHex = EncodeHexTx(*pblock->vtx[0]);
+
     if (!pblocktemplate->vchCoinbaseCommitment.empty() && fSupportsSegwit) {
 
-        result.push_back(Pair("SCRIPT", HexStr(coinbaseScript->reserveScript)));
-
+        result.push_back(Pair("Original Coinbase txn", HexStr(coinbaseScript->reserveScript)));
+        result.push_back(Pair("Modified Coinbase txn",strHex));
         result.push_back(Pair("default_witness_commitment2", HexStr(pblocktemplate->vchCoinbaseCommitment.begin(), pblocktemplate->vchCoinbaseCommitment.end())));
     }
     return result;
