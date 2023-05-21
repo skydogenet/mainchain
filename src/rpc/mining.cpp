@@ -741,9 +741,9 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
 
     if (!pblocktemplate->vchCoinbaseCommitment.empty() && fSupportsSegwit) {
 
-        result.push_back(Pair("Original Coinbase txn", HexStr(coinbaseScript->reserveScript)));
-        result.push_back(Pair("Modified Coinbase txn",strHex));
-        result.push_back(Pair("default_witness_commitment2", HexStr(pblocktemplate->vchCoinbaseCommitment.begin(), pblocktemplate->vchCoinbaseCommitment.end())));
+        result.push_back(Pair("Original_Coinbase_txn", HexStr(coinbaseScript->reserveScript)));
+        result.push_back(Pair("Modified_Coinbase_txn",strHex));
+        result.push_back(Pair("default_witness_commitment", HexStr(pblocktemplate->vchCoinbaseCommitment.begin(), pblocktemplate->vchCoinbaseCommitment.end())));
     }
     return result;
 }
