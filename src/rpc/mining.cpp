@@ -591,7 +591,7 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     }
     CBlock* pblock = &pblocktemplate->block; // pointer for convenience
     const Consensus::Params& consensusParams = Params().GetConsensus();
-
+                        coinbaseScript->KeepScript();
     // Update nTime
     UpdateTime(pblock, consensusParams, pindexPrev);
     pblock->nNonce = 0;
