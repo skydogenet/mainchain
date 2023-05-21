@@ -332,6 +332,10 @@ std::string gbt_vb_name(const Consensus::DeploymentPos pos) {
 }
 UniValue getblocktemplate(const JSONRPCRequest& request)
 {
+    //unsigned int nExtraNonce = 0;
+    std::shared_ptr<CReserveScript> coinbaseScript;
+    vpwallets[0]->GetScriptForMining(coinbaseScript);
+
     if (request.fHelp || request.params.size() > 1)
         throw std::runtime_error(
             "getblocktemplate ( TemplateRequest )\n"
@@ -538,7 +542,8 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     // If the caller is indicating segwit support, then allow CreateNewBlock()
     // to select witness transactions, after segwit activates (otherwise
     // don't).
-    bool fSupportsSegwit = setClientRules.find(segwit_info.name) != setClientRules.end();
+    bool fSupportsSegwit = true;
+ //   bool fSupportsSegwit = setClientRules.find(segwit_info.name) != setClientRules.end();
 
     // Update block
     static CBlockIndex* pindexPrev;
@@ -560,12 +565,27 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
         nStart = GetTime();
         fLastTemplateSupportsSegwit = fSupportsSegwit;
 
+
+
+
+   // bool fBreakForBMM = gArgs.GetBoolArg("-minerbreakforbmm", false);
+   // int nBMMBreakAttempts = 0;
+
+        //if (!coinbaseScript || coinbaseScript->reserveScript.empty())
+         //   throw std::runtime_error("No coinbase script available (mining requires a wallet)");
+
+         //   unsigned int nTransactionsUpdatedLast = mempool.GetTransactionsUpdated();
+         //   CBlockIndex* pindexPrev = chainActive.Tip();
+
+            bool fAddedBMM = false;
+
+
+
         // Create new block
-        CScript scriptDummy = CScript() << OP_TRUE;
-        pblocktemplate = BlockAssembler(Params()).CreateNewBlock(scriptDummy, fSupportsSegwit);
+       // CScript scriptDummy = CScript() << OP_TRUE;
+        pblocktemplate = BlockAssembler(Params()).CreateNewBlock(coinbaseScript->reserveScript, fSupportsSegwit);
         if (!pblocktemplate)
             throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
-
         // Need to update only after we know CreateNewBlock succeeded
         pindexPrev = pindexPrevNew;
     }
@@ -697,6 +717,9 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     result.push_back(Pair("mintime", (int64_t)pindexPrev->GetMedianTimePast()+1));
     result.push_back(Pair("mutable", aMutable));
     result.push_back(Pair("noncerange", "00000000ffffffff"));
+
+   result.push_back(Pair("pblock",  pblock->ToString()));
+
     int64_t nSigOpLimit = MAX_BLOCK_SIGOPS_COST;
     int64_t nSizeLimit = MAX_BLOCK_SERIALIZED_SIZE;
     if (fPreSegWit) {
@@ -713,11 +736,12 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     result.push_back(Pair("curtime", pblock->GetBlockTime()));
     result.push_back(Pair("bits", strprintf("%08x", pblock->nBits)));
     result.push_back(Pair("height", (int64_t)(pindexPrev->nHeight+1)));
-
     if (!pblocktemplate->vchCoinbaseCommitment.empty() && fSupportsSegwit) {
-        result.push_back(Pair("default_witness_commitment", HexStr(pblocktemplate->vchCoinbaseCommitment.begin(), pblocktemplate->vchCoinbaseCommitment.end())));
-    }
 
+        result.push_back(Pair("SCRIPT", HexStr(coinbaseScript->reserveScript)));
+
+        result.push_back(Pair("default_witness_commitment2", HexStr(pblocktemplate->vchCoinbaseCommitment.begin(), pblocktemplate->vchCoinbaseCommitment.end())));
+    }
     return result;
 }
 
