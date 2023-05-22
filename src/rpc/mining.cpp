@@ -718,7 +718,7 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     result.push_back(Pair("mutable", aMutable));
     result.push_back(Pair("noncerange", "00000000ffffffff"));
 
-   result.push_back(Pair("pblock",  pblock->ToString()));
+   //result.push_back(Pair("pblock",  pblock->ToString()));
 
     int64_t nSigOpLimit = MAX_BLOCK_SIGOPS_COST;
     int64_t nSizeLimit = MAX_BLOCK_SERIALIZED_SIZE;
@@ -738,11 +738,42 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     result.push_back(Pair("height", (int64_t)(pindexPrev->nHeight+1)));
 
    std::string strHex = EncodeHexTx(*pblock->vtx[0]);
-
+std::string erer = EncodeHexTx(*pblock->vtx[0]);
     if (!pblocktemplate->vchCoinbaseCommitment.empty() && fSupportsSegwit) {
 
-        result.push_back(Pair("Original_Coinbase_txn", HexStr(coinbaseScript->reserveScript)));
-        result.push_back(Pair("Modified_Coinbase_txn",strHex));
+       // result.push_back(Pair("Original_Coinbase_txn", HexStr(coinbaseScript->reserveScript)));
+        result.push_back(Pair("NbCoinTxn", pblock->vtx[0]->vout.size()));
+
+if(pblock->vtx[0]->vout.size() == 1){
+        result.push_back(Pair("Modified_Coinbase_txn1", HexStr(pblock->vtx[0]->vout[0].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn2", HexStr(pblock->vtx[0]->vout[1].scriptPubKey)));
+}
+
+if(pblock->vtx[0]->vout.size() == 2){
+        result.push_back(Pair("Modified_Coinbase_txn1", HexStr(pblock->vtx[0]->vout[0].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn2", HexStr(pblock->vtx[0]->vout[1].scriptPubKey)));
+}
+
+if(pblock->vtx[0]->vout.size() == 3){
+        result.push_back(Pair("Modified_Coinbase_txn1", HexStr(pblock->vtx[0]->vout[0].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn2", HexStr(pblock->vtx[0]->vout[1].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn3", HexStr(pblock->vtx[0]->vout[2].scriptPubKey)));
+}
+
+if(pblock->vtx[0]->vout.size() == 4){
+        result.push_back(Pair("Modified_Coinbase_txn1", HexStr(pblock->vtx[0]->vout[0].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn2", HexStr(pblock->vtx[0]->vout[1].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn3", HexStr(pblock->vtx[0]->vout[2].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn4", HexStr(pblock->vtx[0]->vout[3].scriptPubKey)));
+}
+
+if(pblock->vtx[0]->vout.size() == 5){
+        result.push_back(Pair("Modified_Coinbase_txn1", HexStr(pblock->vtx[0]->vout[0].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn2", HexStr(pblock->vtx[0]->vout[1].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn3", HexStr(pblock->vtx[0]->vout[2].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn4", HexStr(pblock->vtx[0]->vout[3].scriptPubKey)));
+        result.push_back(Pair("Modified_Coinbase_txn5", HexStr(pblock->vtx[0]->vout[4].scriptPubKey)));
+}
         result.push_back(Pair("default_witness_commitment", HexStr(pblocktemplate->vchCoinbaseCommitment.begin(), pblocktemplate->vchCoinbaseCommitment.end())));
     }
     return result;
