@@ -212,7 +212,7 @@ public:
         consensus.nPowTargetTimespan = 60 * 60; // two weeks
         consensus.nPowTargetSpacing = 1;
         consensus.DrivechainHeight = 1;
-        consensus.fPowAllowMinDifficultyBlocks = true;
+        consensus.fPowAllowMinDifficultyBlocks = false;
         consensus.fPowNoRetargeting = false;
         consensus.nRuleChangeActivationThreshold = 1; // 75% for testchains
         consensus.nMinerConfirmationWindow = 1; // nPowTargetTimespan / nPowTargetSpacing
