@@ -744,35 +744,10 @@ std::string erer = EncodeHexTx(*pblock->vtx[0]);
        // result.push_back(Pair("Original_Coinbase_txn", HexStr(coinbaseScript->reserveScript)));
         result.push_back(Pair("NbCoinTxn", pblock->vtx[0]->vout.size()));
 
-if(pblock->vtx[0]->vout.size() == 1){
-        result.push_back(Pair("Modified_Coinbase_txn1", HexStr(pblock->vtx[0]->vout[0].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn2", HexStr(pblock->vtx[0]->vout[1].scriptPubKey)));
-}
-
-if(pblock->vtx[0]->vout.size() == 2){
-        result.push_back(Pair("Modified_Coinbase_txn1", HexStr(pblock->vtx[0]->vout[0].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn2", HexStr(pblock->vtx[0]->vout[1].scriptPubKey)));
-}
-
-if(pblock->vtx[0]->vout.size() == 3){
-        result.push_back(Pair("Modified_Coinbase_txn1", HexStr(pblock->vtx[0]->vout[0].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn2", HexStr(pblock->vtx[0]->vout[1].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn3", HexStr(pblock->vtx[0]->vout[2].scriptPubKey)));
-}
-
-if(pblock->vtx[0]->vout.size() == 4){
-        result.push_back(Pair("Modified_Coinbase_txn1", HexStr(pblock->vtx[0]->vout[0].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn2", HexStr(pblock->vtx[0]->vout[1].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn3", HexStr(pblock->vtx[0]->vout[2].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn4", HexStr(pblock->vtx[0]->vout[3].scriptPubKey)));
-}
-
-if(pblock->vtx[0]->vout.size() == 5){
-        result.push_back(Pair("Modified_Coinbase_txn1", HexStr(pblock->vtx[0]->vout[0].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn2", HexStr(pblock->vtx[0]->vout[1].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn3", HexStr(pblock->vtx[0]->vout[2].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn4", HexStr(pblock->vtx[0]->vout[3].scriptPubKey)));
-        result.push_back(Pair("Modified_Coinbase_txn5", HexStr(pblock->vtx[0]->vout[4].scriptPubKey)));
+    int longueur = pblock->vtx[0]->vout.size();  
+        
+	for (int i = 0; i < longueur; i++) {
+        result.push_back(Pair("Modified_Coinbase_txn" + std::to_string(i), HexStr(pblock->vtx[0]->vout[i].scriptPubKey)));
 }
         result.push_back(Pair("default_witness_commitment", HexStr(pblocktemplate->vchCoinbaseCommitment.begin(), pblocktemplate->vchCoinbaseCommitment.end())));
     }
