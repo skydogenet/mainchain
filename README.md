@@ -1,3 +1,5 @@
+Check skydogehash branche for latest release
+
 Skydoge / Drivechain (BIPs 300+301)
 ------------------
 
