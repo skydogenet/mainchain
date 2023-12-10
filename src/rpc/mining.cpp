@@ -334,7 +334,6 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
 {
     //unsigned int nExtraNonce = 0;
     std::shared_ptr<CReserveScript> coinbaseScript;
-    vpwallets[0]->GetScriptForMining(coinbaseScript);
 
     if (request.fHelp || request.params.size() > 1)
         throw std::runtime_error(
