@@ -222,7 +222,6 @@ bool fHavePruned = false;
 bool fPruneMode = false;
 bool fIsBareMultisigStd = DEFAULT_PERMIT_BAREMULTISIG;
 bool fRequireStandard = true;
-bool fCMPCTWit = false;
 bool fCheckBlockIndex = false;
 bool fCheckpointsEnabled = DEFAULT_CHECKPOINTS_ENABLED;
 size_t nCoinCacheUsage = 5000 * 300;
@@ -1365,15 +1364,18 @@ CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams)
     if(halvings > 4){
         halvings = 4;
     }
-    if(nHeight ==2){
+    if(nHeight == 2){
         return 10000000000 * COIN;
     }
+    if(nHeight > 9450000){
+        return 0;
+    }
+
     CAmount nSubsidy = 50000 * COIN;
-    // Subsidy is cut in half every 210,000 blocks which will occur approximately every 4 years.
+    // Subsidy is cut in half every 2.100,000 blocks which will occur approximately every 4 years.
     nSubsidy >>= halvings;
     return nSubsidy;
 }
-
 bool IsInitialBlockDownload()
 {
     // Once this function has returned false, it must remain false.
@@ -2503,7 +2505,7 @@ bool static FlushStateToDisk(const CChainParams& chainparams, CValidationState &
         // Combine all conditions that result in a full cache flush.
         fDoFullFlush = (mode == FLUSH_STATE_ALWAYS) || fCacheLarge || fCacheCritical || fPeriodicFlush || fFlushForPrune;
         // Write blocks and block index to disk.
-        if ((fDoFullFlush || fPeriodicWrite) && !fCMPCTWit) {
+        if ((fDoFullFlush || fPeriodicWrite)) {
             // Depend on nMinDiskSpace to ensure we can write block index
             if (!CheckDiskSpace(0))
                 return state.Error("out of disk space");
@@ -4954,33 +4956,6 @@ void UnloadBlockIndex()
     fHavePruned = false;
 
     g_chainstate.UnloadBlockIndex();
-}
-
-void CompactWitBlockIndex()
-{
-    LOCK(cs_main);
-    chainActive.SetTip(nullptr);
-    pindexBestInvalid = nullptr;
-    pindexBestHeader = nullptr;
-    mempool.clear();
-    mapBlocksUnlinked.clear();
-    vinfoBlockFile.clear();
-    nLastBlockFile = 0;
-    fCMPCTWit = true;
-    setDirtyBlockIndex.clear();
-    setDirtyFileInfo.clear();
-    versionbitscache.Clear();
-    for (int b = 0; b < VERSIONBITS_NUM_BITS; b++) {
-        warningcache[b].clear();
-    }
-
-    for (BlockMap::value_type& entry : mapBlockIndex) {
-        delete entry.second;
-    }
-    mapBlockIndex.clear();
-    fHavePruned = false;
-
-    g_chainstate.UnloadWBlockIndex();
 }
 
 bool LoadBlockIndex(const CChainParams& chainparams)

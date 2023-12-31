@@ -142,7 +142,7 @@ public:
         consensus.nMinimumChainWork = uint256S("0x000000000000000000000000000000000000000000000000000000001d5fffff");
 
         // By default assume that the signatures in ancestors of this block are valid.
-        consensus.defaultAssumeValid = uint256S("0x5a86f07cf871fb4d8125aa6f8701e3ba3e876bddfcb6d11754cfb459eedf2e8c");
+        consensus.defaultAssumeValid = uint256S("0x000000000007fe51ecfdfa34837b2d4a8f2c53eb41289d531f8a5b25fb348259");
         consensus.DrivechainHeight = 1;
 
         /**
@@ -165,6 +165,12 @@ public:
         assert(consensus.hashGenesisBlock == uint256S("0x000000204da4f2092d957aa155339b91892c9e35de481c0a8efe099986936695"));
         assert(genesis.hashMerkleRoot == uint256S("0x160ace8d7230cd2879c999e1262333cca48d2fb87b67c06a6556d474f224fa80"));
 
+        vFixedSeeds.clear();
+        vSeeds.clear();
+        // nodes with support for servicebits filtering should be at the top
+        vSeeds.emplace_back("treenode.net");
+        vSeeds.emplace_back("skydoge.org");
+
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,0);
         base58Prefixes[SIDECHAIN_PUBKEY_ADDRESS] = std::vector<unsigned char>(1,125);
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,5);
@@ -184,13 +190,14 @@ public:
         checkpointData = {
             {
                 { 0, uint256S("0x0000000b2b10496bb3520722e9e197377d22671e39f1def14ed3455b473e9afa")},
+                { 534647, uint256S("0x000000000007fe51ecfdfa34837b2d4a8f2c53eb41289d531f8a5b25fb348259")},
             }
         };
 
         chainTxData = ChainTxData{
-            /* nTime    */ 1645542140,
-            /* nTxCount */ 712531200,
-            /* dTxRate  */ 2.9
+            /* nTime    */ 1703917155,
+            /* nTxCount */ 634398,
+            /* dTxRate  */ 1
         };
     }
 };

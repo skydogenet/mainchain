@@ -1342,6 +1342,70 @@ UniValue listsidechainproposals(const JSONRPCRequest& request)
     return ret;
 }
 
+
+UniValue acksidechain(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() == 0)
+        throw std::runtime_error(
+            "acksidechain\n"
+            "acksidechain sidechain proposals\n"
+            "\nArguments:\n"
+            "\nExamples:\n"
+            + HelpExampleCli("acksidechain", "")
+            + HelpExampleRpc("acksidechain", "")
+            );
+    uint256 strSChash = uint256S(request.params[0].get_str());
+    scdb.CacheSidechainHashToAck(strSChash);
+
+    return NullUniValue;
+
+}
+
+UniValue nacksidechain(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() == 0)
+        throw std::runtime_error(
+            "nacksidechain\n"
+            "nacksidechain sidechain proposals\n"
+            "\nArguments:\n"
+            "\nExamples:\n"
+            + HelpExampleCli("nacksidechain", "")
+            + HelpExampleRpc("nacksidechain", "")
+            );
+    uint256 strSChash = uint256S(request.params[0].get_str());
+    scdb.RemoveSidechainHashToAck(strSChash);
+
+    return NullUniValue;
+
+}
+
+UniValue listhashsidechain(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 0)
+        throw std::runtime_error(
+            "listhashsidechain\n"
+            "listhashsidechain sidechain proposals\n"
+            "\nArguments:\n"
+            "\nExamples:\n"
+            + HelpExampleCli("listhashsidechain", "")
+            + HelpExampleRpc("listhashsidechain", "")
+            );
+    std::vector<uint256> vHash = scdb.GetSidechainsToActivate();
+    int longueur = vHash.size();  
+          UniValue ret(UniValue::VARR);     
+	for (int i = 0; i < longueur; i++) {
+
+       		 UniValue obj(UniValue::VOBJ);
+       		 obj.push_back(Pair("Hash" + std::to_string(i) + ": ", HexStr(vHash[i])));
+
+       		 ret.push_back(obj);
+    }
+
+
+    return ret;
+
+}
+
 UniValue getsidechainactivationstatus(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 1)
@@ -2124,6 +2188,9 @@ static const CRPCCommand commands[] =
     { "Drivechain",  "listactivesidechains",          &listactivesidechains,            {}},
     { "Drivechain",  "listsidechainactivationstatus", &listsidechainactivationstatus,   {}},
     { "Drivechain",  "listsidechainproposals",        &listsidechainproposals,          {}},
+    { "Drivechain",  "acksidechain",                  &acksidechain,   {"hash"}},
+    { "Drivechain",  "nacksidechain",                 &nacksidechain,          {"hash"}},
+    { "Drivechain",  "listhashsidechain",                 &listhashsidechain,          {}},
     { "Drivechain",  "getsidechainactivationstatus",  &getsidechainactivationstatus,    {}},
     { "Drivechain",  "createsidechainproposal",       &createsidechainproposal,         {"nsidechain", "title", "description", "keyhash", "nversion", "hashid1", "hashid2"}},
     { "Drivechain",  "clearwithdrawalvotes",          &clearwithdrawalvotes,            {}},

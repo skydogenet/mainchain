@@ -221,12 +221,6 @@ extern const char *FEEFILTER;
 extern const char *SENDCMPCT;
 /**
  * Contains a CBlockHeaderAndShortTxIDs object - providing a header and
- * list of SERIALIZE_TRANSACTION_NO_WITNESS "short txids"
- * @since protocol version 70014 as described by BIP 152
- */
-extern const char *CMPCTWITBLOCK;
-/**
- * Contains a CBlockHeaderAndShortTxIDs object - providing a header and
  * list of "short txids".
  * @since protocol version 70014 as described by BIP 152
  */

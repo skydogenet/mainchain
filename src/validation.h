@@ -182,7 +182,6 @@ extern int nScriptCheckThreads;
 extern bool fTxIndex;
 extern bool fIsBareMultisigStd;
 extern bool fRequireStandard;
-extern bool fCMPCTWit;
 extern bool fCheckBlockIndex;
 extern bool fCheckpointsEnabled;
 extern size_t nCoinCacheUsage;
@@ -280,8 +279,6 @@ bool LoadGenesisBlock(const CChainParams& chainparams);
 bool LoadBlockIndex(const CChainParams& chainparams);
 /** Update the chain tip based on database information. */
 bool LoadChainTip(const CChainParams& chainparams);
-/** Compact witness block information */
-void CompactWitBlockIndex();
 /** Unload database information */
 void UnloadBlockIndex();
 /** Run an instance of the script checking thread */

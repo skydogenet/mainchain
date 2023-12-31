@@ -746,7 +746,7 @@ void BitcoinGUI::setClientModel(ClientModel *_clientModel)
         // Show progress
         connect(_clientModel, SIGNAL(showProgress(QString,int)), this, SLOT(showProgress(QString,int)));
 
-        modalOverlay->setKnownBestHeight(_clientModel->getHeaderTipHeight(), QDateTime::fromTime_t(clientModel->getHeaderTipTime()));
+        modalOverlay->setProgress(_clientModel->getHeaderTipHeight(), 0.0);
 
         rpcConsole->setClientModel(_clientModel);
 #ifdef ENABLE_WALLET
@@ -757,6 +757,9 @@ void BitcoinGUI::setClientModel(ClientModel *_clientModel)
 
         blockExplorerDialog->setClientModel(_clientModel);
         denialDialog->setClientModel(_clientModel);
+
+        connect(_clientModel, SIGNAL(numBlocksChangedIBD(int,double)), this, SLOT(setNumBlocksIBD(int,double)));
+
 
 #endif // ENABLE_WALLET
         OptionsModel* optionsModel = _clientModel->getOptionsModel();
@@ -1241,12 +1244,9 @@ QFrame* BitcoinGUI::CreateVLine()
 
 void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, double nVerificationProgress, bool header)
 {
-    if (modalOverlay) {
-        if (header)
-            modalOverlay->setKnownBestHeight(count, blockDate);
-        else
-            modalOverlay->tipUpdate(count, blockDate, nVerificationProgress);
-    }
+
+    if (modalOverlay)
+        modalOverlay->setProgress(count, nVerificationProgress);
 
     if (!clientModel)
         return;
@@ -1355,6 +1355,20 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, double nVer
     // Display last block time
     labelLastBlock->setText(tr("Last block: %1 ago").arg(timeBehindText));
 }
+
+void BitcoinGUI::setNumBlocksIBD(int count, double nVerificationProgress)
+{
+    // Display number of blocks & IBD progress
+    QString label = QString::number(count);
+    label += " blocks ( Syncing: ";
+    label += QString::number(nVerificationProgress, 'f', 2).right(2);
+    label += "%";
+    label += ")";
+    labelNumBlocks->setText(label);
+
+    modalOverlay->setProgress(count, nVerificationProgress);
+}
+
 
 void BitcoinGUI::message(const QString &title, const QString &message, unsigned int style, bool *ret)
 {

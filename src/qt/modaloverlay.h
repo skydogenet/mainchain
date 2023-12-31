@@ -25,13 +25,11 @@ public:
     ~ModalOverlay();
 
 public Q_SLOTS:
-    void tipUpdate(int count, const QDateTime& blockDate, double nVerificationProgress);
-    void setKnownBestHeight(int count, const QDateTime& blockDate);
+    void setProgress(int height, double nVerificationProgress);
 
     void toggleVisibility();
     // will show or hide the modal layer
     void showHide(bool hide = false, bool userRequested = false);
-    void closeClicked();
     bool isLayerVisible() const { return layerIsVisible; }
 
 protected:
@@ -40,11 +38,13 @@ protected:
 
 private:
     Ui::ModalOverlay *ui;
-    int bestHeaderHeight; //best known height (based on the headers)
-    QDateTime bestHeaderDate;
-    QVector<QPair<qint64, double> > blockProcessTime;
+
     bool layerIsVisible;
     bool userClosed;
+
+private Q_SLOTS:
+    void on_pushButtonHide_clicked();
+
 };
 
 #endif // BITCOIN_QT_MODALOVERLAY_H

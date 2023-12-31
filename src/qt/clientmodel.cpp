@@ -336,19 +336,33 @@ static void BannedListChanged(ClientModel *clientmodel)
 
 static void BlockTipChanged(ClientModel *clientmodel, bool initialSync, const CBlockIndex *pIndex, bool fHeader)
 {
-    // lock free async UI updates in case we have a new block tip
-    // during initial sync, only update the UI if the last update
-    // was > 250ms (MODEL_UPDATE_DELAY) ago. If an update is ignored
-    // it will be cached and sent later
+
     int64_t now = 0;
     if (initialSync)
         now = GetTimeMillis();
+
+
+    int64_t& nLastUpdateNotification = fHeader ? nLastHeaderTipUpdateNotification : nLastBlockTipUpdateNotification;
+
+    if (initialSync && !fHeader) {
+        if (now - nLastUpdateNotification > MODEL_UPDATE_DELAY) {
+            QMetaObject::invokeMethod(clientmodel, "numBlocksChangedIBD", Qt::QueuedConnection,
+                    Q_ARG(int, pIndex->nHeight),
+                    Q_ARG(double, clientmodel->getVerificationProgress(pIndex)));
+
+            nLastUpdateNotification = now;
+        }
+        return;
+    }
+
+    if (initialSync && fHeader)
+        return;
+
 
     // Once we are synchronized we can stop the ignored block changes timer
     if (!initialSync)
         clientmodel->StopIgnoredBlockChangeTimer();
 
-    int64_t& nLastUpdateNotification = fHeader ? nLastHeaderTipUpdateNotification : nLastBlockTipUpdateNotification;
 
     if (fHeader) {
         // cache best headers time and height to reduce future cs_main locks

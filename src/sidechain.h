@@ -20,18 +20,22 @@
 
 //! Blocks that a withdrawal bundle has to acheieve minimum work score
 static const int SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD = 263;
+//static const int SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD = 263000; // DC original 6 months 26300
 
 //! The minimum workscore votes for a withdrawal bundle to be paid out.
 static const int SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE = 131;
+//static const int SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE = 131500; // DC original 3 months 13150;
 
 //! The destination string for the change of a withdrawal bundle
 static const std::string SIDECHAIN_WITHDRAWAL_RETURN_DEST = "D";
 
 //! Max number of failures (blocks without commits) for a sidechain to activate
 static const int SIDECHAIN_ACTIVATION_MAX_FAILURES = 2;
+//static const int SIDECHAIN_ACTIVATION_MAX_FAILURES = 10070; // DC original 7 days 1007
 
 //! The number of blocks in a sidechain activation period
 static const int SIDECHAIN_ACTIVATION_PERIOD = 20;
+//static const int SIDECHAIN_ACTIVATION_PERIOD = 20160; // DC original 14 days 2016
 
 //! The number of blocks in a sidechain replacement period
 static const int SIDECHAIN_REPLACEMENT_PERIOD = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE;

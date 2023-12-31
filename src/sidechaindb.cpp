@@ -1407,14 +1407,14 @@ bool SidechainDB::ApplyUpdate(int nHeight, const uint256& hashBlock, const uint2
             return false;
         }
     }
-
+ /*
     if (fDebug && !fJustCheck) {
         LogPrintf("SCDB %s: Updated from block %s to block %s.\n",
                 __func__,
                 hashBlockLastSeen.ToString(),
                 hashBlock.ToString());
     }
-
+  */
     // Update hashBLockLastSeen
     if (!fJustCheck)
         hashBlockLastSeen = hashBlock;

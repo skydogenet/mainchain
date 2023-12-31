@@ -60,6 +60,8 @@ struct Params {
     int BIP66Height;
     /** Block height at which Drivechain becomes active */
     int DrivechainHeight;
+    /** Minimum valid blockchain height */
+    int MinimumHeight;
     /**
      * Minimum blocks including miner confirmation of the total of 2016 blocks in a retargeting period,
      * (nPowTargetTimespan / nPowTargetSpacing) which is also used for BIP9 deployments.
