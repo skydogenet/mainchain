@@ -740,7 +740,7 @@ std::string erer = EncodeHexTx(*pblock->vtx[0]);
     if (!pblocktemplate->vchCoinbaseCommitment.empty() && fSupportsSegwit) {
 
        // result.push_back(Pair("Original_Coinbase_txn", HexStr(coinbaseScript->reserveScript)));
-        result.push_back(Pair("NbCoinTxn", pblock->vtx[0]->vout.size()->ToString()));
+    result.push_back(Pair("NbCoinTxn", (int64_t)(pblock->vtx[0]->vout.size())));
 
     int longueur = pblock->vtx[0]->vout.size();  
         
