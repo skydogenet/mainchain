@@ -5,6 +5,8 @@
 
 #include "txmempool.h"
 
+#include <algorithm>
+
 #include "chain.h"
 #include "chainparams.h"
 #include "consensus/consensus.h"
@@ -526,9 +528,6 @@ void CTxMemPool::removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMem
         const CTransaction& tx = it->GetTx();
         LockPoints lp = it->GetLockPoints();
         bool validLP =  TestLockPointValidity(&lp);
-        if (nHeight < DrivechainHeight) {
-            bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
-        }
         if (!CheckFinalTx(tx, flags) || !CheckSequenceLocks(tx, flags, &lp, validLP)) {
             // Note if CheckSequenceLocks fails the LockPoints may still be invalid
             // So it's critical that we remove the tx and not depend on the LockPoints.
@@ -545,20 +544,6 @@ void CTxMemPool::removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMem
                     break;
                 }
             }
-        } else if (nHeight < DrivechainHeight) {
-                   if (skydogesEnabled && it->GetSpendsCriticalData()) {
-                       for (const CTxIn& txin : tx.vin) {
-                           indexed_transaction_set::const_iterator it2 = mapTx.find(txin.prevout.hash);
-                           if (it2 != mapTx.end())
-                           continue;
-                           const Coin &coin = pcoins->AccessCoin(txin.prevout);
-                           if (nCheckFrequency != 0) assert(!coin.IsSpent());
-                           if (coin.IsSpent() /* || (coin.IsCriticalData() && ((signed long)nMemPoolHeight) - coin.nHeight < CRITICAL_DATA_MATURITY)*/) {
-                           txToRemove.insert(it);
-                           break;
-                      }
-                  }
-            }
         }
         if (!validLP) {
             mapTx.modify(it, update_lock_points(lp));
@@ -569,6 +554,29 @@ void CTxMemPool::removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMem
         CalculateDescendants(it, setAllRemoves);
     }
     RemoveStaged(setAllRemoves, false, MemPoolRemovalReason::REORG);
+}
+
+void CTxMemPool::removeForSmallBlockActivation(unsigned int nMaxSerializedSize)
+{
+    LOCK(cs);
+    setEntries txToRemove;
+    for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
+        // Serialized bytes, not GetTxSize(): that returns the virtual size,
+        // which discounts witness bytes. The rule this enforces counts them at
+        // par, so a witness-heavy transaction under the virtual limit can still
+        // be over the byte limit.
+        if (::GetSerializeSize(it->GetTx(), SER_NETWORK, PROTOCOL_VERSION) > nMaxSerializedSize)
+            txToRemove.insert(it);
+    }
+    setEntries setAllRemoves;
+    for (txiter it : txToRemove) {
+        CalculateDescendants(it, setAllRemoves);
+    }
+    if (!setAllRemoves.empty()) {
+        LogPrintf("%s: dropping %u transaction(s) larger than %u bytes at the small-block flag day\n",
+                __func__, setAllRemoves.size(), nMaxSerializedSize);
+    }
+    RemoveStaged(setAllRemoves, false, MemPoolRemovalReason::SIZELIMIT);
 }
 
 void CTxMemPool::removeConflicts(const CTransaction &tx)
@@ -1086,20 +1094,33 @@ void CTxMemPool::RemoveExpiredCriticalRequests(std::vector<uint256>& vHashRemove
     }
 }
 
-void CTxMemPool::SelectBMMRequests(std::vector<uint256>& vHashRemoved)
+void CTxMemPool::RemoveInvalidBMMRequests(std::vector<uint256>& vHashRemoved)
 {
-    // TODO
-    // For now, this is just making sure that we only accept 1 BMM request
-    // per block per sidechain. Eventually though, we should allow options
-    // such as minimum payment amount, filter by sidechain, etc.
-    //
+    // This used to keep the FIRST request per slot in
+    // salted-hash order and delete every other valid one (the wallet then
+    // abandoned them), never comparing fee or bid - so a flooder submitting N
+    // requests won about N/(N+1) of blocks, and with -blockmintxfee above the
+    // relay minimum a slot could get no BMM at all. Only requests no block on
+    // this tip can carry are removed now; RankBMMRequests ranks the rest.
 
     LOCK(cs);
 
-    // We only want 1 BMM request per sidechain so track whether we've
-    // already found one for a given sidechain
-    std::vector<bool> vSidechain;
-    vSidechain.resize(SIDECHAIN_ACTIVATION_MAX_ACTIVE);
+    /* A BMM request is only valid while it names the CURRENT tip.
+     * AcceptToMemoryPool checks that at admission and nothing re-checks it when
+     * the tip advances - removeForReorg runs only on a reorg, removeForBlock
+     * only drops what a block included. A request that loses the race to the
+     * next block therefore stays in the mempool for the full expiry, and every
+     * template that includes it would fail ContextualCheckBlock with
+     * bad-critical-bmm-prevblock-invalid. This removes them instead.
+     *
+     * The comparison is on the last 8 hex characters because that is what a BMM
+     * request carries (4 prevBytes) and what AcceptToMemoryPool compares; using
+     * the full hash here would never match. */
+    std::string strTip = "";
+    if (chainActive.Tip()) {
+        strTip = chainActive.Tip()->GetBlockHash().ToString();
+        strTip = strTip.substr(strTip.size() - 8, strTip.size() - 1);
+    }
 
     std::vector<CTransaction> vTxRemove;
     for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
@@ -1107,6 +1128,17 @@ void CTxMemPool::SelectBMMRequests(std::vector<uint256>& vHashRemoved)
             uint8_t nSidechain;
             std::string strPrevBlock = "";
             if (it->GetTx().criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
+                if (!strTip.empty() && strPrevBlock != strTip) {
+                    /* Stale: it names a block that is no longer the tip, so no
+                     * block containing it can be valid. Removed FIRST, before the
+                     * one-per-sidechain choice below, which keeps the first
+                     * request it sees and deletes the others - a stale one in
+                     * that slot would once have deleted the valid replacement;
+                     * the stale-first order is kept for that reason. */
+                    vTxRemove.push_back(it->GetTx());
+                    continue;
+                }
+
                 if (!scdb.IsSidechainActive(nSidechain)) {
                     // A BMM request for an invalid sidechain shouldn't be
                     // accepted, but a sidechain can be deactivated so if we
@@ -1116,18 +1148,9 @@ void CTxMemPool::SelectBMMRequests(std::vector<uint256>& vHashRemoved)
                     continue;
                 }
 
-                if (nSidechain >= vSidechain.size()) {
+                if (nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE) {
                     vTxRemove.push_back(it->GetTx());
                     continue;
-                }
-
-                if (vSidechain[nSidechain] == false) {
-                    // Track that we have found a BMM request for this sidechain
-                    vSidechain[nSidechain] = true;
-                } else {
-                    // We already have a BMM request selected for this sidechain
-                    // so remove any extras
-                    vTxRemove.push_back(it->GetTx());
                 }
             }
         }
@@ -1137,6 +1160,91 @@ void CTxMemPool::SelectBMMRequests(std::vector<uint256>& vHashRemoved)
         vHashRemoved.push_back(tx.GetHash());
         removeRecursive(tx);
     }
+}
+
+std::map<uint8_t, std::vector<uint256>> CTxMemPool::RankBMMRequests(const CFeeRate& minFeeRate) const
+{
+    LOCK(cs);
+
+    // Same tip bytes as RemoveInvalidBMMRequests (the last 8 hex characters).
+    std::string strTip = "";
+    if (chainActive.Tip()) {
+        strTip = chainActive.Tip()->GetBlockHash().ToString();
+        strTip = strTip.substr(strTip.size() - 8, strTip.size() - 1);
+    }
+    const CScript scriptBid = CScript() << OP_TRUE;
+
+    // Per slot: (fee + bid, txid) of every competitor.
+    std::map<uint8_t, std::vector<std::pair<CAmount, uint256>>> mapCandidates;
+    for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
+        const CTransaction& tx = it->GetTx();
+        if (tx.criticalData.IsNull())
+            continue;
+        uint8_t nSidechain;
+        std::string strPrevBlock = "";
+        if (!tx.criticalData.IsBMMRequest(nSidechain, strPrevBlock))
+            continue;
+        // Never choose what RemoveInvalidBMMRequests would remove.
+        if (!strTip.empty() && strPrevBlock != strTip)
+            continue;
+        if (nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE || !scdb.IsSidechainActive(nSidechain))
+            continue;
+        // A winner the block assembler would refuse for its feerate leaves the
+        // slot with no BMM at all, so only competitors that can be included
+        // take part.
+        if (it->GetModFeesWithAncestors() < minFeeRate.GetFee(it->GetSizeWithAncestors()))
+            continue;
+        // A request that spends another BMM request's unconfirmed output can
+        // only enter a block together with it: for the same slot that is two
+        // requests, which consensus refuses, and the assembler would then
+        // leave the slot with no BMM at all. Such a request does not compete;
+        // its ancestor may.
+        {
+            setEntries setAncestors;
+            const uint64_t nNoLimit = std::numeric_limits<uint64_t>::max();
+            std::string strDummy;
+            CalculateMemPoolAncestors(*it, setAncestors, nNoLimit, nNoLimit, nNoLimit, nNoLimit, strDummy, false);
+            bool fChained = false;
+            for (txiter ait : setAncestors) {
+                uint8_t nAncestorSlot;
+                std::string strAncestorPrev = "";
+                if (!ait->GetTx().criticalData.IsNull() &&
+                        ait->GetTx().criticalData.IsBMMRequest(nAncestorSlot, strAncestorPrev)) {
+                    fChained = true;
+                    break;
+                }
+            }
+            if (fChained)
+                continue;
+        }
+
+        // The bid: the OP_TRUE outputs the critical fee transaction collects
+        // (CreateNewBlock), plus the request's own fee.
+        CAmount nValue = it->GetModifiedFee();
+        for (const CTxOut& out : tx.vout) {
+            if (out.scriptPubKey == scriptBid)
+                nValue += out.nValue;
+        }
+
+        mapCandidates[nSidechain].emplace_back(nValue, tx.GetHash());
+    }
+
+    // Highest fee + bid first, the lowest txid on a tie - the order the
+    // single winner used to be picked in, so the head of each list is the
+    // request PickBMMRequests picks.
+    std::map<uint8_t, std::vector<uint256>> mapRanked;
+    for (auto& p : mapCandidates) {
+        std::sort(p.second.begin(), p.second.end(),
+                [](const std::pair<CAmount, uint256>& a, const std::pair<CAmount, uint256>& b) {
+                    if (a.first != b.first)
+                        return a.first > b.first;
+                    return a.second < b.second;
+                });
+        std::vector<uint256>& vRanked = mapRanked[p.first];
+        for (const auto& c : p.second)
+            vRanked.push_back(c.second);
+    }
+    return mapRanked;
 }
 
 void CTxMemPool::UpdateCTIPFromMempool(const std::map<uint8_t, SidechainCTIP>& mapCTIP)

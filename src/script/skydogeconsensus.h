@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#if defined(BUILD_DRIVENET_INTERNAL) && defined(HAVE_CONFIG_H)
+#if defined(BUILD_DRIVECHAIN_INTERNAL) && defined(HAVE_CONFIG_H)
 #include <config/skydoge-config.h>
   #if defined(_WIN32)
     #if defined(DLL_EXPORT)

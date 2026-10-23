@@ -13,12 +13,23 @@
 
 #include <boost/property_tree/json_parser.hpp>
 
+/** Whether the transaction-replay lookup may contact the outside world. */
+static const bool DEFAULT_REPLAY_CHECK = false;
+
 class APIClient
 {
 public:
     APIClient();
 
-    bool IsTxReplayed(const uint256& txid);
+    /**
+     * Ask whether txid also exists on the other chain.
+     *
+     * Sets fDetermined only when an answer was actually obtained. A false
+     * return with fDetermined unset means the question could not be answered -
+     * the lookup is switched off, or the request failed - and must not be
+     * treated as "not replayed".
+     */
+    bool IsTxReplayed(const uint256& txid, bool& fDetermined);
 
 private:
     /*

@@ -93,6 +93,14 @@ OPReturnDialog::~OPReturnDialog()
     delete ui;
 }
 
+void OPReturnDialog::setWalletModel(WalletModel *model)
+{
+    // Forwarded so the create dialog can ask for the passphrase when the
+    // wallet is encrypted.
+    if (createOPReturnDialog)
+        createOPReturnDialog->setWalletModel(model);
+}
+
 void OPReturnDialog::setClientModel(ClientModel *model)
 {
     if (model)

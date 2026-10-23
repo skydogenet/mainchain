@@ -30,6 +30,21 @@ SCDBDialog::~SCDBDialog()
 
 void SCDBDialog::UpdateOnShow()
 {
+    // All three helpers read the global scdb, which ConnectBlock move-assigns
+    // under cs_main, so the lock belongs here rather than at each call site -
+    // numBlocksChanged() already held it, but ShowSCDBDialog() did not, which
+    // left the same reads guarded on one path and unguarded on the other.
+    //
+    // Non-blocking on purpose: these run on the GUI thread and rebuild whole
+    // tree widgets, so waiting on a contended cs_main would freeze the
+    // interface for as long as a block takes to connect. On a miss the dialog
+    // keeps its current contents and numBlocksChanged() refreshes it on the
+    // next block. cs_main is recursive, so this still succeeds immediately on
+    // the numBlocksChanged() path, which already holds it.
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     UpdateVoteTree();
     UpdateSCDBText();
     UpdateHistoryTree();
@@ -37,6 +52,10 @@ void SCDBDialog::UpdateOnShow()
 
 void SCDBDialog::UpdateVoteTree()
 {
+    // Caller must hold cs_main - reads the global scdb, which ConnectBlock
+    // move-assigns. Reached only through UpdateOnShow(), which takes it.
+    AssertLockHeld(cs_main);
+
     // Update vote tree
 
     ui->treeWidgetVote->setUpdatesEnabled(false);
@@ -62,7 +81,13 @@ void SCDBDialog::UpdateVoteTree()
         QTreeWidgetItem *subItemAbstain = new QTreeWidgetItem();
         subItemAbstain->setText(0, "Abstain");
         subItemAbstain->setCheckState(0, Qt::Unchecked);
-        subItemAbstain->setData(0, NumRole, QString::number(x));
+        // The slot number, not the position in the active list. The withdrawal
+        // rows below and the vote lookup above both use nSidechain, so writing
+        // the index here sent the operator's Abstain and Alarm choices to
+        // whichever slot happened to sit at that position - silently, with the
+        // checkbox reverting on the next block and the real slot still
+        // abstaining.
+        subItemAbstain->setData(0, NumRole, QString::number(vSidechain[x].nSidechain));
         subItemAbstain->setData(0, HashRole, "");
         topItem->addChild(subItemAbstain);
 
@@ -70,7 +95,7 @@ void SCDBDialog::UpdateVoteTree()
         QTreeWidgetItem *subItemAlarm = new QTreeWidgetItem();
         subItemAlarm->setText(0, "Alarm");
         subItemAlarm->setCheckState(0, Qt::Unchecked);
-        subItemAlarm->setData(0, NumRole, QString::number(x));
+        subItemAlarm->setData(0, NumRole, QString::number(vSidechain[x].nSidechain));
         subItemAlarm->setData(0, HashRole, "");
         topItem->addChild(subItemAlarm);
 
@@ -119,6 +144,10 @@ void SCDBDialog::UpdateVoteTree()
 
 void SCDBDialog::UpdateSCDBText()
 {
+    // Caller must hold cs_main - reads the global scdb. Two call sites:
+    // UpdateOnShow() (TRY_LOCK) and on_treeWidgetVote_itemChanged() (LOCK).
+    AssertLockHeld(cs_main);
+
     ui->textBrowserSCDB->clear();
     std::vector<std::string> vVote = scdb.GetVotes();
 
@@ -194,6 +223,12 @@ void SCDBDialog::UpdateSCDBText()
 
 void SCDBDialog::UpdateHistoryTree()
 {
+    // Caller must hold cs_main. This one reads no scdb state, but it walks
+    // chainActive and dereferences the CBlockIndex it returns, which a reorg
+    // can invalidate under it - the same contract for a different reason.
+    // Reached only through UpdateOnShow(), which takes the lock.
+    AssertLockHeld(cs_main);
+
     // Update history tree
 
     ui->treeWidgetHistory->setUpdatesEnabled(false);
@@ -241,7 +276,7 @@ void SCDBDialog::UpdateHistoryTree()
             // Create sidechain children items
             for (const SidechainWithdrawalState& s : vScore) {
                 // Look up old work score
-                uint16_t nPrevScore = 0;
+                uint32_t nPrevScore = 0;   // tracks nWorkScore
                 if (prevData.vWithdrawalStatus.size() > s.nSidechain) {
                     for (const SidechainWithdrawalState& prevState : prevData.vWithdrawalStatus[s.nSidechain]) {
                         if (prevState.hash == s.hash)
@@ -302,8 +337,15 @@ void SCDBDialog::AddHistoryTreeItem(int index, const int nHeight, QTreeWidgetIte
 
 void SCDBDialog::numBlocksChanged()
 {
-    if (this->isVisible())
-        UpdateOnShow();
+    if (!this->isVisible())
+        return;
+
+    // Skip refresh if cs_main is contended during sync; the next block signal will retry when it's free
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
+    UpdateOnShow();
 }
 
 void SCDBDialog::on_treeWidgetVote_itemChanged(QTreeWidgetItem *item, int column)
@@ -342,11 +384,19 @@ void SCDBDialog::on_treeWidgetVote_itemChanged(QTreeWidgetItem *item, int column
             parent->child(0)->setCheckState(0, Qt::Checked);
     }
 
-    // Update users custom vote settings
+    // Update users custom vote settings.
+    //
+    // Block connection copies the SCDB, mutates the copy and publishes it back
+    // wholesale, so this read-modify-write needs cs_main or the vote can be
+    // silently reverted moments after it is set.
+    LOCK(cs_main);
+
     std::vector<std::string> vVote = scdb.GetVotes();
 
     unsigned int nSidechain = item->data(0, NumRole).toUInt();
-    if (nSidechain > SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+    // Slots are numbered 0..SIDECHAIN_ACTIVATION_MAX_ACTIVE-1; ">" would let the
+    // count itself through and index one past the end of the vote vector.
+    if (nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE || nSidechain >= vVote.size())
         return;
 
     if (parent->child(0)->checkState(0) == Qt::Checked) {

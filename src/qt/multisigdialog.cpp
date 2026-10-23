@@ -5,7 +5,7 @@
 #include <qt/multisigdialog.h>
 #include <qt/forms/ui_multisigdialog.h>
 
-#include <qt/drivechainamountfield.h>
+#include <qt/skydogeamountfield.h>
 #include <qt/guiutil.h>
 #include <qt/platformstyle.h>
 
@@ -280,6 +280,17 @@ void MultisigDialog::updateCreateMSOutput()
 
     // Create multisig script (P2SH inner script / redeem script)
     CScript script = GetScriptForMultisig(nRequired, vPubKey);
+
+    // Spending a P2SH output pushes the redeem script, and a push over
+    // MAX_SCRIPT_ELEMENT_SIZE (520 bytes) fails, so an address for a longer
+    // script can receive coins that can never leave. 16 compressed keys make
+    // 547 bytes; 15 make 513.
+    if (script.size() > MAX_SCRIPT_ELEMENT_SIZE) {
+        SetCreateMSErrorOutput(QString("Redeem script would be %1 bytes; a P2SH redeem script over %2 bytes can never be spent. Use fewer keys (at most 15 compressed).\n")
+            .arg((qulonglong)script.size()).arg((qulonglong)MAX_SCRIPT_ELEMENT_SIZE));
+        return;
+    }
+
     CScriptID id(script);
 
     std::string strDestination = EncodeDestination(id);

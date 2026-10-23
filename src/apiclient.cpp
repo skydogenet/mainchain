@@ -23,11 +23,22 @@ APIClient::APIClient()
 
 }
 
-bool APIClient::IsTxReplayed(const uint256& txid)
+bool APIClient::IsTxReplayed(const uint256& txid, bool& fDetermined)
 {
     // TODO use sendrequest instead of everything here
-    // TODO needs to return false if request failed and return replay status
-    // by reference
+
+    fDetermined = false;
+
+    // Off unless asked for. Answering this question means opening a TLS
+    // connection to a third-party service and parsing its certificate chain
+    // and response with the TLS library this is built against, which is long
+    // out of support. That is the only outbound connection the wallet makes to
+    // anything other than the network itself, and it exists for a display-only
+    // convenience, so it should not happen unless the operator wants it.
+    if (!gArgs.GetBoolArg("-replaycheck", DEFAULT_REPLAY_CHECK)) {
+        LogPrintf("%s: replay lookup is disabled (enable with -replaycheck)\n", __func__);
+        return false;
+    }
 
     try {
         // Setup BOOST ASIO for a synchronus call to the mainchain
@@ -40,6 +51,36 @@ bool APIClient::IsTxReplayed(const uint256& txid)
         auto endpoint_iterator = resolver.resolve(query);
 
         boost::asio::connect(sslSocket.lowest_layer(), endpoint_iterator);
+
+        // Verify the server's TLS certificate chain against the system CA store
+        // and check that the presented hostname matches, so a man-in-the-middle
+        // cannot impersonate the API and forge the replay-protection answer.
+        //
+        // set_default_verify_paths() alone is not enough for release builds:
+        // those link a statically built OpenSSL whose compiled-in CA directory
+        // points inside the build tree and does not exist on user machines, so
+        // the trust store comes up empty and every handshake fails verification.
+        // Also try the usual system CA locations so verification can actually
+        // succeed off the build machine.
+        boost::system::error_code ecVerify;
+        sslContext.set_default_verify_paths(ecVerify);
+        static const char* const pszCAFiles[] = {
+            "/etc/ssl/certs/ca-certificates.crt",   // Debian/Ubuntu, Alpine
+            "/etc/pki/tls/certs/ca-bundle.crt",     // Fedora/RHEL
+            "/etc/ssl/ca-bundle.pem",               // openSUSE
+            "/etc/ssl/cert.pem",                    // macOS/BSD
+        };
+        for (const char* pszCAFile : pszCAFiles) {
+            if (fs::exists(fs::path(pszCAFile))) {
+                boost::system::error_code ecFile;
+                sslContext.load_verify_file(pszCAFile, ecFile);
+                if (!ecFile)
+                    break;
+            }
+        }
+        sslContext.add_verify_path("/etc/ssl/certs", ecVerify);
+        sslSocket.set_verify_mode(boost::asio::ssl::verify_peer);
+        sslSocket.set_verify_callback(boost::asio::ssl::rfc2818_verification("blockchain.info"));
 
         sslSocket.handshake(boost::asio::ssl::stream_base::handshake_type::client);
 
@@ -124,15 +165,20 @@ bool APIClient::IsTxReplayed(const uint256& txid)
 
                 // If we find the Tx on Bitcoin "Core", it is replayed
                 if (txid == uint256S(hash)) {
+                    fDetermined = true;
                     return true;
                 }
             }
         }
     } catch (std::exception &exception) {
+        // Request or parse failed: leave fDetermined unset so the caller does
+        // not record this as a definite "not replayed".
         LogPrintf("ERROR API client (sendRequestToMainchain): %s\n", exception.what());
         return false;
     }
 
+    // Parsed a response and the transaction was not in it.
+    fDetermined = true;
     return false;
 }
 

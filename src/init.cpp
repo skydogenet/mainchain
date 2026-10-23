@@ -22,6 +22,8 @@
 #include "key.h"
 #include "validation.h"
 #include "miner.h"
+#include "base58.h"
+#include "utilstrencodings.h"
 #include "netbase.h"
 #include "net.h"
 #include "net_processing.h"
@@ -31,6 +33,7 @@
 #include "rpc/server.h"
 #include "rpc/register.h"
 #include "rpc/blockchain.h"
+#include "rpc/safemode.h"
 #include "script/standard.h"
 #include "script/sigcache.h"
 #include "scheduler.h"
@@ -74,7 +77,6 @@ bool fFeeEstimatesInitialized = false;
 static const bool DEFAULT_PROXYRANDOMIZE = true;
 static const bool DEFAULT_REST_ENABLE = false;
 static const bool DEFAULT_STOPAFTERBLOCKIMPORT = false;
-static const bool DEFAULT_DISABLE_SAFEMODE = false;
 
 std::unique_ptr<CConnman> g_connman;
 std::unique_ptr<PeerLogicValidation> peerLogic;
@@ -203,8 +205,6 @@ void Shutdown()
     // using the other before destroying them.
     if (peerLogic) UnregisterValidationInterface(peerLogic.get());
     if (g_connman) g_connman->Stop();
-    peerLogic.reset();
-    g_connman.reset();
 
     StopTorControl();
 
@@ -212,6 +212,22 @@ void Shutdown()
     // CScheduler/checkqueue threadGroup
     threadGroup.interrupt_all();
     threadGroup.join_all();
+
+    // Destroy these only once the scheduler thread is joined. peerLogic is a
+    // registered CValidationInterface, and CMainSignals queues its callbacks to
+    // the scheduler rather than running them inline, so a callback queued before
+    // the unregister above can still be mid-dispatch on that thread. Freeing
+    // peerLogic while the scheduler is alive leaves that dispatch calling through
+    // a freed object - boost::signals2 checks a slot's connected flag and then
+    // releases the connection lock before calling through the bound pointer, so
+    // unregistering does not wait for an invocation already past that check.
+    //
+    // Previously these two lines sat above the join, which is the window
+    // described. g_connman moves with peerLogic because peerLogic holds a
+    // reference to it, so the original "neither can be using the other" ordering
+    // is preserved - both are now destroyed after nothing can be running.
+    peerLogic.reset();
+    g_connman.reset();
 
     DumpSCDBCache();
 
@@ -445,8 +461,8 @@ std::string HelpMessage(HelpMessageMode mode)
         strUsage += HelpMessageOpt("-checklevel=<n>", strprintf(_("How thorough the block verification of -checkblocks is (0-4, default: %u)"), DEFAULT_CHECKLEVEL));
         strUsage += HelpMessageOpt("-checkblockindex", strprintf("Do a full consistency check for mapBlockIndex, setBlockIndexCandidates, chainActive and mapBlocksUnlinked occasionally. Also sets -checkmempool (default: %u)", defaultChainParams->DefaultConsistencyChecks()));
         strUsage += HelpMessageOpt("-checkmempool=<n>", strprintf("Run checks every <n> transactions (default: %u)", defaultChainParams->DefaultConsistencyChecks()));
-        strUsage += HelpMessageOpt("-checkpoints", strprintf("Disable expensive verification for known chain history (default: %u)", DEFAULT_CHECKPOINTS_ENABLED));
-        strUsage += HelpMessageOpt("-disablesafemode", strprintf("Disable safemode, override a real safe mode event (default: %u)", DEFAULT_DISABLE_SAFEMODE));
+        strUsage += HelpMessageOpt("-checkpoints", strprintf("Enforce built-in checkpoints: reject any block that would fork the chain below the most recent checkpoint (default: %u). Set to 0 to let such a reorg be evaluated on proof of work instead", DEFAULT_CHECKPOINTS_ENABLED));
+        strUsage += HelpMessageOpt("-disablesafemode", strprintf("Disable safe mode. With safe mode on, the node warns and refuses some RPCs when it detects a problem with the chain; with it off it does neither (default: %u). Set to 0 to turn safe mode on", DEFAULT_DISABLE_SAFEMODE));
         strUsage += HelpMessageOpt("-deprecatedrpc=<method>", "Allows deprecated RPC method(s) to be used");
         strUsage += HelpMessageOpt("-testsafemode", strprintf("Force safe mode (default: %u)", DEFAULT_TESTSAFEMODE));
         strUsage += HelpMessageOpt("-dropmessagestest=<n>", "Randomly drop 1 of every <n> network messages");
@@ -459,6 +475,15 @@ std::string HelpMessage(HelpMessageMode mode)
         strUsage += HelpMessageOpt("-limitdescendantcount=<n>", strprintf("Do not accept transactions if any ancestor would have <n> or more in-mempool descendants (default: %u)", DEFAULT_DESCENDANT_LIMIT));
         strUsage += HelpMessageOpt("-limitdescendantsize=<n>", strprintf("Do not accept transactions if any ancestor would have more than <n> kilobytes of in-mempool descendants (default: %u).", DEFAULT_DESCENDANT_SIZE_LIMIT));
         strUsage += HelpMessageOpt("-vbparams=deployment:start:end", "Use given start/end times for specified version bits deployment (regtest-only)");
+        strUsage += HelpMessageOpt("-smallblockheight=<n>", "Override the small-block soft fork activation height (testnet/regtest only)");
+        strUsage += HelpMessageOpt("-timewarpguardheight=<n>", "Override the timewarp guard activation height (testnet/regtest only)");
+        strUsage += HelpMessageOpt("-sidechainparamsheight=<n>", "Override the sidechain production-parameters activation height (testnet/regtest only)");
+        strUsage += HelpMessageOpt("-withdrawalwindow=<period>:<minworkscore>:<failedretention>", "Override the production withdrawal verification period, minimum workscore and failed-bundle retention, in blocks (regtest only)");
+        strUsage += HelpMessageOpt("-scdbcommitmentheight=<n>", "Override the SCDB coinbase-commitment activation height (testnet/regtest only)");
+        strUsage += HelpMessageOpt("-ctipanchorheight=<n>", "Override the treasury-pointer anchor activation height (testnet/regtest only)");
+        strUsage += HelpMessageOpt("-escrowrulesheight=<n>", "Override the BIP300 escrow-rules activation height (zero-value withdrawal fee output; no replacement of a funded sidechain slot) (testnet/regtest only)");
+        strUsage += HelpMessageOpt("-drivechainpolicybypass", "Suspend the node-local drivechain relay and bundle ingestion checks, so that transactions only consensus should judge can be put in a block (regtest only)");
+        strUsage += HelpMessageOpt("-blockplacetx=<hex>", "Place this raw transaction in every block template this node builds, without relaying it. Suspends no check: the block is still judged by consensus, and if it turns out invalid the transaction is dropped and the block rebuilt without it, so mining cannot be stopped by a bad one. For transactions that are consensus-valid but that relay policy refuses, such as a deposit re-chaining a stranded treasury branch");
     }
     strUsage += HelpMessageOpt("-debug=<category>", strprintf(_("Output debugging information (default: %u, supplying <category> is optional)"), 0) + ". " +
         _("If <category> is not supplied or if <category> = 1, output all debugging information.") + " " + _("<category> can be:") + " " + ListLogCategories() + ".");
@@ -501,8 +526,12 @@ std::string HelpMessage(HelpMessageMode mode)
     strUsage += HelpMessageOpt("-whitelistrelay", strprintf(_("Accept relayed transactions received from whitelisted peers even when not relaying transactions (default: %d)"), DEFAULT_WHITELISTRELAY));
 
     strUsage += HelpMessageGroup(_("Block creation options:"));
+    strUsage += HelpMessageOpt("-acksidechainproposal=<hash>", _("Ack (vote to activate) the pending sidechain proposal with exactly this hash in every block this node builds, for as long as it is pending, and nothing else. <hash> is the 64-hex-digit \"proposalhash\" that getsidechainactivationstatus prints; the \"Hash\" entries of listhashsidechain are the same hash byte-reversed and do NOT match. Can be specified multiple times. Miner policy only"));
+    strUsage += HelpMessageOpt("-activatesidechains", _("Ack EVERY pending sidechain proposal in every block this node builds, including one from anyone who claims a slot (a hijacker's too). Test networks only: refused on mainnet, use -acksidechainproposal there (default: 0)"));
+
     strUsage += HelpMessageOpt("-blockmaxsize=<n>", _("Set maximum BIP141 block weight to this * 4. Deprecated, use blockmaxweight"));
     strUsage += HelpMessageOpt("-blockmaxweight=<n>", strprintf(_("Set maximum BIP141 block weight (default: %d)"), DEFAULT_BLOCK_MAX_WEIGHT));
+    strUsage += HelpMessageOpt("-bmmfeescript=<address|hex>", _("Pay the BMM (critical data) fee transaction in the block templates this node builds to this address or scriptPubKey (P2PKH, P2SH, P2WPKH or P2WSH) instead of the coinbase script, which getblocktemplate leaves as an anyone-can-spend placeholder. Miner policy only"));
     strUsage += HelpMessageOpt("-blockmintxfee=<amt>", strprintf(_("Set lowest fee rate (in %s/kB) for transactions to be included in block creation. (default: %s)"), CURRENCY_UNIT, FormatMoney(DEFAULT_BLOCK_MIN_TX_FEE)));
     if (showDebug)
         strUsage += HelpMessageOpt("-blockversion=<n>", "Override block version to test forking scenarios");
@@ -542,7 +571,6 @@ std::string LicenseInfo()
                URL_SOURCE_CODE) +
            "\n" +
            "\n" +
-           _("This is experimental software.") + "\n" +
            strprintf(_("Distributed under the MIT software license, see the accompanying file %s or %s"), "COPYING", "<https://opensource.org/licenses/MIT>") + "\n" +
            "\n" +
            strprintf(_("This product includes software developed by the OpenSSL Project for use in the OpenSSL Toolkit %s and cryptographic software written by Eric Young and UPnP software written by Thomas Bernard."), "<https://www.openssl.org>") +
@@ -690,6 +718,13 @@ void ThreadImport(std::vector<fs::path> vImportFiles)
     if (!ActivateBestChain(state, chainparams)) {
         LogPrintf("Failed to connect best block\n");
         StartShutdown();
+    } else if (!ShutdownRequested()) {
+        // 0.45.2: a chain replay has finished (or there was none): install
+        // the cached withdrawal bundles and custom withdrawal votes held back
+        // for it. On a shutdown mid-replay they stay held and are written
+        // back to withdrawal.dat and customvotes.dat as they were read.
+        InstallReplayedWithdrawalCache();
+        InstallReplayedCustomVotes();
     }
 
     if (gArgs.GetBoolArg("-stopafterblockimport", DEFAULT_STOPAFTERBLOCKIMPORT)) {
@@ -1084,6 +1119,49 @@ bool AppInitParameterInteraction()
             return InitError(AmountErrMsg("blockmintxfee", gArgs.GetArg("-blockmintxfee", "")));
     }
 
+    // -bmmfeescript.
+    if (gArgs.IsArgSet("-bmmfeescript")) {
+        const std::string strFeeScript = gArgs.GetArg("-bmmfeescript", "");
+        CScript script;
+        const CTxDestination dest = DecodeDestination(strFeeScript);
+        if (IsValidDestination(dest)) {
+            script = GetScriptForDestination(dest);
+        } else if (!strFeeScript.empty() && IsHex(strFeeScript)) {
+            const std::vector<unsigned char> v = ParseHex(strFeeScript);
+            script = CScript(v.begin(), v.end());
+        }
+        txnouttype type;
+        std::vector<std::vector<unsigned char>> vSolutions;
+        if (script.empty() || !Solver(script, type, vSolutions) ||
+                (type != TX_PUBKEYHASH && type != TX_SCRIPTHASH &&
+                 type != TX_WITNESS_V0_KEYHASH && type != TX_WITNESS_V0_SCRIPTHASH)) {
+            return InitError(strprintf(_("Invalid -bmmfeescript '%s': give an address, or the hex of a P2PKH, P2SH, P2WPKH or P2WSH scriptPubKey"), strFeeScript));
+        }
+        g_bmm_fee_script = script;
+    }
+
+    // -acksidechainproposal: the exact sidechain proposals this node's miner
+    // acks. Miner policy; a bad value stops the node rather than ack nothing.
+    {
+        std::set<uint256> setAck;
+        std::string strAckError;
+        if (!ParseSidechainProposalAcks(gArgs.GetArgs("-acksidechainproposal"), setAck, strAckError))
+            return InitError(strAckError);
+        SetConfiguredSidechainProposalAcks(setAck);
+        for (const uint256& u : setAck)
+            LogPrintf("Sidechain activation: this node's miner acks proposal %s while it is pending (-acksidechainproposal)\n", u.ToString());
+        if (gArgs.GetBoolArg("-activatesidechains", false)) {
+            // Refused on mainnet. It acks EVERY pending proposal,
+            // so a pool that left it set would vote a slot to whoever claims
+            // it. Test networks keep it for testing.
+            if (chainparams.NetworkIDString() == CBaseChainParams::MAIN)
+                return InitError(_("-activatesidechains is not allowed on mainnet: it acks EVERY pending sidechain proposal, a hijacker's included. "
+                                   "Remove it and name the proposal you support with -acksidechainproposal=<proposalhash> "
+                                   "(the \"proposalhash\" that getsidechainactivationstatus prints)."));
+            LogPrintf("WARNING: -activatesidechains is set: this node's miner acks EVERY pending sidechain proposal, a hijacker's included. Test networks only; use -acksidechainproposal=<proposalhash>.\n");
+        }
+    }
+
     // Feerate used to define dust.  Shouldn't be changed lightly as old
     // implementations may inadvertently create non-standard transactions
     if (gArgs.IsArgSet("-dustrelayfee"))
@@ -1164,6 +1242,171 @@ bool AppInitParameterInteraction()
             }
         }
     }
+
+    if (gArgs.IsArgSet("-smallblockheight")) {
+        // Allow overriding the small-block soft fork activation height for
+        // testing. Not allowed on mainnet: all nodes must agree on it there.
+        if (chainparams.NetworkIDString() == CBaseChainParams::MAIN) {
+            return InitError("The small block activation height may not be overridden on mainnet.");
+        }
+        int64_t nHeight;
+        if (!ParseInt64(gArgs.GetArg("-smallblockheight", ""), &nHeight) ||
+                nHeight < 0 || nHeight > std::numeric_limits<int>::max()) {
+            return InitError(strprintf("Invalid -smallblockheight (%s)", gArgs.GetArg("-smallblockheight", "")));
+        }
+        UpdateSmallBlockHeight(nHeight);
+        LogPrintf("Setting small block soft fork activation height to %ld\n", nHeight);
+    }
+
+    if (gArgs.IsArgSet("-timewarpguardheight")) {
+        // Test-network-only override of the timewarp guard activation height.
+        if (chainparams.NetworkIDString() == CBaseChainParams::MAIN) {
+            return InitError("The timewarp guard activation height may not be overridden on mainnet.");
+        }
+        int64_t nHeight;
+        if (!ParseInt64(gArgs.GetArg("-timewarpguardheight", ""), &nHeight) ||
+                nHeight < 0 || nHeight > std::numeric_limits<int>::max()) {
+            return InitError(strprintf("Invalid -timewarpguardheight (%s)", gArgs.GetArg("-timewarpguardheight", "")));
+        }
+        UpdateTimewarpGuardHeight(nHeight);
+        LogPrintf("Setting timewarp guard activation height to %ld\n", nHeight);
+    }
+
+    if (gArgs.IsArgSet("-sidechainparamsheight")) {
+        // Test-network-only override of the sidechain production-params height.
+        if (chainparams.NetworkIDString() == CBaseChainParams::MAIN) {
+            return InitError("The sidechain parameters activation height may not be overridden on mainnet.");
+        }
+        int64_t nHeight;
+        if (!ParseInt64(gArgs.GetArg("-sidechainparamsheight", ""), &nHeight) ||
+                nHeight < 0 || nHeight > std::numeric_limits<int>::max()) {
+            return InitError(strprintf("Invalid -sidechainparamsheight (%s)", gArgs.GetArg("-sidechainparamsheight", "")));
+        }
+        UpdateSidechainParamsHeight(nHeight);
+        LogPrintf("Setting sidechain parameters activation height to %ld\n", nHeight);
+    }
+
+    if (gArgs.IsArgSet("-withdrawalwindow")) {
+        // Regtest only, and stricter than the height overrides on purpose: the
+        // window values are hashed into the SCDB commitment, and testnet must
+        // keep the values its existing chain was built under.
+        if (chainparams.NetworkIDString() != CBaseChainParams::REGTEST) {
+            return InitError("-withdrawalwindow is for regression testing (-regtest mode) only.");
+        }
+        const std::string strWindow = gArgs.GetArg("-withdrawalwindow", "");
+        std::vector<std::string> vPart;
+        boost::split(vPart, strWindow, boost::is_any_of(":"));
+        int64_t nPeriod = 0, nMinScore = 0, nRetention = 0;
+        if (vPart.size() != 3 ||
+                !ParseInt64(vPart[0], &nPeriod) || !ParseInt64(vPart[1], &nMinScore) ||
+                !ParseInt64(vPart[2], &nRetention) ||
+                nMinScore < 1 || nPeriod <= nMinScore || nPeriod > std::numeric_limits<int>::max() ||
+                nRetention < 1 || nRetention > std::numeric_limits<int>::max()) {
+            return InitError(strprintf("Invalid -withdrawalwindow (%s); expected <period>:<minworkscore>:<failedretention> with period > minworkscore >= 1", strWindow));
+        }
+        UpdateWithdrawalWindow((int)nPeriod, (int)nMinScore, (int)nRetention);
+        LogPrintf("Setting withdrawal window to period %ld, min workscore %ld, failed retention %ld\n", nPeriod, nMinScore, nRetention);
+    }
+
+    // The treasury anchor must not activate before the SCDB commitment,
+    // because the anchor's DoS(100) escalation is only defensible once the
+    // commitment has made the sidechain state part of the chain. This check
+    // enforces that ordering for the compiled-in heights.
+    //
+    // Equal passes, because the inert value is the same sentinel for both and
+    // regtest wants them together on purpose. Only anchor-before-commitment is
+    // refused, and refusing is right: a node that would enforce the anchor
+    // first is a node that would ban its peers over state nothing has yet
+    // committed to.
+    //
+    // Read here, before the overrides below can touch either value, so this is
+    // a statement about what was compiled in. The overrides are test
+    // instruments and inverting the pair with them is legitimate - the
+    // commitment test holds the commitment out of reach on a regtest chain
+    // whose anchor is live at 300, which is how it stands in for a miner that
+    // has not upgraded.
+    if (chainparams.GetConsensus().CTIPAnchorHeight < chainparams.GetConsensus().SCDBCommitmentHeight) {
+        return InitError(strprintf("Treasury anchor height %d is below SCDB commitment height %d. "
+                                   "The anchor must not activate first.",
+                                   chainparams.GetConsensus().CTIPAnchorHeight,
+                                   chainparams.GetConsensus().SCDBCommitmentHeight));
+    }
+
+    if (gArgs.IsArgSet("-scdbcommitmentheight")) {
+        // Test-network-only override of the SCDB coinbase-commitment height.
+        // Exists for recorded test chains as much as for convenience: a
+        // chain recorded before the commitment existed would, without the
+        // override, be invalid under a regtest activation at 300.
+        if (chainparams.NetworkIDString() == CBaseChainParams::MAIN) {
+            return InitError("The SCDB commitment activation height may not be overridden on mainnet.");
+        }
+        int64_t nHeight;
+        if (!ParseInt64(gArgs.GetArg("-scdbcommitmentheight", ""), &nHeight) ||
+                nHeight < 0 || nHeight > std::numeric_limits<int>::max()) {
+            return InitError(strprintf("Invalid -scdbcommitmentheight (%s)", gArgs.GetArg("-scdbcommitmentheight", "")));
+        }
+        UpdateSCDBCommitmentHeight(nHeight);
+        LogPrintf("Setting SCDB commitment activation height to %ld\n", nHeight);
+    }
+
+    if (gArgs.IsArgSet("-ctipanchorheight")) {
+        // Test-network-only override of the treasury-pointer anchor height,
+        // for the same reason as the commitment override above: test chains
+        // recorded before the anchor existed must still replay, and a chain
+        // built to exercise the checks needs to choose where they start.
+        // Refused on mainnet.
+        if (chainparams.NetworkIDString() == CBaseChainParams::MAIN) {
+            return InitError("The treasury-pointer anchor activation height may not be overridden on mainnet.");
+        }
+        int64_t nHeight;
+        if (!ParseInt64(gArgs.GetArg("-ctipanchorheight", ""), &nHeight) ||
+                nHeight < 0 || nHeight > std::numeric_limits<int>::max()) {
+            return InitError(strprintf("Invalid -ctipanchorheight (%s)", gArgs.GetArg("-ctipanchorheight", "")));
+        }
+        UpdateCTIPAnchorHeight(nHeight);
+        LogPrintf("Setting treasury-pointer anchor activation height to %ld\n", nHeight);
+    }
+
+    if (gArgs.IsArgSet("-escrowrulesheight")) {
+        // Test-network-only override of the BIP300 escrow-rules height, like
+        // the four above: a test has to choose which side of the gate a
+        // chain is built on, and testnet must be able to move the coded
+        // height if a block below it ever breaks one of the rules.
+        if (chainparams.NetworkIDString() == CBaseChainParams::MAIN) {
+            return InitError("The escrow-rules activation height may not be overridden on mainnet.");
+        }
+        int64_t nHeight;
+        if (!ParseInt64(gArgs.GetArg("-escrowrulesheight", ""), &nHeight) ||
+                nHeight < 0 || nHeight > std::numeric_limits<int>::max()) {
+            return InitError(strprintf("Invalid -escrowrulesheight (%s)", gArgs.GetArg("-escrowrulesheight", "")));
+        }
+        UpdateEscrowRulesHeight(nHeight);
+        LogPrintf("Setting escrow-rules activation height to %ld\n", nHeight);
+    }
+
+    if (gArgs.GetBoolArg("-drivechainpolicybypass", false)) {
+        // Regtest only, and refused rather than ignored anywhere else. A
+        // stricter gate than the height overrides above, because those only
+        // move when a rule starts applying while this one makes a node accept
+        // what it would otherwise turn away. The drivechain checks in the
+        // memory pool and in receivewithdrawalbundle are all that stands in
+        // front of transaction shapes that ConnectBlock's own rules do not
+        // reach, so a node running without them on a network carrying money
+        // is a node those transactions relay through.
+        //
+        // It exists because those shapes have to be testable. A miner that
+        // wants one in a block puts it there without asking any memory pool,
+        // so a test that only ever offers the transaction to relay policy
+        // measures the wrong layer entirely and reports a defence that is not
+        // there. This flag lets the test stand where that miner stands. It
+        // reaches no consensus rule: every check ConnectBlock makes runs
+        // unchanged, which is the whole point of the exercise.
+        if (chainparams.NetworkIDString() != CBaseChainParams::REGTEST) {
+            return InitError("Drivechain policy may only be bypassed on regtest.");
+        }
+        fDrivechainPolicyBypass = true;
+        LogPrintf("Suspending node-local drivechain policy checks (regtest only)\n");
+    }
     return true;
 }
 
@@ -1208,6 +1451,44 @@ bool AppInitLockDataDirectory()
         return false;
     }
     return true;
+}
+
+//! Read the sidechain settings the operator authored.
+//!
+//! Votes, proposals, activation acknowledgements, the BMM cache and any
+//! withdrawal bundle this node was handed exist in no block, so nothing can
+//! rebuild them. They are read on every startup path, and read again after a
+//! reindex resets the sidechain database, because that reset clears the
+//! block-derived state and would otherwise take these with it.
+//! fWillReplayChain says the chain is about to be connected from genesis. It
+//! decides exactly one thing: whether the spent and failed withdrawal records
+//! are installed. Those two are not settings, they are consensus inputs -
+//! SidechainDB::AddWithdrawal refuses a bundle it already holds an outcome for -
+//! so installing them ahead of a replay makes the node reject the very block
+//! that first proposed the bundle, mark it permanently invalid, and stop there.
+//! The bundles themselves are operator data and load either way.
+//! fHoldForConnect (0.45.2) says blocks are still to be connected after this
+//! load - a replay from genesis, or the rest of one that was interrupted - so
+//! the raw withdrawal bundles and the custom withdrawal votes are held back
+//! and installed once ThreadImport has connected them: each sidechain
+//! activation those blocks carry would otherwise clear them.
+static bool LoadSidechainUserData(bool fWillReplayChain, bool fHoldForConnect)
+{
+    // Every loader runs, and the results are combined afterwards. Chaining
+    // these with && short-circuits, so one unreadable settings file would skip
+    // every loader after it - including LoadWithdrawalCache, which is last and
+    // is the only one carrying consensus state. A node that came up having
+    // silently skipped the spent and failed withdrawal records would accept a
+    // block re-proposing a bundle that already failed on this chain, and follow
+    // a branch the rest of the network rejects. Which file failed must not
+    // decide how much of the sidechain state gets read.
+    bool fOk = true;
+    if (!LoadSidechainProposalCache())          fOk = false;
+    if (!LoadSidechainActivationHashCache())    fOk = false;
+    if (!LoadCustomVoteCache(fHoldForConnect))  fOk = false;
+    if (!LoadBMMCache())                        fOk = false;
+    if (!LoadWithdrawalCache(fWillReplayChain, fHoldForConnect)) fOk = false;
+    return fOk;
 }
 
 bool AppInitMain()
@@ -1405,14 +1686,15 @@ bool AppInitMain()
     // ********************************************************* Step 7: load caches
     fReindex = gArgs.GetBoolArg("-reindex", false);
 
-//old DC
-    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
+
 
     std::string strFailSCDAT;
-    strFailSCDAT = "Failed to load sidechain database files!\n";
-    strFailSCDAT += "They may corrupt or need to be updated.\n";
+    strFailSCDAT = "Could not load the sidechain database files.\n";
+    strFailSCDAT += "They may be from another chain, left behind by an unclean\n";
+    strFailSCDAT += "stop, or genuinely damaged. The sidechain-only rebuild has\n";
+    strFailSCDAT += "already been tried and could not complete.\n";
     strFailSCDAT += "\n";
-    strFailSCDAT += "Reindex now to fix errors?\n";
+    strFailSCDAT += "Reindex now? This re-reads every block and takes a while.\n";
 
     // ********************************************************* Step 8: load block chain
 
@@ -1438,9 +1720,10 @@ bool AppInitMain()
     LogPrintf("* Using %.1fMiB for in-memory UTXO set (plus up to %.1fMiB of unused mempool space)\n", nCoinCacheUsage * (1.0 / 1024 / 1024), nMempoolSizeMax * (1.0 / 1024 / 1024));
 
     bool fLoaded = false;
-    bool drivechainsEnabled = false;
+    bool skydogeEnabled = false;
     while (!fLoaded && !fRequestShutdown) {
         bool fReset = fReindex;
+        bool fCachesLoaded = false;
         std::string strLoadError;
 
         uiInterface.InitMessage(_("Loading block index..."));
@@ -1538,14 +1821,32 @@ bool AppInitMain()
                     assert(chainActive.Tip() != nullptr);
                 }
 
-    		    drivechainsEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
+    		    skydogeEnabled = IsSkydogeEnabled(chainActive.Tip(), chainparams.GetConsensus());
+
+                // An older release ran this data
+                // directory past the fork - refuse rather than seed from its
+                // legacy records. Runs under -reindex-chainstate on purpose
+                // (that keeps the sidechain tree); a full -reindex (fReset)
+                // wipes the tree, so it is skipped there. NOT gated on
+                // skydogeEnabled: that is computed from the tip, which
+                // -reindex-chainstate leaves unset here - the very case the
+                // check must catch. It reads only records at or above
+                // SidechainParamsHeight, so it is inert where they are absent.
+                if (!fReset) {
+                    std::string strRecordError;
+                    if (!CheckSCDBRecordFormat(strRecordError)) {
+                        strLoadError = strRecordError;
+                        break;
+                    }
+                }
 
                 // Synchronize SCDB
-                if (skydogesEnabled && !fReindex && chainActive.Tip() && (chainActive.Tip()->GetBlockHash() != scdb.GetHashBlockLastSeen()))
+                if (skydogeEnabled && !fReindex && chainActive.Tip() && (chainActive.Tip()->GetBlockHash() != scdb.GetHashBlockLastSeen()))
                 {
                     uiInterface.InitMessage(_("Synchronizing sidechain database..."));
                     if (!ResyncSCDB(chainActive.Tip())) {
-                        LogPrintf("%s: Error: Failed to initialize SCDB\n", __func__);
+                        LogPrintf("%s: Error: could not resync the sidechain database to the "
+                                  "chain tip; restarting with a reindex.\n", __func__);
                         scdb.Reset();
                         fReindex = true;
                         fRequestShutdown = false;
@@ -1554,23 +1855,72 @@ bool AppInitMain()
                     }
                 }
 
-                if (skydogesEnabled && !fReindex) {
-                    if (!LoadDepositCache()) {
-                        // Ask to reindex to fix issue loading DAT
-                        bool fRet = uiInterface.ThreadSafeQuestion(
-                            strFailSCDAT,
-                            "Failed to load sidechain deposit files. Reindex?",
-                            "Failed to load sidechain deposit files. Reindex?",
-                            CClientUIInterface::MSG_ERROR | CClientUIInterface::BTN_ABORT);
-                        if (fRet) {
-                            scdb.Reset();
-                            fReindex = true;
-                            fRequestShutdown = false;
-                            strLoadError = _("Error reading sidechain database files.");
-                            break;
-                        } else {
-                            LogPrintf("Aborted reindex. Exiting.\n");
-                            return InitError("Aborted reindex. Exiting.\n");
+                if (skydogeEnabled && !fReindex) {
+                    bool fNeedRebuild = !LoadDepositCache();
+
+                    // A cache that loaded is not necessarily a cache that is
+                    // complete. A missing deposit.dat is reported as success -
+                    // it is the normal state of a new data directory - so the
+                    // node that has simply lost the file looks identical to a
+                    // fresh one, and used to carry on with an empty deposit
+                    // history and no way to notice.
+                    //
+                    // Now that the treasury pointer arrives from the per-block
+                    // record, that case is detectable: the record supplies a
+                    // pointer for a slot whose deposits cannot produce it. The
+                    // pointer is still the trustworthy half, so this is not a
+                    // reason to refuse to start - it is a reason to rebuild the
+                    // history that should have been behind it.
+                    if (!fNeedRebuild) {
+                        uint8_t nSlot = 0;
+                        if (!scdb.DepositCacheSupportsTreasury(nSlot)) {
+                            LogPrintf("Deposit cache does not account for the treasury of sidechain %u; "
+                                      "rebuilding it from blocks.\n", nSlot);
+                            fNeedRebuild = true;
+                        }
+                    }
+
+                    if (fNeedRebuild) {
+                        // The deposit cache is unreadable, describes another
+                        // chain, or does not account for the treasury. Any of
+                        // those used to mean a full reindex - every block
+                        // re-verified - because nothing else could rebuild the
+                        // cache from blocks. The sidechain-only pass does
+                        // exactly that and reads blocks without verifying them,
+                        // so try it before asking for anything.
+                        //
+                        // It needs the per-block records; where they are also
+                        // missing it says so and the reindex offer below still
+                        // stands, which is the honest fallback rather than
+                        // starting on a cache known to be wrong.
+                        LogPrintf("Rebuilding the sidechain deposit cache from blocks.\n");
+
+                        std::string strRebuildError;
+                        bool fRebuilt = false;
+                        {
+                            LOCK(cs_main);
+                            fRebuilt = RebuildSidechainDeposits(strRebuildError);
+                        }
+
+                        if (!fRebuilt) {
+                            LogPrintf("Sidechain rebuild failed: %s\n", strRebuildError);
+
+                            // Ask to reindex to fix issue loading DAT
+                            bool fRet = uiInterface.ThreadSafeQuestion(
+                                strFailSCDAT,
+                                "Failed to load sidechain deposit files. Reindex?",
+                                "Failed to load sidechain deposit files. Reindex?",
+                                CClientUIInterface::MSG_ERROR | CClientUIInterface::BTN_ABORT);
+                            if (fRet) {
+                                scdb.Reset();
+                                fReindex = true;
+                                fRequestShutdown = false;
+                                strLoadError = _("Error reading sidechain database files.");
+                                break;
+                            } else {
+                                LogPrintf("Aborted reindex. Exiting.\n");
+                                return InitError("Aborted reindex. Exiting.\n");
+                            }
                         }
                     }
                 }
@@ -1610,31 +1960,111 @@ bool AppInitMain()
                         strLoadError = _("Corrupted block database detected");
                         break;
                     }
-                }
 
-                // Load user's skydoge data
-                if (skydogesEnabled) {
-                    // We want to read the user's data even if reindexing - this data
-                    // was created by the user and is not in any block
-                    if (!LoadSidechainProposalCache() ||
-                            !LoadSidechainActivationHashCache() ||
-                            !LoadCustomVoteCache() ||
-                            !LoadBMMCache() ||
-                            !LoadWithdrawalCache(fReindex))
-                    {
-                        std::string strError = "Error loading withdrawal vote & BMM settings!\n\n";
-                        strError += "You may need to re-set any vote settings you have made.";
-                        uiInterface.ThreadSafeMessageBox(_(strError.c_str()), "", CClientUIInterface::MSG_ERROR);
-                        LogPrintf("Error reading custom vote cache.\n");
+                    // Verification at level 3 and above disconnects blocks to
+                    // check their undo data, and disconnecting one rewinds the
+                    // sidechain database with it. The coins those levels touch
+                    // live in a throwaway cache, but the sidechain database is
+                    // process-global, and only level 4 connects the blocks back
+                    // up. So a level-3 start would leave this node's sidechain
+                    // state behind its own chain, silently, for the rest of the
+                    // run - and the deposit cache written at shutdown would
+                    // describe the wrong block. Put it back where the chain is.
+                    //
+                    // Both halves are needed. The index restores the
+                    // withdrawal, activation and sidechain lists, but the
+                    // deposits and the treasury tips derived from them exist
+                    // only in the deposit file, and disconnecting a block
+                    // erases the deposits it carried. Restoring the first
+                    // without the second would leave the state describing the
+                    // tip while the treasury still sat where the disconnects
+                    // left it - which is the shape that makes a node reject a
+                    // withdrawal payout the rest of the network accepts.
+                    // Re-reading the file is cheap and its deposits are
+                    // deduplicated on the way in.
+                    if (skydogeEnabled) {
+                        LOCK(cs_main);
+                        if (chainActive.Tip() && scdb.GetHashBlockLastSeen() != chainActive.Tip()->GetBlockHash()) {
+                            if (!ResyncSCDB(chainActive.Tip()) || !LoadDepositCache()) {
+                                scdb.Reset();
+                                fReindex = true;
+                                fRequestShutdown = false;
+                                strLoadError = _("Failed to re-sync the sidechain database after block verification.");
+                                break;
+                            }
+                        }
                     }
                 }
+
+                // Load user's skydoge data.
+                //
+                // This data was created by the user and is in no block, so it is
+                // read on every path, including both reindexes. It used to be
+                // gated on skydogeEnabled, which contradicted the intent stated
+                // right here: that flag is IsSkydogeEnabled() against
+                // chainActive.Tip(), and the tip is still null during a reindex
+                // because LoadChainTip is skipped when the coins view is empty.
+                // A null tip reads as "not enabled", so the loads were skipped -
+                // and shutdown then wrote default-constructed caches over the
+                // files, destroying votes, proposals, acknowledgements and any
+                // withdrawal bundle the node had been given. Since
+                // DrivechainHeight is 1 on every network the gate could never do
+                // anything but that, which is the same reasoning that removed it
+                // from the service-flag advertisement below.
+                //
+                // The argument is is_coinsview_empty rather than fReindex,
+                // because the chain is replayed from genesis whenever the coins
+                // view is empty - which -reindex-chainstate causes, and so does
+                // deleting the chainstate by hand, neither of which sets
+                // fReindex.
+                //
+                // 0.45.2: held back as well when the chain tip is not the
+                // best block the index knows - what a node stopped or killed
+                // in the middle of a replay comes back to; ThreadImport
+                // connects the rest.
+                bool fHoldForConnect = is_coinsview_empty;
+                {
+                    LOCK(cs_main);
+                    if (chainActive.Tip() && pindexBestHeader && chainActive.Tip() != pindexBestHeader)
+                        fHoldForConnect = true;
+                }
+                fCachesLoaded = LoadSidechainUserData(is_coinsview_empty, fHoldForConnect);
+                if (!fCachesLoaded) {
+                    std::string strError = "Error loading withdrawal vote & BMM settings!\n\n";
+                    strError += "You may need to re-set any vote settings you have made.";
+                    uiInterface.ThreadSafeMessageBox(_(strError.c_str()), "", CClientUIInterface::MSG_ERROR);
+                    LogPrintf("Error reading custom vote cache.\n");
+                }
                 // Load address book
-                if (!LoadAddressBook())
+                if (!LoadAddressBook()) {
                     LogPrintf("Failed to load address book!\n");
+                    fCachesLoaded = false;
+                }
             } catch (const std::exception& e) {
                 LogPrintf("%s\n", e.what());
                 strLoadError = _("Error opening block database");
                 break;
+            }
+
+            // Only now may shutdown write these files back. A loader that
+            // failed leaves its cache empty while the others hold real data, and
+            // the loads short-circuit, so a single unreadable file would
+            // otherwise cost every file after it.
+            if (fCachesLoaded) {
+                SetSCDBStateLoaded();
+            } else {
+                LogPrintf("%s: Sidechain caches did not all load; shutdown will leave the files untouched.\n", __func__);
+            }
+
+            // Last, once every source of sidechain state has been applied -
+            // the per-block records, the deposit cache and the user files -
+            // check the treasury pointers those sources produced against the
+            // coins view. Ordered here deliberately: run earlier and it would
+            // check a state a later loader is still going to change. Reports
+            // only; it never repairs and never refuses to start.
+            {
+                LOCK(cs_main);
+                AuditTreasuryAnchors();
             }
 
             fLoaded = true;
@@ -1709,15 +2139,24 @@ bool AppInitMain()
         nLocalServices = ServiceFlags(nLocalServices | NODE_WITNESS);
     }
 
-if (nHeight < DrivechainHeight) {
-    if (chainparams.GetConsensus().vDeployments[Consensus::DEPLOYMENT_SKYDOGE].nTimeout != 0) {
-        nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN);
-    }
-} else {
 
-    // Show NODE_DRIVECHAIN after fork height
-    if (drivechainsEnabled)
-        nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN); }
+    // NODE_DRIVECHAIN says this build can serve drivechain-serialised
+    // transactions. That is a property of the software, not of the chain tip, so
+    // it is advertised unconditionally.
+    //
+    // It used to be gated on skydogeEnabled, which is IsSkydogeEnabled() against
+    // chainActive.Tip(). The tip is still null here on a fresh datadir and on
+    // both reindex paths, because LoadChainTip is skipped when the coins view is
+    // empty; a null tip reads as "not enabled", and the flag is never recomputed
+    // afterwards. So the flag stayed clear for the whole life of the process.
+    // Since DrivechainHeight is 1 on every network, that gate could never do
+    // anything except suppress the advertisement incorrectly.
+    //
+    // The consequence was not cosmetic: criticalData is excluded from the txid,
+    // the witness hash and both merkle roots, and only peers that negotiate this
+    // flag exchange it. A node that does not advertise it receives a null field
+    // and then re-serves that copy forever, with nothing detecting the loss.
+    nLocalServices = ServiceFlags(nLocalServices | NODE_DRIVECHAIN);
 
     // ********************************************************* Step 11: import blocks
 
@@ -1741,7 +2180,15 @@ if (nHeight < DrivechainHeight) {
     }
 
     if (fReindex) {
+        // The reindex rebuilds the sidechain state from blocks, so it starts
+        // from nothing. The operator's own settings are not in any block and
+        // cannot be rebuilt, so read them back rather than letting the reset
+        // carry them off - shutdown writes whatever is in memory, which is how
+        // a reindex used to destroy them.
         scdb.Reset();
+        if (!LoadSidechainUserData(true /* fWillReplayChain */, true /* fHoldForConnect */)) {
+            LogPrintf("%s: Failed to restore sidechain settings after the reset.\n", __func__);
+        }
     }
 
     // Import blocks: load external block files if reindexing or bootstrap.dat
@@ -1763,12 +2210,12 @@ if (nHeight < DrivechainHeight) {
         return false;
     }
 
-#ifdef ENABLE_WALLET
-    StartWallets(scheduler);
+//#ifdef ENABLE_WALLET
+    //StartWallets(scheduler);
 
     // ********************************************************* Step 12: load coins
 
-    bool fReadLoadedCoins = gArgs.GetBoolArg("-loadedcoins", true);
+    //bool fReadLoadedCoins = gArgs.GetBoolArg("-loadedcoins", true);
 
     // TODO loaded coins are disabled for this release. Setting fReadLoadedCoins
     // to false no matter what settings are applied means that loaded coins will
@@ -1777,7 +2224,7 @@ if (nHeight < DrivechainHeight) {
     //
     // If loaded coins are to be removed entirely the code should be deleted.
     // Or if loaded coins are to be re-enabled the next line can be deleted.
-    fReadLoadedCoins = false;
+    //fReadLoadedCoins = false;
 
     // TODO improve this check... Right now we're just checking if the last
     // loaded coin that will be written can currently be looked up by pcoinsTip.
@@ -1790,26 +2237,26 @@ if (nHeight < DrivechainHeight) {
     // Note that we only load coins for main network.
     //
     // Check if we have already imported loaded coins, try to load them if not
-    if (chainparams.NetworkIDString() == "main" && fReadLoadedCoins &&
-            !pcoinsTip->HaveCoin(COutPoint(uint256S(LAST_LOADED_OUTPOINT), LAST_LOADED_N)))
-    {
-        uiInterface.InitMessage(_("Importing UTXO set. First time only (~10 minutes)."));
+    //if (chainparams.NetworkIDString() == "main" && fReadLoadedCoins &&
+    //        !pcoinsTip->HaveCoin(COutPoint(uint256S(LAST_LOADED_OUTPOINT), LAST_LOADED_N)))
+    //{
+    //    uiInterface.InitMessage(_("Importing UTXO set. First time only (~10 minutes)."));
 
         // Try to read loaded coins
-        if (!pcoinsTip->ReadLoadedCoins()) {
+    //    if (!pcoinsTip->ReadLoadedCoins()) {
             // Failed to read loaded coins, abort
             // TODO add link to website with setup guide
-            std::string strError = "Error reading loading coins!\n\n";
-            strError += "Skydoge needs to import a UTXO set (loaded coins) before starting for the first time.";
-            strError += "\n\n";
-            strError += "You must move loaded_coins.dat to your Skydoge datadir.";
-            strError += "\n\n";
-            strError += "Shutting down.";
-            uiInterface.ThreadSafeMessageBox(_(strError.c_str()), "", CClientUIInterface::MSG_ERROR);
-            LogPrintf("Error reading loaded coins, aborting init");
-            return false;
-        }
-    }
+    //        std::string strError = "Error reading loading coins!\n\n";
+    //        strError += "Skydoge needs to import a UTXO set (loaded coins) before starting for the first time.";
+    //        strError += "\n\n";
+    //        strError += "You must move loaded_coins.dat to your Skydoge datadir.";
+    //        strError += "\n\n";
+    //        strError += "Shutting down.";
+    //        uiInterface.ThreadSafeMessageBox(_(strError.c_str()), "", CClientUIInterface::MSG_ERROR);
+    //        LogPrintf("Error reading loaded coins, aborting init");
+    //        return false;
+    //    }
+    //}
 
     //
     // TODO
@@ -1825,7 +2272,7 @@ if (nHeight < DrivechainHeight) {
         pwallet->AddLoadedCoins(vLoadedCoin);
     }
     */
-#endif
+//#endif
 
     // ********************************************************* Step 12: start node
     uiInterface.InitMessage(_("Starting node..."));
@@ -1904,8 +2351,17 @@ if (nHeight < DrivechainHeight) {
         return false;
     }
 
+    // Say at startup whether each -acksidechainproposal value
+    // names a pending proposal. A value that matches nothing used to be logged
+    // as an ack and silently acked nothing; ConnectTip repeats this per block.
+    {
+        LOCK(cs_main);
+        LogConfiguredSidechainProposalAckStatus(true /* fStartup */);
+    }
+
     // ********************************************************* Step 14: finished
     uiInterface.InitMessage(_("Skydoge ready"));
+
 
     SetRPCWarmupFinished();
 

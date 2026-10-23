@@ -173,6 +173,14 @@ void NewsTableModel::UpdateModel()
     if (clientModel->inInitialBlockDownload())
         return;
 
+    // Don't block the GUI thread: skip this refresh if the validation thread is
+    // busy connecting blocks (e.g. catch-up after being offline) rather than
+    // waiting on cs_main. The next block notification retries; the chainActive
+    // walk and per-block reads below then run safely under cs_main.
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     // Clear old data
     beginResetModel();
     model.clear();

@@ -16,14 +16,41 @@
 class CCoinsViewCache;
 class CTxOut;
 
-/** Max OP_RETURN data bytes once Drivechain is activated */
+/** Max OP_RETURN data bytes once Drivechain is activated, before the
+ *  small-block flag day. */
 static const int MAX_DRIVECHAIN_DATA_BYTES = 64000;
+/** Max OP_RETURN data bytes once Drivechain is activated, at and after
+ *  Consensus::Params::SmallBlockHeight. The pre-flag-day limit above is larger
+ *  than a whole small block, so an output carrying it could never be mined
+ *  once the 50 KB rule binds. Height-gated rather than simply tightened: these
+ *  are relay and wallet limits, and applying the smaller one while the block
+ *  rule is still deferred would make this node refuse to relay -- and its
+ *  wallet refuse to create -- transactions the rest of the network accepts. */
+static const int MAX_DRIVECHAIN_DATA_BYTES_SMALL_BLOCK = 10000;
 /** Default for -blockmaxweight, which controls the range of block weights the mining code will create **/
 static const unsigned int DEFAULT_BLOCK_MAX_WEIGHT = MAX_BLOCK_WEIGHT - 4000;
 /** Default for -blockmintxfee, which sets the minimum feerate for a transaction in blocks created by mining code **/
 static const unsigned int DEFAULT_BLOCK_MIN_TX_FEE = 1000;
-/** The maximum weight for transactions we're willing to relay/mine */
+/** The maximum weight for transactions we're willing to relay/mine. */
 static const unsigned int MAX_STANDARD_TX_WEIGHT = 400000;
+/** The maximum SERIALIZED size, in bytes, for a transaction we're willing to
+ *  relay/mine at and after Consensus::Params::SmallBlockHeight.
+ *
+ *  The limit is in bytes, not weight, because the rule it has to keep a
+ *  transaction inside -- MAX_SMALL_BLOCK_SERIALIZED_SIZE -- is in bytes.
+ *  Weight is the wrong unit here twice over: for a legacy transaction weight
+ *  is 4x size, so a weight cap tightened to fit would bind legacy spends more
+ *  than four times harder than the block rule does, and it would bind segwit
+ *  and legacy transactions of the same on-the-wire size differently, which is
+ *  exactly the discount the small-block rule exists to remove.
+ *
+ *  40000 is the same figure as SIDECHAIN_MAX_WITHDRAWAL_BUNDLE_BYTES, and for
+ *  the same reason: a withdrawal bundle is a transaction that has to be
+ *  mineable in a small block. It leaves room for the coinbase reserve the
+ *  assembler holds back (SMALL_BLOCK_COINBASE_RESERVE_BYTES, plus its
+ *  per-sidechain and per-BMM allowances), so a standard transaction at the cap
+ *  still fits in a block this node would build. */
+static const unsigned int MAX_STANDARD_TX_SMALL_BLOCK_SIZE = 40000;
 /** Maximum number of signature check operations in an IsStandard() P2SH script */
 static const unsigned int MAX_P2SH_SIGOPS = 15;
 /** The maximum number of sigops we're willing to relay/mine in a single tx */
@@ -78,12 +105,12 @@ CAmount GetDustThreshold(const CTxOut& txout, const CFeeRate& dustRelayFee);
 
 bool IsDust(const CTxOut& txout, const CFeeRate& dustRelayFee);
 
-bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool witnessEnabled = false, const bool skydogeEnabled = false);
+bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool witnessEnabled = false, const bool IsSkydogeEnabled = false, const bool smallBlockEnabled = false);
     /**
      * Check for standard transaction types
      * @return True if all outputs (scriptPubKeys) use only standard transaction forms
      */
-bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnessEnabled = false, const bool skydogeEnabled = false);
+bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnessEnabled = false, const bool IsSkydogeEnabled = false, const bool smallBlockEnabled = false);
     /**
      * Check for standard transaction types
      * @param[in] mapInputs    Map of previous transactions that have outputs we're spending

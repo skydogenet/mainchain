@@ -15,6 +15,21 @@
 static const int SERIALIZE_TRANSACTION_NO_WITNESS = 0x40000000;
 static const int SERIALIZE_TRANSACTION_NO_DRIVECHAIN = 0x20000000;
 
+/** Maximum number of extra bytes on a critical (v3/BMM) transaction. Defined
+ *  here rather than in validation.h so CCriticalData deserialization can bound
+ *  vBytes (a transaction-layer property). */
+static const int MAX_CRITICAL_DATA_BYTES = 21;
+
+/** Fixed bytes the small-block cap charges every nVersion==3 transaction on
+ *  top of its committed size, whatever its criticalData actually holds: the
+ *  extended-format marker and flags (2), the vBytes length (1), vBytes at its
+ *  parse bound and hashCritical (32). nVersion IS committed, so the charged
+ *  measure stays a function of committed data only, and it is a provable
+ *  upper bound on the wire bytes the committed measure leaves out. Kept as
+ *  the expression so that raising MAX_CRITICAL_DATA_BYTES moves the bound.
+ *  Rationale in consensus/consensus.h; enforced by GetCommittedSerializedSize. */
+static const unsigned int SMALL_BLOCK_V3_TX_CHARGE_BYTES = 2 + 1 + MAX_CRITICAL_DATA_BYTES + 32;
+
 static const unsigned char TX_REPLAY_BYTES = 0x3f;
 static const int32_t TX_REPLAY_VERSION = 12566463;
 
@@ -193,12 +208,59 @@ public:
         SetNull();
     }
 
-    ADD_SERIALIZE_METHODS;
+    // Hand-written rather than ADD_SERIALIZE_METHODS, because the read and the
+    // write are not symmetric here and the SerializationOp form compiles BOTH
+    // branches for every stream type - including read-only and size-computing
+    // streams that have only one of read()/write().
+    //
+    // Bound the BMM critical-data bytes at deserialization. Consensus already
+    // rejects vBytes > MAX_CRITICAL_DATA_BYTES, but criticalData is excluded
+    // from the txid and witness hash while still counted in the serialized
+    // block size/weight, so an unbounded vBytes lets a peer pad a copy of an
+    // honest block past the cap without changing its hash and get that hash
+    // marked permanently invalid. Refuse to parse an over-long value.
+    //
+    // The length is checked BEFORE the vector is sized, which is the whole
+    // point of spelling this out. The generic vector reader allocates the
+    // DECLARED length in ~5 MB chunks and only then runs out of data, so
+    // checking afterwards still let a peer spend the node's memory and CPU on
+    // a length it never had to send the bytes for - a few bytes on the wire to
+    // make the node allocate megabytes, from any peer, repeatedly. Bounded
+    // first, the largest allocation this field can ask for is 21 bytes.
+    //
+    // Byte-identical on the wire to the generic vector<unsigned char> path it
+    // replaces - same CompactSize, same payload, same order - so nothing
+    // serialises differently and the set of transactions that parse is
+    // unchanged: anything over the bound was already refused here, only later
+    // and more expensively. The exception type and message are kept too, so
+    // ProcessMessages classifies the failure exactly as it did before.
+    template <typename Stream>
+    void Serialize(Stream& s) const
+    {
+        WriteCompactSize(s, vBytes.size());
+        if (!vBytes.empty())
+            s.write((const char*)vBytes.data(), vBytes.size());
+        ::Serialize(s, hashCritical);
+    }
 
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(vBytes);
-        READWRITE(hashCritical);
+    template <typename Stream>
+    void Unserialize(Stream& s)
+    {
+        const uint64_t nSize = ReadCompactSize(s);
+        if (nSize > (uint64_t)MAX_CRITICAL_DATA_BYTES)
+            // "size too large" is LOAD-BEARING, not description - see the same
+            // point in serialize.h. ProcessMessages classifies
+            // ios_base::failure by SUBSTRING; a message matching none of its
+            // three buckets falls to PrintExceptionContinue, which writes to
+            // debug.log AND stderr unconditionally and unthrottled, so a few
+            // bytes on the wire buy ~360 bytes of output per message from any
+            // peer. The serialize.h bound had the same problem and was fixed
+            // first; this sibling is the older of the two.
+            throw std::ios_base::failure("ReadCompactSize(): size too large (CCriticalData::vBytes exceeds MAX_CRITICAL_DATA_BYTES)");
+        vBytes.resize((size_t)nSize);
+        if (nSize)
+            s.read((char*)vBytes.data(), (size_t)nSize);
+        ::Unserialize(s, hashCritical);
     }
 
     void SetNull()
@@ -397,7 +459,12 @@ public:
     // Compute blind hash of withdrawal tx (remove inputs and sidechain change)
     bool GetBlindHash(uint256& hashRet) const;
 
-    CAmount GetBlindValueOut() const;
+    /** Out-parameter, like GetBlindHash above and for the same reason: the
+     *  empty-transaction case has to be reportable. Returning the amount
+     *  directly left no error channel - a failure converted to CAmount 0,
+     *  which is a valid money value, so a caller could not tell "no outputs"
+     *  from "zero". */
+    bool GetBlindValueOut(CAmount& amountRet) const;
 
     // Return sum of txouts.
     CAmount GetValueOut() const;

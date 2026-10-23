@@ -9,7 +9,7 @@
 #include <qt/denialamountdialog.h>
 #include <qt/denialscheduledialog.h>
 #include <qt/denyallconfirmationdialog.h>
-#include <qt/drivechainunits.h>
+#include <qt/skydogeunits.h>
 #include <qt/platformstyle.h>
 #include <qt/scheduledtransactiontablemodel.h>
 
@@ -139,6 +139,27 @@ DenialDialog::~DenialDialog()
     delete ui;
 }
 
+// A denial transaction that could not be scheduled is created and
+// in the wallet but will never be broadcast, so its input stays reserved and
+// the coin vanishes from coin selection. Abandon it so the coin is spendable
+// again, and build the message that says both what failed and what was done.
+static QString ScheduleFailureMessage(const uint256& wtxid, const std::string& strError)
+{
+    QString msg = "Failed to schedule transaction!\n\n";
+    msg += QString::fromStdString(strError) + "\n\n";
+    std::string strReason = "it is not in the wallet";
+    // AbandonTransaction asserts the transaction is in the wallet; a denial
+    // that failed before reaching it (empty wtx) has nothing to release.
+    if (vpwallets.empty() || !vpwallets[0]->GetWalletTx(wtxid))
+        return msg;
+    if (vpwallets[0]->AbandonTransaction(wtxid, &strReason))
+        msg += "The denial transaction was abandoned; its coin is spendable again.\n";
+    else
+        msg += "The denial transaction could not be abandoned (" + QString::fromStdString(strReason) +
+               "); use abandontransaction " + QString::fromStdString(wtxid.ToString()) + " to release its coin.\n";
+    return msg;
+}
+
 void DenialDialog::automaticDenial()
 {
     QMessageBox messageBox;
@@ -166,14 +187,19 @@ void DenialDialog::automaticDenial()
         if (!vpwallets[0]->DenyCoin(wtx, strFail, vCoin[i], false /* fBroadcast */)) {
             messageBox.setText(QString::fromStdString(strFail));
             messageBox.exec();
+            // Nothing was created, so there is nothing to
+            // schedule (this used to go on and schedule an empty wtx).
+            break;
         }
+
 
         // Add a random number of seconds to current time
         QDateTime dateTime = QDateTime::currentDateTime().addSecs(GetRand(nAutoMinutes * 60));
 
         std::string strTime = dateTime.toString(QString::fromStdString(SCHEDULED_TX_TIME_FORMAT)).toStdString();
-        if (!vpwallets[0]->ScheduleTransaction(wtx.GetHash(), strTime)) {
-            messageBox.setText("Failed to schedule transaction!\n");
+        std::string strScheduleError;
+        if (!vpwallets[0]->ScheduleTransaction(wtx.GetHash(), strTime, &strScheduleError)) {
+            messageBox.setText(ScheduleFailureMessage(wtx.GetHash(), strScheduleError));
             messageBox.exec();
         }
 
@@ -322,8 +348,9 @@ void DenialDialog::on_pushButtonCreateAmount_clicked()
 
         // Schedule for later
         std::string strTime = dateTime.toString(QString::fromStdString(SCHEDULED_TX_TIME_FORMAT)).toStdString();
-        if (!vpwallets[0]->ScheduleTransaction(wtx.GetHash(), strTime)) {
-            messageBox.setText("Failed to schedule transaction!\n");
+        std::string strScheduleError;
+        if (!vpwallets[0]->ScheduleTransaction(wtx.GetHash(), strTime, &strScheduleError)) {
+            messageBox.setText(ScheduleFailureMessage(wtx.GetHash(), strScheduleError));
             messageBox.exec();
             return;
         }
@@ -384,6 +411,18 @@ void DenialDialog::setClientModel(ClientModel *model)
 void DenialDialog::updateCoins()
 {
     if (vpwallets.empty() || vpwallets[0]->IsLocked())
+        return;
+
+    // Don't block the GUI thread while the validation thread is connecting
+    // blocks (e.g. catch-up after being offline): skip this refresh rather than
+    // waiting on cs_main / cs_wallet. The next block notification retries, and
+    // AvailableCoins() below re-acquires both locks recursively when synced, so
+    // behavior is identical once the node is caught up.
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+    TRY_LOCK(vpwallets[0]->cs_wallet, lockWallet);
+    if (!lockWallet)
         return;
 
     ui->tableWidgetCoins->setUpdatesEnabled(false);
@@ -453,7 +492,7 @@ void DenialDialog::updateCoins()
         // Amount
         QTableWidgetItem *itemAmount = new QTableWidgetItem();
         itemAmount->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        itemAmount->setText(BitcoinUnits::format(BitcoinUnits::BTC, out.tx->tx->vout[out.i].nValue, false, BitcoinUnits::separatorNever));
+        itemAmount->setText(BitcoinUnits::format(BitcoinUnits::SKYDOGE, out.tx->tx->vout[out.i].nValue, false, BitcoinUnits::separatorNever));
         itemAmount->setFlags(itemAmount->flags() & ~Qt::ItemIsEditable);
         ui->tableWidgetCoins->setItem(nRow, COLUMN_AMOUNT, itemAmount);
 
@@ -502,26 +541,62 @@ void DenialDialog::broadcastScheduledTransactions()
     if (vpwallets.empty() || vpwallets[0]->IsLocked())
         return;
 
-    // Get current time and day of the week
+    // The message boxes below run a nested event loop, during which this
+    // timer can fire again; one pass at a time.
+    static bool fRunning = false;
+    if (fRunning)
+        return;
+    fRunning = true;
+
+    // Get current time
     QDateTime currentDateTime = QDateTime::currentDateTime();
-    int nCurrentDay = currentDateTime.date().dayOfWeek();
+    const int64_t nNow = currentDateTime.toMSecsSinceEpoch() / 1000;
 
     std::vector<ScheduledTransaction> vScheduled = vpwallets[0]->GetScheduled();
     std::vector<ScheduledTransaction> vComplete;
+    QString strDropped;
+    QString strDropErrors;
     for (ScheduledTransaction& s : vScheduled) {
         QDateTime txDateTime = QDateTime::fromString(
                     QString::fromStdString(s.strTime),
                     QString::fromStdString(SCHEDULED_TX_TIME_FORMAT));
 
-        if (nCurrentDay != txDateTime.date().dayOfWeek())
+        // A schedule is DUE from one minute before its time to
+        // SCHEDULED_TX_LATE_GRACE_SECONDS after it, and MISSED after that (the
+        // node was down, or the wallet locked, when it was due). A missed one
+        // used to be skipped forever while its unbroadcast transaction kept
+        // its coins out of coin selection. It is now DROPPED and its coins
+        // released, and the user is told - never fired late: a denial is a
+        // self-transfer whose only purpose is its timing, so sending it at a
+        // time the user did not pick defeats it, while dropping it loses
+        // nothing (the coins stay in the wallet and can be denied again).
+        // (The calendar-date match that replaced the old weekday-only test is
+        // kept by construction: the comparison is on the full date and time.)
+        const bool fValid = txDateTime.isValid();
+        const int64_t nScheduled = fValid ? txDateTime.toMSecsSinceEpoch() / 1000 : 0;
+        const ScheduledTxTiming timing = ClassifyScheduledTime(nScheduled, nNow, fValid);
+
+        if (timing == ScheduledTxTiming::WAIT)
             continue;
 
-        QTime currentTime = currentDateTime.time();
-        QTime txTime = txDateTime.time();
-
-        // Skip if the scheduled time is > 1 minute away from now
-        if (currentTime.secsTo(txTime) > 1 * 60)
+        if (timing == ScheduledTxTiming::MISSED) {
+            // A schedule is only missed if the CHAIN says so: while the
+            // node is syncing, the transaction may already be in a block not connected yet, and
+            // DropScheduledTransaction refuses. Do not ask it then - skip this
+            // one silently and retry on the next tick. TRY_LOCK so the GUI
+            // thread never waits on cs_main during catch-up; held through the
+            // drop, so the wallet's check sees the same state as this one.
+            TRY_LOCK(cs_main, lockMain);
+            if (!lockMain || !IsSyncedForScheduledDrop())
+                continue;
+            std::string strError;
+            const QString strTx = QString::fromStdString(s.wtxid.ToString());
+            if (vpwallets[0]->DropScheduledTransaction(s.wtxid, strError))
+                strDropped += strTx + " (" + (fValid ? QString::fromStdString(s.strTime) : tr("unreadable time")) + ")\n";
+            else
+                strDropErrors += strTx + ": " + QString::fromStdString(strError) + "\n";
             continue;
+        }
 
         if (!vpwallets[0]->BroadcastScheduled(s.wtxid))
             continue;
@@ -529,12 +604,33 @@ void DenialDialog::broadcastScheduledTransactions()
         vComplete.push_back(s);
     }
 
-    for (ScheduledTransaction& s : vComplete)
-        vpwallets[0]->RemoveScheduledTransaction(s);
+    // A removal that could not be saved is said, not swallowed -
+    // the file still lists the sent transaction until the next good write.
+    QString strSaveErrors;
+    for (ScheduledTransaction& s : vComplete) {
+        std::string strError;
+        if (!vpwallets[0]->RemoveScheduledTransaction(s, &strError))
+            strSaveErrors += QString::fromStdString(s.wtxid.ToString()) + ": " + QString::fromStdString(strError) + "\n";
+    }
 
-    if (vComplete.size())
+    if (vComplete.size() || !strDropped.isEmpty())
         updateCoins();
+
+    if (!strDropped.isEmpty())
+        QMessageBox::information(this, tr("Scheduled transactions missed"),
+                                 tr("These scheduled transactions were not sent at their time (the wallet was closed or locked) "
+                                    "and have been DROPPED, not sent late. Their coins are spendable again; deny them again to reschedule.\n\n") + strDropped);
+    if (!strDropErrors.isEmpty())
+        QMessageBox::warning(this, tr("Scheduled transactions missed"),
+                             tr("These scheduled transactions were missed and could not be dropped:\n\n") + strDropErrors);
+    if (!strSaveErrors.isEmpty())
+        QMessageBox::warning(this, tr("Scheduled transactions not saved"),
+                             tr("These transactions were broadcast, but removing them from the saved schedule failed:\n\n") + strSaveErrors);
+
+    fRunning = false;
 }
+
+
 
 struct CompareByDenial
 {
@@ -585,14 +681,14 @@ void DenialDialog::Deny(const QModelIndex& index)
     if (!scheduleDialog.GetScheduled())
         return;
 
-    QString strAmount = BitcoinUnits::format(BitcoinUnits::BTC, coin.tx->tx->vout[coin.i].nValue, false, BitcoinUnits::separatorNever);
+    QString strAmount = BitcoinUnits::format(BitcoinUnits::SKYDOGE, coin.tx->tx->vout[coin.i].nValue, false, BitcoinUnits::separatorNever);
 
     QString confirm = "This will schedule a transaction which moves the coin you have selected to one or more new addresses!\n\n";
     confirm += "Amount to deny: " + strAmount + "\n\n";
     confirm += "Are you sure?\n";
-    int nRes = QMessageBox::question(this, tr("Drivechain - confirm denial"),
+    int nRes = QMessageBox::question(this, tr("Skydoge - confirm denial"),
                                      confirm,
-                                     QMessageBox::Ok, QMessageBox::Cancel);
+                                     QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel);
     if (nRes == QMessageBox::Cancel)
         return;
 
@@ -606,8 +702,9 @@ void DenialDialog::Deny(const QModelIndex& index)
 
     QDateTime dateTime = scheduleDialog.GetDateTime();
     std::string strTime = dateTime.toString(QString::fromStdString(SCHEDULED_TX_TIME_FORMAT)).toStdString();
-    if (!vpwallets[0]->ScheduleTransaction(wtx.GetHash(), strTime)) {
-        messageBox.setText("Failed to schedule transaction!\n");
+    std::string strScheduleError;
+    if (!vpwallets[0]->ScheduleTransaction(wtx.GetHash(), strTime, &strScheduleError)) {
+        messageBox.setText(ScheduleFailureMessage(wtx.GetHash(), strScheduleError));
         messageBox.exec();
         return;
     }

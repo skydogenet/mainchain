@@ -39,6 +39,9 @@ public:
     /** Colorize an icon (given object) with the text color */
     QIcon TextColorIcon(const QIcon& icon) const;
 
+    /** Colorize an icon (given filename) with an arbitrary color */
+    QIcon TintedIcon(const QString& filename, const QColor& color) const;
+
 private:
     PlatformStyle(const QString &name, bool imagesOnButtons, bool colorizeIcons, bool useExtraSpacing);
 

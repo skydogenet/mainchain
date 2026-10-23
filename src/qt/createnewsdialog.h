@@ -9,6 +9,7 @@
 
 class NewsTypesTableModel;
 class PlatformStyle;
+class WalletModel;
 
 namespace Ui {
 class CreateNewsDialog;
@@ -23,6 +24,7 @@ public:
     ~CreateNewsDialog();
 
     void setNewsTypesModel(NewsTypesTableModel* model);
+    void setWalletModel(WalletModel* model);
 
 public Q_SLOTS:
     void updateTypes();
@@ -38,6 +40,9 @@ private:
     QString cacheText;
 
     NewsTypesTableModel* newsTypesModel = nullptr;
+
+    //! Needed to prompt for the passphrase on an encrypted wallet.
+    WalletModel* walletModel = nullptr;
 
     const PlatformStyle *platformStyle = nullptr;
 };

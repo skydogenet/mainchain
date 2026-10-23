@@ -36,11 +36,19 @@ import os
 #   GCC 4.4.2: GLIBCXX_3.4.13, CXXABI_1.3.3
 #   (glibc)    GLIBC_2_11
 #
+#
+# GLIBC is 2.12 rather than the 2.11 implied above. libzmq 4.3.5 names its
+# threads with pthread_setname_np() (its src/thread.cpp), which is versioned
+# GLIBC_2.12, so the ZMQ-enabled binaries carry that reference. The alternative
+# was staying on libzmq 4.2.2, a 2017 release with known remotely reachable
+# defects in its wire handling, which is a far worse trade than requiring a
+# glibc from 2010. Every distribution this software can plausibly run on has
+# 2.12; the number is a floor we advertise, not a correctness check.
 MAX_VERSIONS = {
 'GCC':     (4,4,0),
 'CXXABI':  (1,3,3),
 'GLIBCXX': (3,4,13),
-'GLIBC':   (2,11)
+'GLIBC':   (2,12)
 }
 # See here for a description of _IO_stdin_used:
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=634261#109

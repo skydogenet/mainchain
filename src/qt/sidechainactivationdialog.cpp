@@ -89,6 +89,12 @@ void SidechainActivationDialog::on_pushButtonActivate_clicked()
 {
     QModelIndexList selected = ui->tableViewActivation->selectionModel()->selectedIndexes();
 
+    // Writing the global scdb needs cs_main - ConnectBlock move-assigns it
+    // wholesale, so an unlocked write can be silently dropped, and a lost ack
+    // is a missed activation vote. Held across the whole loop so a multi-row
+    // selection cannot be split across a block connection.
+    LOCK(cs_main);
+
     for (int i = 0; i < selected.size(); i++) {
         uint256 hash;
         if (activationModel->GetHashAtRow(selected[i].row(), hash))
@@ -100,6 +106,10 @@ void SidechainActivationDialog::on_pushButtonReject_clicked()
 {
     QModelIndexList selected = ui->tableViewActivation->selectionModel()->selectedIndexes();
 
+    // See on_pushButtonActivate_clicked: the scdb write needs cs_main, and the
+    // lock spans the loop so a multi-row rejection is not split across a block.
+    LOCK(cs_main);
+
     for (int i = 0; i < selected.size(); i++) {
         uint256 hash;
         if (activationModel->GetHashAtRow(selected[i].row(), hash))
@@ -110,7 +120,7 @@ void SidechainActivationDialog::on_pushButtonReject_clicked()
 void SidechainActivationDialog::on_pushButtonHelp_clicked()
 {
     // TODO move text into static const
-    QMessageBox::information(this, tr("Skydoge - information"),
+    QMessageBox::information(this, tr("Drivechain - information"),
         tr("Sidechain activation signalling:\n\n"
            "Use this page to ACK (acknowledgement) or NACK "
            "(negative-acknowledgement) sidechains.\n\n"

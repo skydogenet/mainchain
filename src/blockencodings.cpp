@@ -77,8 +77,15 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
     // Because well-formed cmpctblock messages will have a (relatively) uniform distribution
     // of short IDs, any highly-uneven distribution of elements can be safely treated as a
     // READ_STATUS_FAILED.
-    std::unordered_map<uint64_t, uint16_t> shorttxids(cmpctblock.shorttxids.size());
-    uint16_t index_offset = 0;
+    // These are 32-bit rather than 16-bit on purpose. The transaction count
+    // permitted by the check at the top of this function is larger than a 16-bit
+    // index can address, so a 16-bit offset can be advanced past its maximum by a
+    // sufficiently long run of prefilled transactions; it then wraps to zero and
+    // the loop below can never reach the slot it is looking for. Widening the map
+    // value as well as the counter matters: widening only the counter would turn
+    // the non-terminating loop into positions silently truncated on insert.
+    std::unordered_map<uint64_t, uint32_t> shorttxids(cmpctblock.shorttxids.size());
+    uint32_t index_offset = 0;
     for (size_t i = 0; i < cmpctblock.shorttxids.size(); i++) {
         while (txn_available[i + index_offset])
             index_offset++;
@@ -107,7 +114,7 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
     const std::vector<std::pair<uint256, CTxMemPool::txiter> >& vTxHashes = pool->vTxHashes;
     for (size_t i = 0; i < vTxHashes.size(); i++) {
         uint64_t shortid = cmpctblock.GetShortID(vTxHashes[i].first);
-        std::unordered_map<uint64_t, uint16_t>::iterator idit = shorttxids.find(shortid);
+        std::unordered_map<uint64_t, uint32_t>::iterator idit = shorttxids.find(shortid);
         if (idit != shorttxids.end()) {
             if (!have_txn[idit->second]) {
                 txn_available[idit->second] = vTxHashes[i].second->GetSharedTx();
@@ -133,7 +140,7 @@ ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& c
 
     for (size_t i = 0; i < extra_txn.size(); i++) {
         uint64_t shortid = cmpctblock.GetShortID(extra_txn[i].first);
-        std::unordered_map<uint64_t, uint16_t>::iterator idit = shorttxids.find(shortid);
+        std::unordered_map<uint64_t, uint32_t>::iterator idit = shorttxids.find(shortid);
         if (idit != shorttxids.end()) {
             if (!have_txn[idit->second]) {
                 txn_available[idit->second] = extra_txn[i].second;
@@ -174,7 +181,12 @@ bool PartiallyDownloadedBlock::IsTxAvailable(size_t index) const {
 }
 
 ReadStatus PartiallyDownloadedBlock::FillBlock(CBlock& block, const std::vector<CTransactionRef>& vtx_missing) {
-    assert(!header.IsNull());
+    // Reject rather than abort if this is somehow entered twice: the header is
+    // cleared below, so a second call would otherwise take down the process.
+    // The caller is expected to discard the partial block after any failure,
+    // and this makes that a rejected message rather than a fatal error.
+    if (header.IsNull())
+        return READ_STATUS_INVALID;
     uint256 hash = header.GetHash();
     block = header;
     block.vtx.resize(txn_available.size());

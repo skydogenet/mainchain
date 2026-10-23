@@ -49,7 +49,10 @@ bool SerializeFileDB(const std::string& prefix, const fs::path& path, const Data
 
     // Serialize
     if (!SerializeDB(fileout, data)) return false;
-    FileCommit(fileout.Get());
+    // Renaming a replacement that never reached the disk over the previous file
+    // would trade a good copy for a truncated one.
+    if (!FileCommit(fileout.Get()))
+        return error("%s: Failed to flush %s to disk", __func__, pathTmp.string());
     fileout.fclose();
 
     // replace existing file, if any, with new file

@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <qt/sidechainwithdrawaltablemodel.h>
 
 #include <qt/guiconstants.h>
@@ -88,7 +89,7 @@ QVariant SidechainWithdrawalTableModel::data(const QModelIndex &index, int role)
             QString qAcks;
             qAcks += QString::number(object.nAcks);
             qAcks += " / ";
-            qAcks += QString::number(SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE);
+            qAcks += QString::number(object.nMinWorkScore);
             return qAcks;
         }
         // Approved
@@ -164,6 +165,14 @@ QVariant SidechainWithdrawalTableModel::headerData(int section, Qt::Orientation 
 
 void SidechainWithdrawalTableModel::updateModel()
 {
+    // Skip this refresh if the node is busy (e.g. validating a block during
+    // sync) rather than blocking the GUI thread waiting on cs_main. This is the
+    // same non-blocking guard the wallet balance poll uses, and it also makes
+    // the scdb / chainActive reads below safe (they run under cs_main now).
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     // Clear old data
     beginResetModel();
     model.clear();
@@ -174,6 +183,13 @@ void SidechainWithdrawalTableModel::updateModel()
 
     std::vector<Sidechain> vSidechain = scdb.GetActiveSidechains();
 
+    // Read the height ONCE and resolve the consensus parameters from it, rather
+    // than per row - the values must be consistent across a single refresh, and
+    // this is the only place in the model that has a height at all.
+    const int nHeight = chainActive.Height();
+    const int nVerificationPeriod = GetSidechainWithdrawalVerificationPeriod(nHeight);
+    const int nMinWorkScore = GetSidechainMinWorkScore(nHeight);
+
     int nSidechains = vSidechain.size();
     beginInsertRows(QModelIndex(), model.size(), model.size() + nSidechains);
     for (const Sidechain& s : vSidechain) {
@@ -183,9 +199,19 @@ void SidechainWithdrawalTableModel::updateModel()
             object.sidechain = QString::fromStdString(s.GetSidechainName());
             object.hash = QString::fromStdString(state.hash.ToString());
             object.nAcks = state.nWorkScore;
-            object.nAge = abs(state.nBlocksLeft - SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD);
-            object.nMaxAge = SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD;
-            object.fApproved = scdb.CheckWorkScore(state.nSidechain, state.hash);
+            // int64_t: nBlocksLeft is uint32_t now, so `uint32 - int` would wrap
+            // unsigned before reaching abs().
+            //
+            // HEIGHT-GATED, not the legacy constants. At production values the
+            // verification period is 259,200 and the legacy constant is 263, so
+            // displaying the bare constant put the age column off by ~986x and
+            // showed every pending bundle as wildly over-age. The age is
+            // now computed from the height-gated period, so it is right at
+            // every height.
+            object.nAge = (uint32_t)std::llabs((int64_t)state.nBlocksLeft - (int64_t)nVerificationPeriod);
+            object.nMaxAge = (uint32_t)nVerificationPeriod;
+            object.nMinWorkScore = (uint32_t)nMinWorkScore;
+            object.fApproved = scdb.CheckWorkScore(state.nSidechain, state.hash, nHeight);
 
             model.append(QVariant::fromValue(object));
         }
@@ -214,6 +240,7 @@ void SidechainWithdrawalTableModel::AddDemoData()
     object1.nAcks = 42;
     object1.nAge = 50;
     object1.nMaxAge = SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD;
+    object1.nMinWorkScore = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE;
     object1.fApproved = false;
 
     // Withdrawal 2
@@ -223,6 +250,7 @@ void SidechainWithdrawalTableModel::AddDemoData()
     object2.nAcks = 13141;
     object2.nAge = 21358;
     object2.nMaxAge = SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD;
+    object2.nMinWorkScore = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE;
     object2.fApproved = true;
 
     // Withdrawal 3
@@ -232,6 +260,7 @@ void SidechainWithdrawalTableModel::AddDemoData()
     object3.nAcks = 1637;
     object3.nAge = 2000;
     object3.nMaxAge = SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD;
+    object3.nMinWorkScore = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE;
     object3.fApproved = false;
 
     // Withdrawal 4
@@ -241,6 +270,7 @@ void SidechainWithdrawalTableModel::AddDemoData()
     object4.nAcks = 705;
     object4.nAge = 26215;
     object4.nMaxAge = SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD;
+    object4.nMinWorkScore = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE;
     object4.fApproved = false;
 
     // Withdrawal 5
@@ -250,6 +280,7 @@ void SidechainWithdrawalTableModel::AddDemoData()
     object5.nAcks = 10;
     object5.nAge = 10;
     object5.nMaxAge = SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD;
+    object5.nMinWorkScore = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE;
     object5.fApproved = false;
 
     // Withdrawal 6
@@ -259,6 +290,7 @@ void SidechainWithdrawalTableModel::AddDemoData()
     object6.nAcks = 1256;
     object6.nAge = 1378;
     object6.nMaxAge = SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD;
+    object6.nMinWorkScore = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE;
     object6.fApproved = false;
 
     // Withdrawal 7
@@ -268,6 +300,7 @@ void SidechainWithdrawalTableModel::AddDemoData()
     object7.nAcks = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE + 10;
     object7.nAge = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE + 11;
     object7.nMaxAge = SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD;
+    object7.nMinWorkScore = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE;
     object7.fApproved = true;
 
     // Withdrawal 8
@@ -277,6 +310,7 @@ void SidechainWithdrawalTableModel::AddDemoData()
     object8.nAcks = 1;
     object8.nAge = 26142;
     object8.nMaxAge = SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD;
+    object8.nMinWorkScore = SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE;
     object8.fApproved = false;
 
     // Add demo objects to model

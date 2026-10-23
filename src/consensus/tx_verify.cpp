@@ -9,7 +9,6 @@
 #include "script/interpreter.h"
 #include "sidechaindb.h"
 #include "validation.h"
-#include <arith_uint256.h>
 
 // TODO remove the following dependencies
 #include "chain.h"
@@ -158,7 +157,7 @@ int64_t GetTransactionSigOpCost(const CTransaction& tx, const CCoinsViewCache& i
     return nSigOps;
 }
 
-bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fCheckDuplicateInputs)
+bool CheckTransaction(const CTransaction& tx, CValidationState &state)
 {
     // Basic checks that don't depend on any context
     if (tx.vin.empty())
@@ -169,19 +168,6 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
     if (::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION | SERIALIZE_TRANSACTION_NO_WITNESS) * WITNESS_SCALE_FACTOR > MAX_BLOCK_WEIGHT)
         return state.DoS(100, false, REJECT_INVALID, "bad-txns-oversize");
 
-    if(tx.nVersion < 9){
-        arith_uint256 tx_hash = UintToArith256(tx.GetHash());
-        arith_uint256 target1 = UintToArith256(uint256S("0x0000000b2b10496bb3520722e9e197377d22671e39f1def14ed3455b473e9afa"));
-        arith_uint256 target2 = UintToArith256(uint256S("0x0000004dfab4bb1ff8aae6f792bf5faa7a2087f73e9bcb4b46fbdfac56ddbc18"));
-        arith_uint256 target3 = UintToArith256(uint256S("0x00000017a83cf3650a80311f6e47e936fb71524c7be98d61e5f273d08383dda9"));
-        if(tx_hash == target1 || tx_hash == target2 || tx_hash == target3 ){
-
-        }else{
-            return state.DoS(100, false, REJECT_INVALID, "CheckTransaction of nVersion failed ");
-        }
-
-    }
-
     // Check for negative or overflow output values
     CAmount nValueOut = 0;
     for (const auto& txout : tx.vout)
@@ -190,19 +176,26 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fChe
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-vout-negative");
         if (txout.nValue > MAX_MONEY)
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-vout-toolarge");
-        nValueOut += txout.nValue;
-        if (!MoneyRange(nValueOut))
+        // Check-before-add: nValueOut and txout.nValue are each in [0, MAX_MONEY]
+        // and MAX_MONEY - txout.nValue does not underflow, so this rejects exactly
+        // when the sum would exceed MAX_MONEY - identical to the old
+        // add-then-MoneyRange, but without the signed-overflow UB (here
+        // 2*MAX_MONEY > INT64_MAX, so adding first can overflow).
+        if (nValueOut > MAX_MONEY - txout.nValue)
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-txouttotal-toolarge");
+        nValueOut += txout.nValue;
     }
 
-    // Check for duplicate inputs - note that this check is slow so we skip it in CheckBlock
-    if (fCheckDuplicateInputs) {
-        std::set<COutPoint> vInOutPoints;
-        for (const auto& txin : tx.vin)
-        {
-            if (!vInOutPoints.insert(txin.prevout).second)
-                return state.DoS(100, false, REJECT_INVALID, "bad-txns-inputs-duplicate");
-        }
+    // Check for duplicate inputs. This is never optional: a transaction that
+    // spends the same output twice would credit its value twice, so skipping
+    // the check anywhere - including when validating a whole block - allows
+    // coins to be created out of nothing. The switch that used to make this
+    // skippable has been removed so that it cannot be turned off by accident.
+    std::set<COutPoint> vInOutPoints;
+    for (const auto& txin : tx.vin)
+    {
+        if (!vInOutPoints.insert(txin.prevout).second)
+            return state.DoS(100, false, REJECT_INVALID, "bad-txns-inputs-duplicate");
     }
 
     if (tx.IsCoinBase())
@@ -243,11 +236,14 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
                 strprintf("tried to spend coinbase at depth %d", nSpendHeight - coin.nHeight));
         }
 
-        // Check for negative or overflow input values
-        nValueIn += coin.out.nValue;
-        if (!MoneyRange(coin.out.nValue) || !MoneyRange(nValueIn)) {
+        // Check for negative or overflow input values. Check-before-add (each
+        // value in [0, MAX_MONEY]) avoids the signed-overflow UB of summing
+        // first when 2*MAX_MONEY > INT64_MAX; behaviour is identical (reject
+        // when the running input total would exceed MAX_MONEY).
+        if (!MoneyRange(coin.out.nValue) || nValueIn > MAX_MONEY - coin.out.nValue) {
             return state.DoS(100, false, REJECT_INVALID, "bad-txns-inputvalues-outofrange");
         }
+        nValueIn += coin.out.nValue;
     }
 
     const CAmount value_out = tx.GetValueOut();

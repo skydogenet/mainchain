@@ -51,6 +51,26 @@ static const CAmount DEFAULT_DISCARD_FEE = 10000;
 static const CAmount DEFAULT_TRANSACTION_MINFEE = 1000;
 //! minimum recommended increment for BIP 125 replacement txs
 static const CAmount WALLET_INCREMENTAL_RELAY_FEE = 5000;
+//! Ceiling on the fee an OP_RETURN (news / message) transaction may pay.
+//!
+//! These transactions carry no payment - the fee *is* the message's bid, and
+//! posts are ranked by it - so the usual "a fee this large must be a mistake"
+//! reasoning does not apply the way it does to a send. The old ceiling of one
+//! coin was too low to outbid a busy board; this is high enough to win any
+//! plausible auction and still far below what a slip of the keyboard could
+//! otherwise cost. For scale, filling an entire block costs on the order of
+//! 0.01, so a single coin already outbids a whole block many times over.
+//!
+//! An explicitly configured -maxtxfee takes precedence over this - see
+//! CreateOPReturnTransaction.
+static const CAmount MAX_OP_RETURN_TX_FEE = 1000 * COIN;
+//! Above this, the RPCs that post require the caller to say so explicitly.
+//!
+//! The GUI asks for confirmation and shows the formatted amount; the RPCs
+//! cannot ask anything, so a mistyped fee there goes straight to a miner and is
+//! unrecoverable - a "1000" meant as "0.001" is the whole difference. Anything
+//! over this needs a deliberate second argument, which a typo does not produce.
+static const CAmount OP_RETURN_HIGH_FEE_THRESHOLD = 10 * COIN;
 //! target minimum change amount
 static const CAmount MIN_CHANGE = CENT;
 //! final minimum change amount after paying for fees
@@ -692,6 +712,40 @@ private:
 };
 
 static const std::string SCHEDULED_TX_TIME_FORMAT = "ddd MMMM d yyyy h:mm a";
+
+/** When a scheduled transaction is broadcast, and when it counts
+ *  as MISSED. A schedule is DUE from SCHEDULED_TX_EARLY_SECONDS before its
+ *  time until SCHEDULED_TX_LATE_GRACE_SECONDS after it (the GUI checks once a
+ *  minute and only while the wallet is unlocked); after that it is MISSED and
+ *  is dropped with its coins released, never fired late. */
+static const int64_t SCHEDULED_TX_EARLY_SECONDS = 60;
+static const int64_t SCHEDULED_TX_LATE_GRACE_SECONDS = 60 * 60;
+enum class ScheduledTxTiming { WAIT, DUE, MISSED };
+/** fValid false (the stored time does not parse) counts as MISSED: such a
+ *  schedule can never fire, and keeping it would freeze its coins forever. */
+inline ScheduledTxTiming ClassifyScheduledTime(int64_t nScheduled, int64_t nNow, bool fValid = true)
+{
+    if (!fValid)
+        return ScheduledTxTiming::MISSED;
+    if (nNow < nScheduled - SCHEDULED_TX_EARLY_SECONDS)
+        return ScheduledTxTiming::WAIT;
+    if (nNow <= nScheduled + SCHEDULED_TX_LATE_GRACE_SECONDS)
+        return ScheduledTxTiming::DUE;
+    return ScheduledTxTiming::MISSED;
+}
+
+class CChain;
+/** A schedule is only MISSED if the
+ *  CHAIN says so, so a missed schedule may be dropped only while the node is
+ *  synced: it has a tip, is out of initial block download, and is at most one
+ *  block behind the best header it knows. ChainSyncedForScheduledDrop is that
+ *  criterion on explicit inputs; IsSyncedForScheduledDrop applies it to this
+ *  node's state and REQUIRES cs_main held (chainActive, pindexBestHeader).
+ *  CWallet::DropScheduledTransaction and the Qt schedule timer both call
+ *  IsSyncedForScheduledDrop, so the two can never disagree. */
+bool ChainSyncedForScheduledDrop(const CChain& chain, const CBlockIndex* pindexBestKnownHeader, bool fInitialBlockDownload);
+bool IsSyncedForScheduledDrop();
+
 static const uint64_t SCHEDULED_TX_DUMP_VERSION = 0;
 struct ScheduledTransaction
 {
@@ -802,13 +856,13 @@ private:
      */
     const CBlockIndex* m_last_block_processed;
 
-    /* Load list of scheduled transactions */
-    bool LoadScheduledTransactions();
-
-    /* Write list of scheduled transactions */
-    void WriteScheduledTransactions();
 
     std::vector<ScheduledTransaction> vScheduled;
+
+    //! Whether startup actually read scheduledtx.dat. Shutdown runs on the
+    //! failure paths too, and the schedules exist in no block, so nothing is
+    //! written back unless something was read first.
+    bool fScheduledLoaded = false;
 
 public:
     /*
@@ -1230,15 +1284,43 @@ public:
     /** Update the replay status of a wallet transaction */
     void UpdateReplayStatus(const uint256& txid, const int nReplayStatus);
 
-    /** Add to scheduled transaction cache */
-    bool ScheduleTransaction(const uint256& wtxid, const std::string& strTime);
+    /** Add to scheduled transaction cache. Returns false, with the reason in
+     *  *pstrError, if it cannot be added or the schedule could not be saved
+     *  (then it is NOT scheduled: the in-memory add is rolled back, so the
+     *  file and memory agree). */
+    bool ScheduleTransaction(const uint256& wtxid, const std::string& strTime, std::string* pstrError = nullptr);
 
-    /** Remove / cancel scheduled transaction */
-    void RemoveScheduledTransaction(const ScheduledTransaction& scheduled);
+    /* Load list of scheduled transactions. */
+    bool LoadScheduledTransactions();
+
+    /* Write list of scheduled transactions. returns false, with
+     * the reason in *pstrError, if the list did not reach the disk (it used to
+     * return nothing, so a failed write reported success to the GUI). */
+    bool WriteScheduledTransactions(std::string* pstrError = nullptr);
+
+    /** Remove / cancel scheduled transaction. Returns false, with the reason
+     *  in *pstrError, if the removal could not be saved (it is still removed
+     *  in memory; the file keeps the old list until the next good write). */
+    bool RemoveScheduledTransaction(const ScheduledTransaction& scheduled, std::string* pstrError = nullptr);
+
+    /** Drop any scheduled broadcast of wtxid. Caller holds cs_wallet.
+     *  Used by AbandonTransaction so a cancelled spend is never broadcast.
+     *  Returns false only if a removal happened and could not be saved. */
+    bool UnscheduleTransaction(const uint256& wtxid);
+
 
     std::vector<ScheduledTransaction> GetScheduled() const;
 
     bool IsScheduled(const uint256& wtxid) const;
+
+    /** A schedule that was missed is DROPPED, and the coins it
+     *  reserved are released: the unbroadcast transaction is abandoned (which
+     *  also unschedules it), so its inputs return to coin selection. If the
+     *  transaction is already confirmed or in the memory pool it reserves
+     *  nothing wrongly and is only unscheduled. Returns false, with the reason
+     *  in strError, if the coins could not be released or the list not saved. */
+    bool DropScheduledTransaction(const uint256& wtxid, std::string& strError);
+
 
     bool BroadcastScheduled(const uint256& wtxid);
 };

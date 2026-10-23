@@ -221,12 +221,6 @@ extern const char *FEEFILTER;
 extern const char *SENDCMPCT;
 /**
  * Contains a CBlockHeaderAndShortTxIDs object - providing a header and
- * list of SERIALIZE_TRANSACTION_NO_WITNESS "short txids"
- * @since protocol version 70014 as described by BIP 152
- */
-extern const char *CMPCTWITBLOCK;
-/**
- * Contains a CBlockHeaderAndShortTxIDs object - providing a header and
  * list of "short txids".
  * @since protocol version 70014 as described by BIP 152
  */
@@ -310,8 +304,24 @@ enum ServiceFlags : uint64_t {
  * should be updated appropriately to filter for the same nodes.
  */
 static ServiceFlags GetDesirableServiceFlags(ServiceFlags services) {
-    // TODO
-    return ServiceFlags(NODE_NETWORK | NODE_WITNESS /* | NODE_DRIVECHAIN */ );
+    // NODE_DRIVECHAIN is deliberately NOT listed here, and adding it is a
+    // sequencing decision rather than a one-line change. What this function
+    // returns is a requirement, not a preference: an outbound peer that does not
+    // offer every flag in it is disconnected (net_processing.cpp), addresses
+    // lacking them are skipped when opening connections, and the DNS seed filter
+    // uses the same set. Requiring a flag that most of the network does not yet
+    // set would partition the node that requires it, not the nodes that lack it.
+    //
+    // Advertisement has to come first and be widespread. Until this release the
+    // flag was gated on a chain tip that is null during startup, so nodes did not
+    // advertise it at all; that is fixed in init.cpp, but the fix only takes
+    // effect as operators upgrade. Requiring it before then would isolate exactly
+    // the upgraded nodes that carry the fix.
+    //
+    // Revisit once a survey of live peers shows the advertisement is common. If
+    // this is ever added, contrib/seeds/makeseeds.py must be updated to filter on
+    // the same set, as the comment above notes.
+    return ServiceFlags(NODE_NETWORK | NODE_WITNESS);
 }
 
 /**

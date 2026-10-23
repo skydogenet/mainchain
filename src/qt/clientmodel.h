@@ -84,11 +84,16 @@ public:
     void UpdateBlockCountLater(const int count, const QDateTime& date,
             const double nVerificationProgress, const bool fHeader);
 
-    void StopIgnoredBlockChangeTimer();
-
     // caches for the best header
     mutable std::atomic<int> cachedBestHeaderHeight;
     mutable std::atomic<int64_t> cachedBestHeaderTime;
+
+    // caches for the active chain tip, kept fresh from BlockTipChanged so the
+    // GUI thread's getters never have to take a blocking cs_main lock (which
+    // validation holds for long stretches during initial block download).
+    mutable std::atomic<int> cachedNumBlocks;
+    mutable std::atomic<int64_t> cachedTipBlockTime;
+    mutable std::atomic<double> cachedVerificationProgress;
 
 private:
     OptionsModel *optionsModel;
@@ -102,10 +107,10 @@ private:
     void unsubscribeFromCoreSignals();
 
     struct IgnoredBlockChange {
-        int count;
+        int count = 0;
         QDateTime date;
-        double nVerificationProgress;
-        bool fHeader;
+        double nVerificationProgress = 0;
+        bool fHeader = false;
 
         void clear()
         {
@@ -127,6 +132,7 @@ Q_SIGNALS:
     void networkActiveChanged(bool networkActive);
     void alertsChanged(const QString &warnings);
     void bytesChanged(quint64 totalBytesIn, quint64 totalBytesOut);
+    void numBlocksChangedIBD(int count, double nVerificationProgress);
 
     //! Fired when a message should be reported to the user
     void message(const QString &title, const QString &message, unsigned int style);
@@ -141,6 +147,9 @@ public Q_SLOTS:
     void updateAlert();
     void updateBanlist();
     void updateIgnoredBlockChanges();
+    //! A slot so BlockTipChanged can reach it with a queued connection: it
+    //! stops a QTimer, which only the thread that owns the timer may do.
+    void StopIgnoredBlockChangeTimer();
 };
 
 #endif // BITCOIN_QT_CLIENTMODEL_H

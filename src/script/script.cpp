@@ -299,6 +299,32 @@ bool CScript::IsWithdrawalHashCommit(uint256& hash, uint8_t& nSidechain) const
     return true;
 }
 
+// OP_RETURN PUSH36 0xD1 'b' 'i' 'd' <hashCritical>. A proper push (unlike the
+// coinbase commits above, which are raw bytes after OP_RETURN) so that the
+// output is a standard TX_NULL_DATA output and the request relays.
+static const unsigned char BMM_BID_COMMIT_HEADER[4] = {0xD1, 0x62, 0x69, 0x64};
+
+bool CScript::IsBMMBidCommit(uint256& hash) const
+{
+    if (this->size() != 38)
+        return false;
+    if ((*this)[0] != OP_RETURN || (*this)[1] != 0x24)
+        return false;
+    for (size_t x = 0; x < 4; x++) {
+        if ((*this)[2 + x] != BMM_BID_COMMIT_HEADER[x])
+            return false;
+    }
+    hash = uint256(std::vector<unsigned char>(this->begin() + 6, this->begin() + 38));
+    return !hash.IsNull();
+}
+
+CScript BMMBidCommitScript(const uint256& hashCritical)
+{
+    std::vector<unsigned char> vData(BMM_BID_COMMIT_HEADER, BMM_BID_COMMIT_HEADER + 4);
+    vData.insert(vData.end(), hashCritical.begin(), hashCritical.end());
+    return CScript() << OP_RETURN << vData;
+}
+
 bool CScript::IsSidechainProposalCommit() const
 {
     // Check script size
@@ -357,6 +383,28 @@ bool CScript::IsSCDBBytes() const
             (*this)[3] != 0x17 ||
             (*this)[4] != 0x76)
         return false;
+
+    return true;
+}
+
+bool CScript::IsSCDBHashCommit(uint256& hashCommitment) const
+{
+    // Check script size. Exactly 37 bytes - unlike the other commitments this
+    // one is required by consensus from SCDBCommitmentHeight, and requiring
+    // the exact length is what makes "present and well formed" one question.
+    size_t size = this->size();
+    if (size != 37)
+        return false;
+
+    // Check script header
+    if ((*this)[0] != OP_RETURN ||
+            (*this)[1] != 0xD8 ||
+            (*this)[2] != 0x5C ||
+            (*this)[3] != 0xDB ||
+            (*this)[4] != 0xC0)
+        return false;
+
+    hashCommitment = uint256(std::vector<unsigned char>(this->begin() + 5, this->begin() + 37));
 
     return true;
 }

@@ -17,8 +17,14 @@ struct SidechainActivationTableObject
     int nSidechain;
     QString title;
     QString description;
-    int nAge;
-    int nFail;
+    int nAge = 0;
+    int nFail = 0;
+    //! Resolved from the HEIGHT-GATED accessors where a height is available,
+    //! not from the legacy constants at paint time - same reason as
+    //! SidechainWithdrawalTableObject. Default-initialised so a member added
+    //! here and missed at a construction site renders as 0, not as garbage.
+    int nMaxAge = 0;
+    int nMaxFail = 0;
     QString hash;
 };
 

@@ -10,17 +10,29 @@
 #include <utilstrencodings.h>
 #include <crypto/common.h>
 
+#include <cstddef>
+#include <cstring>
+
 uint256 CBlockHeader::GetHash() const
 {
     //return SerializeHash(*this);
-	return skydoge_hash(BEGIN(nVersion), END(nNonce));
+    // Security fix (remote CPU-DoS): memoize the ~44x-SHA256d skydoge_hash.
+    // The hashed input is the contiguous 80-byte POD region [nVersion..nNonce];
+    // this layout assumption is NOT new - the skydoge_hash(BEGIN,END) call has
+    // always relied on it - so make it explicit. The cache self-validates by
+    // comparing the live 80 bytes against the snapshot, so any field mutation
+    // transparently forces a recompute and the returned value is bit-identical.
+    static_assert(offsetof(CBlockHeader, nNonce) + sizeof(uint32_t) -
+                      offsetof(CBlockHeader, nVersion) == 80,
+                  "CBlockHeader hashed region must be 80 contiguous bytes");
+    if (fHashCached && memcmp(hashCacheInput, BEGIN(nVersion), 80) == 0)
+        return hashCache;
+    memcpy(hashCacheInput, BEGIN(nVersion), 80);
+    hashCache = skydoge_hash(BEGIN(nVersion), END(nNonce));
+    fHashCached = true;
+    return hashCache;
 }
 
-uint256 CBlockHeader::GetPoWHash() const
-{
-//    return SerializeSHAndwichHash(*this);
-    return skydoge_hash(BEGIN(nVersion), END(nNonce));
-}
 
 std::string CBlock::ToString() const
 {

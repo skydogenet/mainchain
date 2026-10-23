@@ -9,6 +9,7 @@
 
 class ClientModel;
 class CreateOPReturnDialog;
+class WalletModel;
 class OPReturnTableModel;
 class PlatformStyle;
 
@@ -31,6 +32,7 @@ public:
     ~OPReturnDialog();
 
     void setClientModel(ClientModel *clientModel);
+    void setWalletModel(WalletModel *walletModel);
 
 private:
     Ui::OPReturnDialog *ui;

@@ -6,9 +6,10 @@
 
 #include <qt/blockexplorer.h>
 #include <qt/clientmodel.h>
-#include <qt/skydogeunits.h>
 #include <qt/createwalletdialog.h>
 #include <qt/denialdialog.h>
+#include <qt/skydogetheme.h>
+#include <qt/skydogeunits.h>
 #include <qt/hashcalcdialog.h>
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
@@ -39,6 +40,7 @@
 #endif
 
 #include <chainparams.h>
+#include <clientversion.h>
 #include <init.h>
 #include <ui_interface.h>
 #include <util.h>
@@ -49,6 +51,13 @@
 #include <QDragEnterEvent>
 #include <QListWidget>
 #include <QMenuBar>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
+#include <QProgressBar>
+#include <QPushButton>
+#include <QToolButton>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QSettings>
@@ -59,6 +68,11 @@
 #include <QTextStream>
 #include <QTimer>
 #include <QToolBar>
+#include <QColor>
+#include <QHBoxLayout>
+#include <QIcon>
+#include <QLabel>
+#include <QSizePolicy>
 #include <QVBoxLayout>
 
 #if QT_VERSION < 0x050000
@@ -86,10 +100,6 @@ using namespace boost::placeholders;
  * collisions in the future with additional wallets */
 const QString BitcoinGUI::DEFAULT_WALLET = "~Default";
 
-//old DC
-//! The required delta of headers to the estimated number of available headers until we show the IBD progress
-static constexpr int HEADER_HEIGHT_DELTA_SYNC = 24;
-
 BitcoinGUI::BitcoinGUI(const PlatformStyle *_platformStyle, const NetworkStyle *networkStyle, QWidget *parent) :
     QMainWindow(parent),
     enableWallet(false),
@@ -105,6 +115,7 @@ BitcoinGUI::BitcoinGUI(const PlatformStyle *_platformStyle, const NetworkStyle *
     labelNumBlocks(0),
     labelLastBlock(0),
     appMenuBar(0),
+    themeActionGroup(0),
     overviewAction(0),
     historyAction(0),
     quitAction(0),
@@ -175,8 +186,6 @@ BitcoinGUI::BitcoinGUI(const PlatformStyle *_platformStyle, const NetworkStyle *
 #endif // ENABLE_WALLET
     windowTitle += " " + networkStyle->getTitleAddText();
 
-    windowTitle += "(Bitcoin Core 0.16.99 + BIPs 300 and 301)";
-
 #ifndef Q_OS_MAC
     QApplication::setWindowIcon(networkStyle->getTrayAndWindowIcon());
     setWindowIcon(networkStyle->getTrayAndWindowIcon());
@@ -227,7 +236,6 @@ BitcoinGUI::BitcoinGUI(const PlatformStyle *_platformStyle, const NetworkStyle *
                 walletFrame, SLOT(showSidechainActivationDialog()));
 
         connect(miningDialog, SIGNAL(WithdrawalDialogRequested()),
-                walletFrame, SLOT(showSidechainWithdrawalDialog()));
                 walletFrame, SLOT(showSCDBDialog()));
 
         connect(walletFrame, SIGNAL(requestedSyncWarningInfo()), this, SLOT(showModalOverlay()));
@@ -280,32 +288,57 @@ BitcoinGUI::BitcoinGUI(const PlatformStyle *_platformStyle, const NetworkStyle *
     labelLastBlock = new QLabel();
     labelProgressReason = new QLabel();
     labelProgressPercentage = new QLabel();
+    labelMempool = new QLabel();
+    syncProgressBar = new QProgressBar();
+    syncProgressBar->setObjectName(QStringLiteral("syncProgressBar"));
+    syncProgressBar->setRange(0, 100);
+    syncProgressBar->setTextVisible(true);
+    syncProgressBar->setFixedWidth(150);
+    syncProgressBar->setFixedHeight(14);
 
-    if(enableWallet)
-    {
-        frameBlocksLayout->addStretch();
-        frameBlocksLayout->addStretch();
-        frameBlocksLayout->addWidget(labelWalletEncryptionIcon);
-    }
-    frameBlocksLayout->addStretch();
-    frameBlocksLayout->addWidget(CreateVLine());
-    frameBlocksLayout->addWidget(labelNumBlocks);
-    frameBlocksLayout->addWidget(CreateVLine());
-    frameBlocksLayout->addStretch();
-    frameBlocksLayout->addWidget(connectionsControl);
-    frameBlocksLayout->addWidget(CreateVLine());
-    frameBlocksLayout->addStretch();
-    frameBlocksLayout->addWidget(labelLastBlock);
-    frameBlocksLayout->addStretch();
-    frameBlocksLayout->addWidget(labelBlocksIcon);
-    frameBlocksLayout->addStretch();
+    // Bottom status-bar left cluster: ● sync · Headers · Peers · Mempool
+    statusDot = new QLabel(QStringLiteral("●"));
+    statusDot->setObjectName(QStringLiteral("statusDot"));
+    statusSync = new QLabel(tr("Syncing"));
+    statusSync->setObjectName(QStringLiteral("statusInfoLabel"));
+    statusHeaders = new QLabel(tr("Headers —"));
+    statusHeaders->setObjectName(QStringLiteral("statusInfoLabel"));
+    // Clickable: the redesigned status bar replaced the old status cluster that
+    // held the network-activity toggle, which left that control unreachable.
+    // The peer count is where users expect it, so it carries the toggle now.
+    statusPeers = new GUIUtil::ClickableLabel();
+    statusPeers->setText(tr("Peers 0"));
+    statusPeers->setObjectName(QStringLiteral("statusInfoLabel"));
+    statusPeers->setCursor(Qt::PointingHandCursor);
+    labelMempool->setObjectName(QStringLiteral("statusInfoLabel"));
 
+    QWidget *statusInfo = new QWidget();
+    QHBoxLayout *statusInfoLayout = new QHBoxLayout(statusInfo);
+    statusInfoLayout->setContentsMargins(8, 0, 8, 0);
+    statusInfoLayout->setSpacing(8);
+    statusInfoLayout->addWidget(statusDot);
+    statusInfoLayout->addWidget(statusSync);
+    statusInfoLayout->addWidget(new QLabel(QStringLiteral("·")));
+    statusInfoLayout->addWidget(statusHeaders);
+    statusInfoLayout->addWidget(new QLabel(QStringLiteral("·")));
+    statusInfoLayout->addWidget(statusPeers);
+    statusInfoLayout->addWidget(new QLabel(QStringLiteral("·")));
+    statusInfoLayout->addWidget(labelMempool);
+    if (enableWallet)
+        statusInfoLayout->addWidget(labelWalletEncryptionIcon);
+
+    statusBar()->addWidget(statusInfo);
     statusBar()->addWidget(labelProgressReason);
     statusBar()->addWidget(labelProgressPercentage);
-    statusBar()->addPermanentWidget(frameBlocks);
+    statusBar()->addPermanentWidget(labelLastBlock);
+    statusBar()->addPermanentWidget(labelBlocksIcon);
+    statusBar()->addPermanentWidget(syncProgressBar);
 
     // Install event filter to be able to catch status tip events (QEvent::StatusTip)
     this->installEventFilter(this);
+
+    // Replace the OS title bar with our own theme-coloured, frameless one
+    setupCustomTitleBar(networkStyle);
 
     // Initially wallet actions should be disabled
     setWalletActionsEnabled(false);
@@ -314,6 +347,9 @@ BitcoinGUI::BitcoinGUI(const PlatformStyle *_platformStyle, const NetworkStyle *
     subscribeToCoreSignals();
 
     connect(connectionsControl, SIGNAL(clicked(QPoint)), this, SLOT(toggleNetworkActive()));
+    // The visible peer count in the status bar is the reachable copy of that
+    // control (connectionsControl itself is no longer laid out).
+    connect(statusPeers, SIGNAL(clicked(QPoint)), this, SLOT(toggleNetworkActive()));
 
     pollTimer = new QTimer(this);
     connect(pollTimer, SIGNAL(timeout()), this, SLOT(updateBlockTime()));
@@ -463,11 +499,20 @@ void BitcoinGUI::createActions()
     showPaperCheckDialogAction->setStatusTip(tr("Show paper check window"));
     showPaperCheckDialogAction->setEnabled(false);
 
-    showCreateWalletDialogAction = new QAction(platformStyle->TextColorIcon(":/icons/createwallet"), tr("&Create New Wallet"), this);
-    showCreateWalletDialogAction->setStatusTip(tr("Show create wallet window"));
+    // These two open CreateWalletDialog, which is a BIP39 calculator and
+    // nothing more: it has no reference to vpwallets, CWallet, WalletModel,
+    // AddKeyPubKey or SetHDSeed, so it cannot read or write wallet.dat in
+    // either direction. They used to be labelled "Create New Wallet" and
+    // "Restore My Wallet" and sat in the Your Wallet menu, which read as a
+    // promise the dialog could not keep - a phrase saved from it restores a
+    // different, empty wallet. The member names still say CreateWallet /
+    // RestoreWallet because they name the dialog's two MODES (entropy ->
+    // phrase, and phrase -> keys), not a wallet operation.
+    showCreateWalletDialogAction = new QAction(platformStyle->TextColorIcon(":/icons/createwallet"), tr("&BIP39 Phrase Generator"), this);
+    showCreateWalletDialogAction->setStatusTip(tr("Generate a BIP39 mnemonic phrase (does not create or modify a wallet)"));
 
-    showRestoreWalletDialogAction = new QAction(platformStyle->TextColorIcon(":/icons/restorewallet"), tr("&Restore My Wallet"), this);
-    showRestoreWalletDialogAction->setStatusTip(tr("Show restore wallet window"));
+    showRestoreWalletDialogAction = new QAction(platformStyle->TextColorIcon(":/icons/restorewallet"), tr("&BIP39 Phrase Decoder"), this);
+    showRestoreWalletDialogAction->setStatusTip(tr("Show the keys a BIP39 phrase derives (does not restore or import a wallet)"));
 
     showHashCalcDialogAction = new QAction(platformStyle->TextColorIcon(":/icons/calculator"), tr("&Hash Calculator"), this);
     showHashCalcDialogAction->setStatusTip(tr("Show hash calculator window"));
@@ -615,11 +660,11 @@ void BitcoinGUI::createMenuBar()
     QMenu *menuWallet = appMenuBar->addMenu(tr("&Your Wallet"));
     if(walletFrame)
     {
-        menuWallet->addAction(showCreateWalletDialogAction);
-        menuWallet->addAction(showRestoreWalletDialogAction);
-
-        menuWallet->addSeparator();
-
+        // The BIP39 generator and decoder used to head this menu. They are
+        // calculators that cannot touch wallet.dat, so they live in Crypto
+        // Tools beside the other calculators; sitting here, next to the
+        // entries that DO act on the wallet, is what made them read as wallet
+        // operations.
         menuWallet->addAction(usedSendingAddressesAction);
         menuWallet->addAction(usedReceivingAddressesAction);
         menuWallet->addAction(backupWalletAction);
@@ -628,15 +673,7 @@ void BitcoinGUI::createMenuBar()
 
         menuWallet->addAction(encryptWalletAction);
         menuWallet->addAction(changePassphraseAction);
-// old DC
-        file->addAction(openAction);
-        file->addAction(backupWalletAction);
-        file->addSeparator();
-        file->addAction(usedSendingAddressesAction);
-        file->addAction(usedReceivingAddressesAction);
-        file->addSeparator();
     }
-    file->addAction(quitAction);
 
     QMenu *menuBanking = appMenuBar->addMenu(tr("&Banking"));
     if (walletFrame)
@@ -659,7 +696,7 @@ void BitcoinGUI::createMenuBar()
         menuBanking->addAction(showPaperCheckDialogAction);
     }
 
-    QMenu *menuBitcoin = appMenuBar->addMenu(tr("&Use Bitcoin"));
+    QMenu *menuBitcoin = appMenuBar->addMenu(tr("&Use Skydoge"));
     if(walletFrame)
     {
         menuBitcoin->addAction(showCoinNewsDialogAction);
@@ -677,14 +714,9 @@ void BitcoinGUI::createMenuBar()
 
         menuBitcoin->addAction(showMerchantsDialogAction);
         menuBitcoin->addAction(showSidechainTransferAction);
-// old DC
-        tools->addAction(showMiningDialogAction);
-        tools->addAction(showHashCalcDialogAction);
-        tools->addAction(showBlockExplorerDialogAction);
-        tools->addAction(signVerifyMessageAction);
     }
 
-    QMenu *menuWork = appMenuBar->addMenu(tr("&Work for Bitcoin"));
+    QMenu *menuWork = appMenuBar->addMenu(tr("&Work for Skydoge"));
     if(walletFrame)
     {
         menuWork->addAction(showMiningDialogAction);
@@ -692,12 +724,7 @@ void BitcoinGUI::createMenuBar()
         menuWork->addAction(showNetworkDialogAction);
         menuWork->addAction(showAddRemoveSidechainDialogAction);
         menuWork->addAction(showSCDBDialogAction); // m4 explorer
-// old DC
-        settings->addAction(encryptWalletAction);
-        settings->addAction(changePassphraseAction);
-        settings->addSeparator();
     }
-    settings->addAction(optionsAction);
 
     QMenu *menuTools = appMenuBar->addMenu(tr("&Crypto Tools"));
     if(walletFrame)
@@ -707,6 +734,8 @@ void BitcoinGUI::createMenuBar()
         menuTools->addAction(showMerkleTreeDialogAction);
         menuTools->addAction(showSignaturesDialogAction);
         menuTools->addAction(showBase58DialogAction);
+        menuTools->addAction(showCreateWalletDialogAction);
+        menuTools->addAction(showRestoreWalletDialogAction);
     }
 
     QMenu *menuNode = appMenuBar->addMenu(tr("&This Node"));
@@ -714,6 +743,26 @@ void BitcoinGUI::createMenuBar()
     {
         menuNode->addAction(openRPCConsoleAction);
         menuNode->addAction(optionsAction);
+
+        // Sub menu
+        themeMenu = new QMenu(tr("&Theme"), this);
+        menuNode->addMenu(themeMenu);
+        // With many themes this list is tall; keep its pop-up inside the
+        // wallet window (see eventFilter) instead of spilling below it.
+        themeMenu->installEventFilter(this);
+        themeActionGroup = new QActionGroup(this);
+        QSettings settings;
+        QString theme = settings.value("theme", SkydogeTheme::DefaultId()).toString();
+        for (const SkydogeTheme::Info &info : SkydogeTheme::All())
+        {
+            QAction *action = themeMenu->addAction(info.name);
+            action->setCheckable(true);
+            action->setData(info.id);
+            action->setChecked(info.id == theme);
+            themeActionGroup->addAction(action);
+        }
+        connect(themeActionGroup, SIGNAL(triggered(QAction*)), this, SLOT(themeActionTriggered(QAction*)));
+
         menuNode->addAction(showHelpMessageAction);
 
         menuNode->addSeparator();
@@ -724,33 +773,185 @@ void BitcoinGUI::createMenuBar()
         menuNode->addSeparator();
 
         menuNode->addAction(quitAction);
-// old DC
-        help->addAction(openRPCConsoleAction);
-        help->addAction(showSidechainTableDialogAction);
     }
-    help->addAction(showHelpMessageAction);
-    help->addSeparator();
-    help->addAction(aboutAction);
-    help->addAction(aboutQtAction);
 }
 
 void BitcoinGUI::createToolBars()
 {
     if(walletFrame)
     {
-        QToolBar *toolbar = addToolBar(tr("Tabs toolbar"));
+        QToolBar *toolbar = new QToolBar(tr("Tabs toolbar"));
+        toolbar->setObjectName("navToolbar");
+        addToolBar(Qt::LeftToolBarArea, toolbar);
         toolbar->setContextMenuPolicy(Qt::PreventContextMenu);
         toolbar->setMovable(false);
         toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+
+        // Brand header at the top of the rail: the Skydoge logo + wordmark
+        QWidget *navHeader = new QWidget();
+        navHeader->setObjectName(QStringLiteral("navHeader"));
+        QHBoxLayout *headerLayout = new QHBoxLayout(navHeader);
+        headerLayout->setContentsMargins(18, 16, 18, 12);
+        headerLayout->setSpacing(9);
+        QLabel *navLogo = new QLabel();
+        navLogo->setObjectName(QStringLiteral("navLogo"));
+        navLogo->setPixmap(QIcon(QStringLiteral(":/icons/bitcoin")).pixmap(QSize(26, 26)));
+        headerLayout->addWidget(navLogo);
+        QWidget *brandText = new QWidget();
+        QVBoxLayout *brandTextLayout = new QVBoxLayout(brandText);
+        brandTextLayout->setContentsMargins(0, 0, 0, 0);
+        brandTextLayout->setSpacing(0);
+        QLabel *navBrand = new QLabel(QStringLiteral("Skydoge"));
+        navBrand->setObjectName(QStringLiteral("navBrand"));
+        // Derived from the configure-time version macros rather than written out,
+        // so it cannot go stale: it read "Core 0.44.1" from 0.44.01 through 0.44.04.
+        // _NUM, not the padded macro: this is a numeric argument, and a padded
+        // revision is an octal literal that does not compile at 08 or 09. The
+        // zero padding is restored below by the field width, so the label is
+        // unchanged.
+        QLabel *navVersion = new QLabel(QStringLiteral("Core %1.%2.%3")
+                .arg(CLIENT_VERSION_MAJOR)
+                .arg(CLIENT_VERSION_MINOR)
+                .arg(CLIENT_VERSION_REVISION_NUM, 2, 10, QLatin1Char('0')));
+        navVersion->setObjectName(QStringLiteral("navVersion"));
+        brandTextLayout->addWidget(navBrand);
+        brandTextLayout->addWidget(navVersion);
+        headerLayout->addWidget(brandText);
+        headerLayout->addStretch();
+        toolbar->addWidget(navHeader);
+
         toolbar->addAction(overviewAction);
         toolbar->addAction(sendCoinsAction);
         toolbar->addAction(receiveCoinsAction);
         toolbar->addAction(historyAction);
         toolbar->addSeparator();
         toolbar->addAction(sidechainAction);
+
+        // Visible theme picker (drops down the same list as This Node -> Theme)
         toolbar->addSeparator();
+        navThemeButton = new QToolButton();
+        navThemeButton->setObjectName(QStringLiteral("navThemeButton"));
+        navThemeButton->setText(tr("Theme"));
+        navThemeButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        navThemeButton->setPopupMode(QToolButton::InstantPopup);
+        navThemeButton->setCursor(Qt::PointingHandCursor);
+        if (themeMenu)
+            navThemeButton->setMenu(themeMenu);
+        toolbar->addWidget(navThemeButton);
+
+        // Push the live status footer to the bottom of the rail
+        QWidget *navSpacer = new QWidget();
+        navSpacer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        toolbar->addWidget(navSpacer);
+
+        QWidget *navFooter = new QWidget();
+        navFooter->setObjectName(QStringLiteral("navFooter"));
+        QVBoxLayout *navFooterLayout = new QVBoxLayout(navFooter);
+        navFooterLayout->setContentsMargins(18, 8, 18, 14);
+        navFooterLayout->setSpacing(3);
+        navFooterBlock = new QLabel(tr("Block —"));
+        navFooterBlock->setObjectName(QStringLiteral("navFooterBlock"));
+        navFooterPeers = new QLabel(tr("0 peers"));
+        navFooterPeers->setObjectName(QStringLiteral("navFooterPeers"));
+        navFooterLayout->addWidget(navFooterBlock);
+        navFooterLayout->addWidget(navFooterPeers);
+        toolbar->addWidget(navFooter);
+
         overviewAction->setChecked(true);
     }
+}
+
+void BitcoinGUI::toggleMaximize()
+{
+    if (isMaximized())
+        showNormal();
+    else
+        showMaximized();
+}
+
+void BitcoinGUI::setupCustomTitleBar(const NetworkStyle *networkStyle)
+{
+#ifndef Q_OS_MAC
+    // Drop the window-manager frame so we can draw a title bar that follows the
+    // active theme. (macOS keeps its native title bar / traffic lights.)
+    setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
+
+    titleBar = new QWidget(this);
+    titleBar->setObjectName(QStringLiteral("titleBar"));
+    QHBoxLayout *tbl = new QHBoxLayout(titleBar);
+    tbl->setContentsMargins(14, 7, 14, 7);
+    tbl->setSpacing(8);
+
+    // Three traffic-light dots double as the window controls.
+    QPushButton *btnClose = new QPushButton(titleBar);
+    btnClose->setObjectName(QStringLiteral("winClose"));
+    btnClose->setFixedSize(14, 14);
+    btnClose->setToolTip(tr("Close"));
+    btnClose->setCursor(Qt::PointingHandCursor);
+    connect(btnClose, SIGNAL(clicked()), this, SLOT(close()));
+    QPushButton *btnMin = new QPushButton(titleBar);
+    btnMin->setObjectName(QStringLiteral("winMin"));
+    btnMin->setFixedSize(14, 14);
+    btnMin->setToolTip(tr("Minimize"));
+    btnMin->setCursor(Qt::PointingHandCursor);
+    connect(btnMin, SIGNAL(clicked()), this, SLOT(showMinimized()));
+    QPushButton *btnMax = new QPushButton(titleBar);
+    btnMax->setObjectName(QStringLiteral("winMax"));
+    btnMax->setFixedSize(14, 14);
+    btnMax->setToolTip(tr("Maximize"));
+    btnMax->setCursor(Qt::PointingHandCursor);
+    connect(btnMax, SIGNAL(clicked()), this, SLOT(toggleMaximize()));
+
+    // Fixed traffic-light styling so the controls look right in every theme.
+    // The geometry (min/max size, padding, margin) is pinned here with
+    // ID-specificity selectors so a theme's generic "QPushButton { padding;
+    // min-width; min-height }" rule can never leak in and bloat the dots.
+    btnClose->setStyleSheet(QStringLiteral("QPushButton#winClose{background:#ff5f57;border:none;border-radius:7px;min-width:14px;max-width:14px;min-height:14px;max-height:14px;padding:0px;margin:0px;}QPushButton#winClose:hover{background:#ff3b30;}"));
+    btnMin->setStyleSheet(QStringLiteral("QPushButton#winMin{background:#f0b90b;border:none;border-radius:7px;min-width:14px;max-width:14px;min-height:14px;max-height:14px;padding:0px;margin:0px;}QPushButton#winMin:hover{background:#d9a400;}"));
+    btnMax->setStyleSheet(QStringLiteral("QPushButton#winMax{background:#28c840;border:none;border-radius:7px;min-width:14px;max-width:14px;min-height:14px;max-height:14px;padding:0px;margin:0px;}QPushButton#winMax:hover{background:#1fae35;}"));
+
+    // Network badge on the LEFT
+    networkBadge = new QLabel(titleBar);
+    networkBadge->setObjectName(QStringLiteral("networkBadge"));
+    QString net = networkStyle->getTitleAddText();
+    net.remove('[').remove(']');
+    net = net.trimmed();
+    if (net.isEmpty())
+        net = tr("mainnet");
+    networkBadge->setText(QString::fromUtf8("\xE2\x97\x8F ") + net);
+    tbl->addWidget(networkBadge);
+    tbl->addStretch();
+
+    // Centered window title
+    titleBarLabel = new QLabel(titleBar);
+    titleBarLabel->setObjectName(QStringLiteral("titleBarLabel"));
+    titleBarLabel->setText(tr(PACKAGE_NAME) + QString::fromUtf8(" Core"));
+    tbl->addWidget(titleBarLabel);
+    tbl->addStretch();
+
+    // Window-control dots on the RIGHT (gold, green, red — functions unchanged)
+    tbl->addWidget(btnMin);
+    tbl->addWidget(btnMax);
+    tbl->addWidget(btnClose);
+
+    titleBar->installEventFilter(this);
+
+    // Stack the title bar above the existing menu bar and use it as the window's
+    // menu area (this keeps the File/Banking/... menus working underneath).
+    QWidget *topContainer = new QWidget(this);
+    topContainer->setObjectName(QStringLiteral("topContainer"));
+    QVBoxLayout *tcl = new QVBoxLayout(topContainer);
+    tcl->setContentsMargins(0, 0, 0, 0);
+    tcl->setSpacing(0);
+    tcl->addWidget(titleBar);
+    tcl->addWidget(appMenuBar);
+    setMenuWidget(topContainer);
+
+    // A frameless window has no edges to grab, so give it a corner resize grip.
+    statusBar()->setSizeGripEnabled(true);
+#else
+    Q_UNUSED(networkStyle);
+#endif
 }
 
 void BitcoinGUI::setClientModel(ClientModel *_clientModel)
@@ -770,13 +971,22 @@ void BitcoinGUI::setClientModel(ClientModel *_clientModel)
         setNumBlocks(_clientModel->getNumBlocks(), _clientModel->getLastBlockDate(), _clientModel->getVerificationProgress(nullptr), false);
         connect(_clientModel, SIGNAL(numBlocksChanged(int,QDateTime,double,bool)), this, SLOT(setNumBlocks(int,QDateTime,double,bool)));
 
+        // Mempool transaction count in the status bar
+        if (labelMempool)
+            labelMempool->setText(tr("Mempool: %L1 tx").arg(static_cast<qlonglong>(_clientModel->getMempoolSize())));
+        connect(_clientModel, &ClientModel::mempoolSizeChanged, this, [this](long count, size_t) {
+            if (labelMempool)
+                labelMempool->setText(tr("Mempool: %L1 tx").arg(static_cast<qlonglong>(count)));
+        });
+
         // Receive and report messages from client model
         connect(_clientModel, SIGNAL(message(QString,QString,unsigned int)), this, SLOT(message(QString,QString,unsigned int)));
 
         // Show progress
         connect(_clientModel, SIGNAL(showProgress(QString,int)), this, SLOT(showProgress(QString,int)));
 
-        modalOverlay->setKnownBestHeight(_clientModel->getHeaderTipHeight(), QDateTime::fromTime_t(clientModel->getHeaderTipTime()));
+        modalOverlay->setProgress(_clientModel->getHeaderTipHeight(),
+                                  _clientModel->getHeaderTipHeight(), 0.0);
 
         rpcConsole->setClientModel(_clientModel);
 #ifdef ENABLE_WALLET
@@ -788,6 +998,9 @@ void BitcoinGUI::setClientModel(ClientModel *_clientModel)
         blockExplorerDialog->setClientModel(_clientModel);
         denialDialog->setClientModel(_clientModel);
 
+        connect(_clientModel, SIGNAL(numBlocksChangedIBD(int,double)), this, SLOT(setNumBlocksIBD(int,double)));
+
+
 #endif // ENABLE_WALLET
         OptionsModel* optionsModel = _clientModel->getOptionsModel();
         if(optionsModel)
@@ -798,8 +1011,11 @@ void BitcoinGUI::setClientModel(ClientModel *_clientModel)
             // initialize the disable state of the tray icon with the current value in the model.
             setTrayIconVisible(optionsModel->getHideTrayIcon());
 
-            // be aware of the theme changing
-            connect(optionsModel, SIGNAL(themeChanged(int)), this, SLOT(updateTheme(int)));
+            // keep the checked action of the theme menu up to date with the model.
+            connect(optionsModel, SIGNAL(themeChanged(QString)), this, SLOT(updateThemeMenu(QString)));
+
+            // initialize the checked action of the theme menu with the current value in the model.
+            updateThemeMenu(optionsModel->getTheme());
         }
     } else {
         // Disable possibility to show main window via action
@@ -1231,6 +1447,9 @@ void BitcoinGUI::updateNetworkState()
     // Don't word-wrap this (fixed-width) tooltip
     tooltip = QString("<nobr>") + tooltip + QString("</nobr>");
     connectionsControl->setToolTip(tooltip);
+    // Same tooltip on the visible, clickable peer count in the status bar.
+    if (statusPeers)
+        statusPeers->setToolTip(tooltip);
 
     if (count == 1) {
         connectionsControl->setText(tr("%n peer", "", count));
@@ -1238,10 +1457,35 @@ void BitcoinGUI::updateNetworkState()
     } else {
         connectionsControl->setText(tr("%n peers", "", count));
     }
+
+    refreshNavFooterPeers();
+}
+
+void BitcoinGUI::refreshNavFooterPeers()
+{
+    if (!clientModel)
+        return;
+    const int peers = clientModel->getNumConnections();
+    const QString peerText = (peers == 1 ? tr("%n peer", "", peers) : tr("%n peers", "", peers));
+    const QString syncText = nodeSynced ? tr("Synced") : tr("Syncing");
+    if (navFooterPeers)
+        navFooterPeers->setText(peerText + QString::fromUtf8("  \xC2\xB7  ") + syncText);
+    if (statusPeers)
+        statusPeers->setText(tr("Peers %L1").arg(peers));
+    if (statusSync)
+        statusSync->setText(syncText);
+    if (statusDot)
+        statusDot->setStyleSheet(nodeSynced ? QStringLiteral("color:#00d68f;") : QStringLiteral("color:#f0b90b;"));
+    if (statusHeaders) {
+        const int h = clientModel->getHeaderTipHeight();
+        statusHeaders->setText(h >= 0 ? tr("Headers %L1").arg(h) : tr("Headers —"));
+    }
 }
 
 void BitcoinGUI::setNumConnections(int count)
 {
+    if (navFooterPeers)
+        navFooterPeers->setText(tr("%n peer(s)", "", count));
     updateNetworkState();
 }
 
@@ -1271,12 +1515,13 @@ QFrame* BitcoinGUI::CreateVLine()
 
 void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, double nVerificationProgress, bool header)
 {
-    if (modalOverlay) {
-        if (header)
-            modalOverlay->setKnownBestHeight(count, blockDate);
-        else
-            modalOverlay->tipUpdate(count, blockDate, nVerificationProgress);
-    }
+
+    // clientModel is checked below, not here: this runs before that guard, so
+    // the header height is only asked for when there is a model to ask.
+    if (modalOverlay)
+        modalOverlay->setProgress(count,
+                                  clientModel ? clientModel->getHeaderTipHeight() : 0,
+                                  nVerificationProgress);
 
     if (!clientModel)
         return;
@@ -1372,6 +1617,16 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, double nVer
         tooltip += tr("Transactions after this will not yet be visible.");
     }
 
+    // Update the left-rail footer (block on line 1, peers/synced on line 2)
+    nodeSynced = (secs < 90 * 60);
+    if (navFooterBlock)
+        navFooterBlock->setText(tr("Block %L1").arg(count));
+    refreshNavFooterPeers();
+
+    // Update the status-bar sync progress line
+    if (syncProgressBar)
+        syncProgressBar->setValue(qBound(0, static_cast<int>(nVerificationProgress * 100.0 + 0.5), 100));
+
     // Don't word-wrap this (fixed-width) tooltip
     tooltip = QString("<nobr>") + tooltip + QString("</nobr>");
 
@@ -1385,6 +1640,46 @@ void BitcoinGUI::setNumBlocks(int count, const QDateTime& blockDate, double nVer
     // Display last block time
     labelLastBlock->setText(tr("Last block: %1 ago").arg(timeBehindText));
 }
+
+void BitcoinGUI::setNumBlocksIBD(int count, double nVerificationProgress)
+{
+    // Display number of blocks & IBD progress. nVerificationProgress is a
+    // fraction in [0,1]; show it as an actual percentage with two decimals so
+    // it updates smoothly during sync (the old code took the last two chars of
+    // the formatted fraction, which only ever showed whole percents and read
+    // "00" at 100%).
+    // Prefer blocks-remaining over the percentage where it is known. Against
+    // the whole chain the percentage is pinned near 100 on a mature node, so a
+    // catch-up of a couple of thousand blocks looks stationary; the remaining
+    // count moves the whole way down.
+    const int nHeaderHeight = clientModel ? clientModel->getHeaderTipHeight() : 0;
+    const int nRemaining = (nHeaderHeight > count) ? nHeaderHeight - count : 0;
+
+    QString label = QString::number(count);
+    if (nRemaining > 0) {
+        label += " blocks ( Syncing: ";
+        label += tr("%n left", "", nRemaining);
+    } else {
+        label += " blocks ( Syncing: ";
+        label += QString::number(nVerificationProgress * 100.0, 'f', 2);
+        label += "%";
+    }
+    label += ")";
+    labelNumBlocks->setText(label);
+
+    // Keep the rail footer + status progress line live during sync
+    nodeSynced = false;
+    if (navFooterBlock)
+        navFooterBlock->setText(tr("Block %L1").arg(count));
+    refreshNavFooterPeers();
+    if (syncProgressBar)
+        syncProgressBar->setValue(qBound(0, static_cast<int>(nVerificationProgress * 100.0 + 0.5), 100));
+
+    modalOverlay->setProgress(count,
+                              clientModel ? clientModel->getHeaderTipHeight() : 0,
+                              nVerificationProgress);
+}
+
 
 void BitcoinGUI::message(const QString &title, const QString &message, unsigned int style, bool *ret)
 {
@@ -1532,6 +1827,73 @@ void BitcoinGUI::dropEvent(QDropEvent *event)
 
 bool BitcoinGUI::eventFilter(QObject *object, QEvent *event)
 {
+    // Drag / double-click handling for the custom (frameless) title bar
+    if (object == titleBar && titleBar) {
+        if (event->type() == QEvent::MouseButtonPress) {
+            QMouseEvent *me = static_cast<QMouseEvent *>(event);
+            if (me->button() == Qt::LeftButton) {
+                titleDragging = true;
+                titleDragOffset = me->globalPos() - frameGeometry().topLeft();
+            }
+        } else if (event->type() == QEvent::MouseMove) {
+            QMouseEvent *me = static_cast<QMouseEvent *>(event);
+            if (titleDragging && (me->buttons() & Qt::LeftButton)) {
+                if (isMaximized()) {
+                    // Dragging a MAXIMIZED window restores it and carries on with
+                    // the drag, which is what every window manager does. Refusing
+                    // the drag instead - as this did - is indistinguishable from
+                    // "this window cannot be moved at all", because a wallet left
+                    // maximized never responds to the title bar again.
+                    //
+                    // Keep the cursor at the same relative position across the
+                    // restore, so the window does not jump out from under it. The
+                    // restored width has to come from normalGeometry() BEFORE
+                    // showNormal(), since frameGeometry() is not updated until the
+                    // window manager has acted on the request.
+                    const QRect maxGeom = frameGeometry();
+                    const QRect restored = normalGeometry().isValid()
+                                               ? normalGeometry()
+                                               : QRect(maxGeom.topLeft(), maxGeom.size() / 2);
+                    const qreal xRatio = maxGeom.width() > 0
+                                             ? qreal(me->globalPos().x() - maxGeom.x()) / maxGeom.width()
+                                             : 0.5;
+                    titleDragOffset = QPoint(qRound(xRatio * restored.width()),
+                                             me->globalPos().y() - maxGeom.y());
+                    showNormal();
+                }
+                move(me->globalPos() - titleDragOffset);
+            }
+        } else if (event->type() == QEvent::MouseButtonRelease) {
+            titleDragging = false;
+        } else if (event->type() == QEvent::MouseButtonDblClick) {
+            toggleMaximize();
+            return true;
+        }
+    }
+
+    // Keep the theme picker's drop-down inside the wallet window. The list is
+    // tall (many themes) and QToolButton's InstantPopup would otherwise open it
+    // straight down from a button in the nav rail, spilling below the window.
+    // On show, nudge it up/left so the whole menu stays within the window.
+    if (object == themeMenu && themeMenu && event->type() == QEvent::Show)
+    {
+        const QRect host = frameGeometry();
+        const QSize sz = themeMenu->size();
+        const QPoint p = themeMenu->pos();
+        int x = p.x();
+        int y = p.y();
+        if (y + sz.height() > host.bottom())
+            y = host.bottom() - sz.height();
+        if (y < host.top())
+            y = host.top();
+        if (x + sz.width() > host.right())
+            x = host.right() - sz.width();
+        if (x < host.left())
+            x = host.left();
+        if (x != p.x() || y != p.y())
+            themeMenu->move(x, y);
+    }
+
     // Catch status tip events
     if (event->type() == QEvent::StatusTip)
     {
@@ -1698,29 +2060,102 @@ void BitcoinGUI::toggleNetworkActive()
     }
 }
 
-void BitcoinGUI::updateTheme(int nTheme)
+void BitcoinGUI::themeActionTriggered(QAction *action)
 {
-    // TODO error messages if we cannot find theme resources for some reason
-    if (nTheme == THEME_DEFAULT) {
-        // Reset style sheet so that Qt will revert to system or default theme
-        qApp->setStyleSheet("");
-    }
-    else
-    if (nTheme == THEME_DARK) {
-        QFile file(":/qdarkstyle/darkstyle");
-        file.open(QFile::ReadOnly | QFile::Text);
-        QTextStream stream(&file);
+    if (!clientModel || !clientModel->getOptionsModel())
+        return;
 
-        qApp->setStyleSheet(stream.readAll());
-    }
+    OptionsModel *optionsModel = clientModel->getOptionsModel();
+    optionsModel->setData(optionsModel->index(OptionsModel::Theme, 0), action->data().toString());
 }
 
-void BitcoinGUI::initTheme()
+// Draw a clean line-icon at the given size, in the
+// given colour. Coordinates follow a 24-unit grid, scaled to the pixmap size.
+static QIcon makeNavIcon(const QString &name, const QColor &color, int size)
 {
-    if (clientModel)
-    {
-        int nTheme = clientModel->getOptionsModel()->getTheme();
-        updateTheme(nTheme);
+    const qreal dpr = 2.0;
+    QPixmap pm(size * dpr, size * dpr);
+    pm.setDevicePixelRatio(dpr);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QPen pen(color);
+    pen.setWidthF(size / 13.5);
+    pen.setCapStyle(Qt::RoundCap);
+    pen.setJoinStyle(Qt::RoundJoin);
+    p.setPen(pen);
+    p.setBrush(Qt::NoBrush);
+    const qreal s = size / 24.0;
+    #define X(v) ((v) * s)
+
+    if (name == "overview") {
+        const qreal r = X(1.6);
+        p.drawRoundedRect(QRectF(X(3), X(3), X(7), X(7)), r, r);
+        p.drawRoundedRect(QRectF(X(14), X(3), X(7), X(7)), r, r);
+        p.drawRoundedRect(QRectF(X(3), X(14), X(7), X(7)), r, r);
+        p.drawRoundedRect(QRectF(X(14), X(14), X(7), X(7)), r, r);
+    } else if (name == "send") {
+        p.drawLine(QPointF(X(12), X(19)), QPointF(X(12), X(5)));
+        p.drawLine(QPointF(X(5), X(12)), QPointF(X(12), X(5)));
+        p.drawLine(QPointF(X(12), X(5)), QPointF(X(19), X(12)));
+    } else if (name == "receive") {
+        p.drawLine(QPointF(X(12), X(5)), QPointF(X(12), X(19)));
+        p.drawLine(QPointF(X(5), X(12)), QPointF(X(12), X(19)));
+        p.drawLine(QPointF(X(12), X(19)), QPointF(X(19), X(12)));
+    } else if (name == "transactions") {
+        p.drawLine(QPointF(X(4), X(6)), QPointF(X(20), X(6)));
+        p.drawLine(QPointF(X(4), X(12)), QPointF(X(20), X(12)));
+        p.drawLine(QPointF(X(4), X(18)), QPointF(X(14), X(18)));
+    } else if (name == "sidechains") {
+        QPolygonF top;
+        top << QPointF(X(12), X(2)) << QPointF(X(21), X(7)) << QPointF(X(12), X(12)) << QPointF(X(3), X(7));
+        p.drawPolygon(top);
+        QPainterPath mid;
+        mid.moveTo(X(3), X(12)); mid.lineTo(X(12), X(17)); mid.lineTo(X(21), X(12));
+        p.drawPath(mid);
+        QPainterPath bot;
+        bot.moveTo(X(3), X(17)); bot.lineTo(X(12), X(22)); bot.lineTo(X(21), X(17));
+        p.drawPath(bot);
+    } else if (name == "theme") {
+        p.drawEllipse(QRectF(X(4), X(4), X(16), X(16)));
+        QPainterPath half;
+        half.moveTo(X(12), X(4));
+        half.arcTo(QRectF(X(4), X(4), X(16), X(16)), 90, -180);
+        half.closeSubpath();
+        p.fillPath(half, color);
+    }
+    #undef X
+    p.end();
+    return QIcon(pm);
+}
+
+void BitcoinGUI::applyNavIconTheme(const QString &themeId)
+{
+    const QColor accent = SkydogeTheme::Accent(themeId);
+    const int sz = 22;
+    if (overviewAction)     overviewAction->setIcon(makeNavIcon("overview", accent, sz));
+    if (sendCoinsAction)    sendCoinsAction->setIcon(makeNavIcon("send", accent, sz));
+    if (receiveCoinsAction) receiveCoinsAction->setIcon(makeNavIcon("receive", accent, sz));
+    if (historyAction)      historyAction->setIcon(makeNavIcon("transactions", accent, sz));
+    if (sidechainAction)    sidechainAction->setIcon(makeNavIcon("sidechains", accent, sz));
+    if (navThemeButton)     navThemeButton->setIcon(makeNavIcon("theme", accent, sz));
+}
+
+void BitcoinGUI::updateThemeMenu(const QString &theme)
+{
+    // Re-tint the navigation icons to the active theme's accent (runs both at
+    // startup, when this is first called with the stored theme, and on every
+    // later theme change).
+    applyNavIconTheme(theme);
+
+    if (!themeActionGroup)
+        return;
+
+    for (QAction *action : themeActionGroup->actions()) {
+        if (action->data().toString() == theme) {
+            action->setChecked(true);
+            break;
+        }
     }
 }
 

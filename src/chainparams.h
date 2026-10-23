@@ -75,6 +75,13 @@ public:
     const CCheckpointData& Checkpoints() const { return checkpointData; }
     const ChainTxData& TxData() const { return chainTxData; }
     void UpdateVersionBitsParameters(Consensus::DeploymentPos d, int64_t nStartTime, int64_t nTimeout);
+    void UpdateSmallBlockHeight(int nHeight);
+    void UpdateTimewarpGuardHeight(int nHeight);
+    void UpdateSidechainParamsHeight(int nHeight);
+    void UpdateWithdrawalWindow(int nVerificationPeriod, int nMinWorkScore, int nFailedRetention);
+    void UpdateSCDBCommitmentHeight(int nHeight);
+    void UpdateCTIPAnchorHeight(int nHeight);
+    void UpdateEscrowRulesHeight(int nHeight);
 protected:
     CChainParams() {}
 
@@ -118,5 +125,41 @@ void SelectParams(const std::string& chain);
  * Allows modifying the Version Bits regtest parameters.
  */
 void UpdateVersionBitsParameters(Consensus::DeploymentPos d, int64_t nStartTime, int64_t nTimeout);
+
+/**
+ * Allows modifying the small-block soft fork activation height (test networks only).
+ */
+void UpdateSmallBlockHeight(int nHeight);
+
+/**
+ * Allows modifying the timewarp guard activation height (test networks only).
+ */
+void UpdateTimewarpGuardHeight(int nHeight);
+
+/**
+ * Allows modifying the sidechain production-parameters activation height (test networks only).
+ */
+void UpdateSidechainParamsHeight(int nHeight);
+
+/**
+ * Allows modifying the production withdrawal window, min workscore and failed
+ * retention (regtest only; init refuses -withdrawalwindow elsewhere).
+ */
+void UpdateWithdrawalWindow(int nVerificationPeriod, int nMinWorkScore, int nFailedRetention);
+
+/**
+ * Allows modifying the SCDB coinbase-commitment activation height (test networks only).
+ */
+void UpdateSCDBCommitmentHeight(int nHeight);
+
+/**
+ * Allows modifying the treasury-pointer anchor activation height (test networks only).
+ */
+void UpdateCTIPAnchorHeight(int nHeight);
+
+/**
+ * Allows modifying the BIP300 escrow-rules activation height (test networks only).
+ */
+void UpdateEscrowRulesHeight(int nHeight);
 
 #endif // BITCOIN_CHAINPARAMS_H

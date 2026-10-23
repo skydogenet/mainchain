@@ -11,9 +11,11 @@
 #include <chainparams.h>
 #include <validation.h>
 #include <coins.h>
+#include <serialize.h>
 #include <tinyformat.h>
 #include <util.h>
 #include <utilstrencodings.h>
+#include <version.h>
 
 
 CAmount GetDustThreshold(const CTxOut& txout, const CFeeRate& dustRelayFeeIn)
@@ -55,7 +57,7 @@ bool IsDust(const CTxOut& txout, const CFeeRate& dustRelayFeeIn)
     return (txout.nValue < GetDustThreshold(txout, dustRelayFeeIn));
 }
 
-bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool witnessEnabled, const bool skydogeEnabled)
+bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool witnessEnabled, const bool IsSkydogeEnabled, const bool smallBlockEnabled)
 {
     std::vector<std::vector<unsigned char> > vSolutions;
     if (!Solver(scriptPubKey, whichType, vSolutions))
@@ -74,20 +76,21 @@ bool IsStandard(const CScript& scriptPubKey, txnouttype& whichType, const bool w
     else if (whichType == TX_NULL_DATA) {
         if (!fAcceptDatacarrier)
             return false;
-        if (!skydogeEnabled && scriptPubKey.size() > nMaxDatacarrierBytes)
+        if (!IsSkydogeEnabled && scriptPubKey.size() > nMaxDatacarrierBytes)
             return false;
-        if (skydogeEnabled && scriptPubKey.size() > MAX_DRIVECHAIN_DATA_BYTES)
+        if (IsSkydogeEnabled && scriptPubKey.size() >
+                (unsigned int)(smallBlockEnabled ? MAX_DRIVECHAIN_DATA_BYTES_SMALL_BLOCK : MAX_DRIVECHAIN_DATA_BYTES))
             return false;
     }
     else if (!witnessEnabled && (whichType == TX_WITNESS_V0_KEYHASH || whichType == TX_WITNESS_V0_SCRIPTHASH))
         return false;
-    else if (!drivechainEnabled && whichType == TX_DRIVECHAIN)
+    else if (!IsSkydogeEnabled && whichType == TX_DRIVECHAIN)
         return false;
 
     return whichType != TX_NONSTANDARD && whichType != TX_WITNESS_UNKNOWN;
 }
 
-bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnessEnabled, const bool skydogeEnabled)
+bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnessEnabled, const bool IsSkydogeEnabled, const bool smallBlockEnabled)
 {
     if (tx.nVersion > CTransaction::MAX_STANDARD_VERSION || tx.nVersion < 1) {
         reason = "version";
@@ -101,6 +104,20 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnes
     unsigned int sz = GetTransactionWeight(tx);
     if (sz >= MAX_STANDARD_TX_WEIGHT) {
         reason = "tx-size";
+        return false;
+    }
+
+    // Small-block soft fork: at and after SmallBlockHeight a block may hold
+    // only MAX_SMALL_BLOCK_SERIALIZED_SIZE bytes, so a transaction larger than
+    // MAX_STANDARD_TX_SMALL_BLOCK_SIZE can never be mined at any fee. The
+    // weight cap above does not bound it: 400000 weight is 100000 bytes for a
+    // legacy transaction, twice the size of a legal block, so without this
+    // check the wallet builds and the network relays a sweep that sits in
+    // every mempool until it expires. The unit is serialized bytes because the
+    // block rule is in serialized bytes; see MAX_STANDARD_TX_SMALL_BLOCK_SIZE.
+    if (smallBlockEnabled &&
+            ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION) > MAX_STANDARD_TX_SMALL_BLOCK_SIZE) {
+        reason = "tx-size-small-block";
         return false;
     }
 
@@ -126,7 +143,7 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnes
     unsigned int nDataOut = 0;
     txnouttype whichType;
     for (const CTxOut& txout : tx.vout) {
-        if (!::IsStandard(txout.scriptPubKey, whichType, witnessEnabled, skydogeEnabled)) {
+        if (!::IsStandard(txout.scriptPubKey, whichType, witnessEnabled, IsSkydogeEnabled, smallBlockEnabled)) {
             reason = "scriptpubkey";
             return false;
         }
@@ -142,7 +159,7 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason, const bool witnes
         }
     }
 
-    if (!(skydogeEnabled && tx.IsCoinBase()) && nDataOut > 1) {
+    if (!(IsSkydogeEnabled && tx.IsCoinBase()) && nDataOut > 1) {
         reason = "multi-op-return";
         return false;
     }

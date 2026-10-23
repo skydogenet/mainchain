@@ -101,7 +101,7 @@ bool CTransaction::GetBlindHash(uint256& hashRet) const
     return true;
 }
 
-CAmount CTransaction::GetBlindValueOut() const
+bool CTransaction::GetBlindValueOut(CAmount& amountRet) const
 {
     CMutableTransaction mtx(*this);
     if (!mtx.vin.size() || !mtx.vout.size())
@@ -115,7 +115,9 @@ CAmount CTransaction::GetBlindValueOut() const
     // Remove the sidechain change return
     mtx.vout.pop_back();
 
-    return CTransaction(mtx).GetValueOut();
+    amountRet = CTransaction(mtx).GetValueOut();
+
+    return true;
 }
 
 /* For backward compatibility, the hash is initialized to 0. TODO: remove the need for this default constructor entirely. */
@@ -127,9 +129,13 @@ CAmount CTransaction::GetValueOut() const
 {
     CAmount nValueOut = 0;
     for (const auto& tx_out : vout) {
-        nValueOut += tx_out.nValue;
-        if (!MoneyRange(tx_out.nValue) || !MoneyRange(nValueOut))
+        // Check-before-add to avoid signed-overflow UB when summing (here
+        // 2*MAX_MONEY > INT64_MAX). MoneyRange(tx_out.nValue) is checked first
+        // (short-circuit) so MAX_MONEY - tx_out.nValue cannot underflow; the
+        // result is identical to the old add-then-MoneyRange.
+        if (!MoneyRange(tx_out.nValue) || nValueOut > MAX_MONEY - tx_out.nValue)
             throw std::runtime_error(std::string(__func__) + ": value out of range");
+        nValueOut += tx_out.nValue;
     }
     return nValueOut;
 }

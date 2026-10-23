@@ -250,10 +250,6 @@ QT_QRC = qt/skydoge.qrc
 QT_QRC_LOCALE_CPP = qt/qrc_skydoge_locale.cpp
 QT_QRC_LOCALE = qt/skydoge_locale.qrc
 
-PROTOBUF_CC = qt/paymentrequest.pb.cc
-PROTOBUF_H = qt/paymentrequest.pb.h
-PROTOBUF_PROTO = qt/paymentrequest.proto
-
 DRIVECHAIN_QT_H = \
   qt/addressbookpage.h \
   qt/addresstablemodel.h \
@@ -265,6 +261,7 @@ DRIVECHAIN_QT_H = \
   qt/skydogeaddressvalidator.h \
   qt/skydogeamountfield.h \
   qt/skydogegui.h \
+  qt/skydogetheme.h \
   qt/skydogeunits.h \
   qt/callback.h \
   qt/clientmodel.h \
@@ -308,7 +305,6 @@ DRIVECHAIN_QT_H = \
   qt/optionsmodel.h \
   qt/overviewpage.h \
   qt/paperwalletdialog.h \
-  qt/paymentrequestplus.h \
   qt/paymentrequestdialog.h \
   qt/paymentserver.h \
   qt/peertablemodel.h \
@@ -482,13 +478,30 @@ RES_ICONS = \
   qt/res/doc/wallet.pdf
 
 RES_QSS = \
-  qt/res/qdarkstyle/style.qss
+  qt/res/qdarkstyle/style.qss \
+  qt/res/themes/classic.qss \
+  qt/res/themes/light.qss \
+  qt/res/themes/dark.qss \
+  qt/res/themes/midnight.qss \
+  qt/res/themes/neon.qss \
+  qt/res/themes/glass.qss \
+  qt/res/themes/wow.qss \
+  qt/res/themes/matrix.qss \
+  qt/res/themes/nord.qss \
+  qt/res/themes/ocean.qss \
+  qt/res/themes/amethyst.qss \
+  qt/res/themes/dracula.qss \
+  qt/res/themes/solar.qss \
+  qt/res/themes/crimson.qss \
+  qt/res/themes/rose.qss \
+  qt/res/themes/sepia.qss
 
 DRIVECHAIN_QT_BASE_CPP = \
   qt/bantablemodel.cpp \
   qt/skydogeaddressvalidator.cpp \
   qt/skydogeamountfield.cpp \
   qt/skydogegui.cpp \
+  qt/skydogetheme.cpp \
   qt/skydogeunits.cpp \
   qt/clientmodel.cpp \
   qt/csvmodelwriter.cpp \
@@ -547,7 +560,6 @@ DRIVECHAIN_QT_WALLET_CPP = \
   qt/opreturntablemodel.cpp \
   qt/overviewpage.cpp \
   qt/paperwalletdialog.cpp \
-  qt/paymentrequestplus.cpp \
   qt/paymentrequestdialog.cpp \
   qt/paymentserver.cpp \
   qt/receivecoinsdialog.cpp \
@@ -596,16 +608,14 @@ DRIVECHAIN_RC = qt/res/skydoge-qt-res.rc
 DRIVECHAIN_QT_INCLUDES = -DQT_NO_KEYWORDS
 
 qt_libskydogeqt_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(DRIVECHAIN_QT_INCLUDES) \
-  $(QT_INCLUDES) $(QT_DBUS_INCLUDES) $(PROTOBUF_CFLAGS) $(QR_CFLAGS)
+  $(QT_INCLUDES) $(QT_DBUS_INCLUDES) $(QR_CFLAGS)
 qt_libskydogeqt_a_CXXFLAGS = $(AM_CXXFLAGS) $(QT_PIE_FLAGS)
 qt_libskydogeqt_a_OBJCXXFLAGS = $(AM_OBJCXXFLAGS) $(QT_PIE_FLAGS)
 
 qt_libskydogeqt_a_SOURCES = $(DRIVECHAIN_QT_CPP) $(DRIVECHAIN_QT_H) $(QT_FORMS_UI) \
-  $(QT_QRC) $(QT_QRC_LOCALE) $(QT_TS) $(PROTOBUF_PROTO) $(RES_ICONS) $(RES_QSS) $(RES_IMAGES) $(RES_MOVIES)
+  $(QT_QRC) $(QT_QRC_LOCALE) $(QT_TS) $(RES_ICONS) $(RES_QSS) $(RES_IMAGES) $(RES_MOVIES)
 
-nodist_qt_libskydogeqt_a_SOURCES = $(QT_MOC_CPP) $(QT_MOC) $(PROTOBUF_CC) \
->>>>>>> master
-  $(PROTOBUF_H) $(QT_QRC_CPP) $(QT_QRC_LOCALE_CPP)
+nodist_qt_libskydogeqt_a_SOURCES = $(QT_MOC_CPP) $(QT_MOC) $(QT_QRC_CPP) $(QT_QRC_LOCALE_CPP)
 
 # forms/foo.h -> forms/ui_foo.h
 QT_FORMS_H=$(join $(dir $(QT_FORMS_UI)),$(addprefix ui_, $(notdir $(QT_FORMS_UI:.ui=.h))))
@@ -615,14 +625,9 @@ QT_FORMS_H=$(join $(dir $(QT_FORMS_UI)),$(addprefix ui_, $(notdir $(QT_FORMS_UI:
 $(QT_MOC): $(QT_FORMS_H)
 $(qt_libskydogeqt_a_OBJECTS) $(qt_skydoge_qt_OBJECTS) : | $(QT_MOC)
 
-#Generating these with a half-written protobuf header leads to wacky results.
-#This makes sure it's done.
-$(QT_MOC): $(PROTOBUF_H)
-$(QT_MOC_CPP): $(PROTOBUF_H)
-
 # skydoge-qt binary #
 qt_skydoge_qt_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(DRIVECHAIN_QT_INCLUDES) \
-  $(QT_INCLUDES) $(PROTOBUF_CFLAGS) $(QR_CFLAGS)
+  $(QT_INCLUDES) $(QR_CFLAGS)
 qt_skydoge_qt_CXXFLAGS = $(AM_CXXFLAGS) $(QT_PIE_FLAGS)
 
 qt_skydoge_qt_SOURCES = qt/skydoge.cpp
@@ -640,7 +645,7 @@ if ENABLE_ZMQ
 qt_skydoge_qt_LDADD += $(LIBDRIVECHAIN_ZMQ) $(ZMQ_LIBS)
 endif
 qt_skydoge_qt_LDADD += $(LIBDRIVECHAIN_CLI) $(LIBDRIVECHAIN_COMMON) $(LIBDRIVECHAIN_UTIL) $(LIBDRIVECHAIN_CONSENSUS) $(LIBDRIVECHAIN_CRYPTO) $(LIBUNIVALUE) $(LIBLEVELDB) $(LIBLEVELDB_SSE42) $(LIBMEMENV) \
-  $(BOOST_LIBS) $(QT_LIBS) $(QT_DBUS_LIBS) $(QR_LIBS) $(PROTOBUF_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(LIBSECP256K1) \
+  $(BOOST_LIBS) $(QT_LIBS) $(QT_DBUS_LIBS) $(QR_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(LIBSECP256K1) \
   $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS)
 qt_skydoge_qt_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(QT_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 qt_skydoge_qt_LIBTOOLFLAGS = --tag CXX
@@ -654,7 +659,7 @@ $(srcdir)/qt/skydogestrings.cpp: $(libskydoge_server_a_SOURCES) $(libskydoge_wal
 	@test -n $(XGETTEXT) || echo "xgettext is required for updating translations"
 	$(AM_V_GEN) cd $(srcdir); XGETTEXT=$(XGETTEXT) PACKAGE_NAME="$(PACKAGE_NAME)" COPYRIGHT_HOLDERS="$(COPYRIGHT_HOLDERS)" COPYRIGHT_HOLDERS_SUBSTITUTION="$(COPYRIGHT_HOLDERS_SUBSTITUTION)" $(PYTHON) ../share/qt/extract_strings_qt.py $^
 
-translate: $(srcdir)/qt/skydogestrings.cpp $(QT_FORMS_UI) $(QT_FORMS_UI) $(DRIVECHAIN_QT_BASE_CPP) qt/drivechain.cpp $(DRIVECHAIN_QT_WINDOWS_CPP) $(DRIVECHAIN_QT_WALLET_CPP) $(DRIVECHAIN_QT_H) $(DRIVECHAIN_MM)
+translate: $(srcdir)/qt/skydogestrings.cpp $(QT_FORMS_UI) $(QT_FORMS_UI) $(DRIVECHAIN_QT_BASE_CPP) qt/skydoge.cpp $(DRIVECHAIN_QT_WINDOWS_CPP) $(DRIVECHAIN_QT_WALLET_CPP) $(DRIVECHAIN_QT_H) $(DRIVECHAIN_MM)
 	@test -n $(LUPDATE) || echo "lupdate is required for updating translations"
 	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(LUPDATE) $^ -locations relative -no-obsolete -ts $(srcdir)/qt/locale/bitcoin_en.ts
 
@@ -665,9 +670,8 @@ $(QT_QRC_LOCALE_CPP): $(QT_QRC_LOCALE) $(QT_QM)
 	  $(SED) -e '/^\*\*.*Created:/d' -e '/^\*\*.*by:/d' > $@
 	@rm $(@D)/temp_$(<F)
 
-$(QT_QRC_CPP): $(QT_QRC) $(QT_FORMS_H) $(RES_ICONS) $(RES_QSS) $(RES_IMAGES) $(RES_MOVIES) $(PROTOBUF_H)
+$(QT_QRC_CPP): $(QT_QRC) $(QT_FORMS_H) $(RES_ICONS) $(RES_QSS) $(RES_IMAGES) $(RES_MOVIES)
 	@test -f $(RCC)
-
 	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(RCC) -name skydoge $< | \
 	  $(SED) -e '/^\*\*.*Created:/d' -e '/^\*\*.*by:/d' > $@
 
@@ -676,10 +680,9 @@ CLEAN_QT = $(nodist_qt_libskydogeqt_a_SOURCES) $(QT_QM) $(QT_FORMS_H) qt/*.gcda 
 CLEANFILES += $(CLEAN_QT)
 
 skydoge_qt_clean: FORCE
-	rm -f $(CLEAN_QT) $(qt_libskydogeqt_a_OBJECTS) $(qt_skydoge_qt_OBJECTS) qt/skydoge-qt$(EXEEXT) $(LIBDRIVECHAINQT)
+	rm -f $(CLEAN_QT) $(qt_libskydogeqt_a_OBJECTS) $(qt_skydoge_qt_OBJECTS) qt/skydoge-qt$(EXEEXT) $(LIBskydogeQT)
 
 skydoge_qt : qt/skydoge-qt$(EXEEXT)
-
 
 ui_%.h: %.ui
 	@test -f $(UIC)

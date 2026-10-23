@@ -130,6 +130,11 @@ void SidechainWithdrawalDialog::on_pushButtonUpvote_clicked()
 {
     // Set withdrawal vote type
 
+    // Vote state lives in the sidechain database, which block connection
+    // republishes wholesale; without cs_main a vote set here can be reverted
+    // moments later with nothing reported to the user.
+    LOCK(cs_main);
+
     QModelIndexList selected = ui->tableViewWithdrawalVote->selectionModel()->selectedIndexes();
 
     for (int i = 0; i < selected.size(); i++) {
@@ -149,6 +154,11 @@ void SidechainWithdrawalDialog::on_pushButtonUpvote_clicked()
 void SidechainWithdrawalDialog::on_pushButtonDownvote_clicked()
 {
     // Set withdrawal vote type
+
+    // Vote state lives in the sidechain database, which block connection
+    // republishes wholesale; without cs_main a vote set here can be reverted
+    // moments later with nothing reported to the user.
+    LOCK(cs_main);
 
     QModelIndexList selected = ui->tableViewWithdrawalVote->selectionModel()->selectedIndexes();
 
@@ -170,6 +180,11 @@ void SidechainWithdrawalDialog::on_pushButtonAbstain_clicked()
 {
     // Set withdrawal vote type
 
+    // Vote state lives in the sidechain database, which block connection
+    // republishes wholesale; without cs_main a vote set here can be reverted
+    // moments later with nothing reported to the user.
+    LOCK(cs_main);
+
     QModelIndexList selected = ui->tableViewWithdrawalVote->selectionModel()->selectedIndexes();
 
     for (int i = 0; i < selected.size(); i++) {
@@ -188,6 +203,12 @@ void SidechainWithdrawalDialog::on_pushButtonAbstain_clicked()
 
 void SidechainWithdrawalDialog::Update()
 {
+    // Skip this poll if the node is busy (e.g. validating a block during sync)
+    // rather than blocking the GUI thread waiting on cs_main.
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     // Disable the default vote combo box if custom votes are set, enable it
     // if they are not.
     std::vector<SidechainCustomVote> vCustomVote = scdb.GetCustomVoteCache();

@@ -5,6 +5,49 @@
 #include <sidechain.h>
 
 #include <base58.h>
+#include <bech32.h>
+#include <utilmoneystr.h>
+#include <utilstrencodings.h>
+#include <chainparams.h> // for Params() in the height-gated parameter accessors
+#include <util.h> // for LogPrintf
+
+// Security fix (fund-theft window): height-gated sidechain parameter accessors.
+// Return the production value at/after Consensus::Params::SidechainParamsHeight,
+// the legacy testing value below it, so consensus reproduces historical SCDB
+// state byte-for-byte on reindex while enforcing production rules after the
+// coordinated flag day.
+int GetSidechainWithdrawalVerificationPeriod(int nHeight)
+{
+    if (nHeight >= Params().GetConsensus().SidechainParamsHeight)
+        return Params().GetConsensus().WithdrawalVerificationPeriod;
+    return SIDECHAIN_WITHDRAWAL_VERIFICATION_PERIOD;
+}
+
+int GetSidechainMinWorkScore(int nHeight)
+{
+    if (nHeight >= Params().GetConsensus().SidechainParamsHeight)
+        return Params().GetConsensus().WithdrawalMinWorkScore;
+    return SIDECHAIN_WITHDRAWAL_MIN_WORKSCORE;
+}
+
+int GetSidechainActivationMaxFailures(int nHeight)
+{
+    if (nHeight >= Params().GetConsensus().SidechainParamsHeight)
+        return Params().GetConsensus().SidechainActivationMaxFailures;
+    return SIDECHAIN_ACTIVATION_MAX_FAILURES;
+}
+
+int GetSidechainActivationPeriod(int nHeight)
+{
+    if (nHeight >= Params().GetConsensus().SidechainParamsHeight)
+        return Params().GetConsensus().SidechainActivationPeriod;
+    return SIDECHAIN_ACTIVATION_PERIOD;
+}
+
+int GetSidechainReplacementPeriod(int nHeight)
+{
+    return GetSidechainMinWorkScore(nHeight);
+}
 #include <clientversion.h>
 #include <core_io.h>
 #include <crypto/sha256.h>
@@ -74,6 +117,17 @@ std::string SidechainCTIP::ToString() const
     return ss.str();
 }
 
+std::string SidechainTreasuryEntry::ToString() const
+{
+    std::stringstream ss;
+    ss << "nsidechain=" << (unsigned int)nSidechain << std::endl;
+    ss << "nseq=" << nSeq << std::endl;
+    ss << "outpoint=" << out.ToString() << std::endl;
+    ss << "amount=" << amount << std::endl;
+    ss << "amountprev=" << amountPrev << std::endl;
+    return ss.str();
+}
+
 bool SidechainWithdrawalState::operator==(const SidechainWithdrawalState& a) const
 {
     return (a.nSidechain == nSidechain &&
@@ -111,7 +165,20 @@ bool Sidechain::DeserializeFromProposalScript(const CScript& script)
     CDataStream ds(vch0, vch0+vch.size(), SER_DISK, CLIENT_VERSION);
 
     Sidechain sidechain;
-    sidechain.DeserializeProposal(ds);
+    // Security fix (chain halt): the stream is built over
+    // attacker-controlled coinbase bytes. A truncated or over-long field makes
+    // DeserializeProposal throw std::ios_base::failure (or std::bad_alloc).
+    // Catch it here so the exception can NEVER escape ApplyUpdate ->
+    // scdb.Update -> ConnectBlock (none of which have a try/catch): an escaping
+    // throw leaves the poison block un-marked-invalid, keeps it a most-work
+    // candidate, and every ActivateBestChain re-throws = permanent network
+    // halt. A malformed proposal is instead treated as "not a proposal".
+    try {
+        sidechain.DeserializeProposal(ds);
+    } catch (const std::exception& e) {
+        LogPrintf("%s: Error: malformed sidechain proposal: %s\n", __func__, e.what());
+        return false;
+    }
 
     fActive = false;
     nSidechain = sidechain.nSidechain;
@@ -140,6 +207,11 @@ uint256 Sidechain::GetSerHash() const
 }
 
 uint256 SidechainWithdrawalState::GetSerHash() const
+{
+    return SerializeHash(*this);
+}
+
+uint256 SidechainWithdrawalStateLegacy::GetSerHash() const
 {
     return SerializeHash(*this);
 }
@@ -257,4 +329,64 @@ bool ParseDepositAddress(const std::string& strAddressIn, std::string& strAddres
         return false;
 
     return true;
+}
+
+// DecodeBase58Check is declared inline in base58.h but defined in base58.cpp,
+// so it cannot be linked from here; the same check, written out.
+static bool DecodeBase58CheckE1(const std::string& str, std::vector<unsigned char>& vchRet)
+{
+    if (!DecodeBase58(str, vchRet) || vchRet.size() < 4) {
+        vchRet.clear();
+        return false;
+    }
+    const uint256 hash = Hash(vchRet.begin(), vchRet.end() - 4);
+    if (memcmp(hash.begin(), &vchRet[vchRet.size() - 4], 4) != 0) {
+        vchRet.clear();
+        return false;
+    }
+    vchRet.resize(vchRet.size() - 4);
+    return true;
+}
+
+bool IsPlausibleSidechainDestination(const std::string& strDest)
+{
+    if (strDest.empty())
+        return false;
+
+    // Ethereum-style account: 0x + 20 bytes in hex
+    if (strDest.size() == 42 && strDest[0] == '0' && (strDest[1] == 'x' || strDest[1] == 'X')) {
+        for (size_t i = 2; i < strDest.size(); i++)
+            if (HexDigit(strDest[i]) < 0)
+                return false;
+        return true;
+    }
+
+    // Base58Check, one or two version bytes + a 20-byte hash. Not 33/34
+    // bytes: that is a WIF private key, which would be published on chain.
+    std::vector<unsigned char> vch;
+    if (DecodeBase58CheckE1(strDest, vch))
+        return vch.size() == 21 || vch.size() == 22;
+
+    // bech32, any human-readable part
+    const std::pair<std::string, std::vector<uint8_t>> bech = bech32::Decode(strDest);
+    if (!bech.first.empty() && !bech.second.empty())
+        return true;
+
+    return false;
+}
+
+std::string DepositPolicyError(CAmount nAmount, const std::string& strDest, bool fAllowUnknownFormat)
+{
+    if (nAmount <= SIDECHAIN_DEPOSIT_FEE) {
+        return strprintf("Deposit amount %s is not greater than the sidechain deposit fee %s: "
+                         "the depositor would receive nothing on the sidechain",
+                         FormatMoney(nAmount), FormatMoney(SIDECHAIN_DEPOSIT_FEE));
+    }
+    if (strDest == SIDECHAIN_WITHDRAWAL_RETURN_DEST)
+        return "Invalid sidechain address. Cannot be SIDECHAIN_WITHDRAWAL_RETURN_DEST";
+    if (!fAllowUnknownFormat && !IsPlausibleSidechainDestination(strDest)) {
+        return "The sidechain address inside the deposit address is not a valid address "
+               "(not Base58Check, bech32 or 0x-hex): the sidechain could not pay it";
+    }
+    return "";
 }

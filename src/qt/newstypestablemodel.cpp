@@ -105,23 +105,35 @@ void NewsTypesTableModel::updateModel()
     model.clear();
     endResetModel();
 
-    beginInsertRows(QModelIndex(), 0, vDefaultType.size());
-    for (const NewsTypesTableObject& object : vDefaultType)
-        model.append(QVariant::fromValue(object));
-    endInsertRows();
-
-    beginInsertRows(QModelIndex(), model.size(), model.size() + vType.size());
-    for (const NewsType& type : vType) {
-        NewsTypesTableObject object;
-
-        object.title = QString::fromStdString(type.title);
-        object.nDays = type.nDays;
-        object.bytes = QString::fromStdString(HexStr(type.header.begin(), type.header.end()));
-        object.url = QString::fromStdString(type.GetShareURL());
-
-        model.append(QVariant::fromValue(object));
+    // beginInsertRows() takes an inclusive range, so N rows starting at first
+    // are (first, first + N - 1). Both calls here passed first + N, claiming one
+    // row more than the loop then appended, which is what produced
+    // "QSortFilterProxyModel: invalid inserted rows reported by source model"
+    // on every refresh. A proxy that believes in a row the source does not have
+    // can index past the end of the source model. The empty cases have to skip
+    // the call entirely rather than pass a reversed range.
+    if (!vDefaultType.empty()) {
+        beginInsertRows(QModelIndex(), 0, static_cast<int>(vDefaultType.size()) - 1);
+        for (const NewsTypesTableObject& object : vDefaultType)
+            model.append(QVariant::fromValue(object));
+        endInsertRows();
     }
-    endInsertRows();
+
+    if (!vType.empty()) {
+        const int nFirst = model.size();
+        beginInsertRows(QModelIndex(), nFirst, nFirst + static_cast<int>(vType.size()) - 1);
+        for (const NewsType& type : vType) {
+            NewsTypesTableObject object;
+
+            object.title = QString::fromStdString(type.title);
+            object.nDays = type.nDays;
+            object.bytes = QString::fromStdString(HexStr(type.header.begin(), type.header.end()));
+            object.url = QString::fromStdString(type.GetShareURL());
+
+            model.append(QVariant::fromValue(object));
+        }
+        endInsertRows();
+    }
 }
 
 bool NewsTypesTableModel::GetURLAtRow(int row, QString& url) const

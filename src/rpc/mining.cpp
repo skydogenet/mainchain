@@ -20,14 +20,31 @@
 #include <rpc/blockchain.h>
 #include <rpc/mining.h>
 #include <rpc/server.h>
+#include <sidechain.h>
+#include <sidechaindb.h>
 #include <txmempool.h>
 #include <util.h>
+#include <uint256.h>
 #include <utilstrencodings.h>
 #include <validationinterface.h>
 #include <warnings.h>
 
+#ifdef ENABLE_WALLET
+#include "wallet/wallet.h"
+#endif
+
 #include <memory>
 #include <stdint.h>
+
+#include <algorithm>
+#include <queue>
+#include <utility>
+
+#include <boost/thread.hpp>
+#include <boost/tuple/tuple.hpp>
+
+static const bool fMiningReqiresPeer = false;
+
 
 unsigned int ParseConfirmTarget(const UniValue& value)
 {
@@ -264,6 +281,29 @@ UniValue prioritisetransaction(const JSONRPCRequest& request)
     return true;
 }
 
+static bool ProcessBlockFound(const CBlock* pblock, const CChainParams& chainparams){
+    LogPrintf("%s\n", pblock->ToString());
+    //LogPrintf("generated %s\n", FormatMoney(pblock->vtx[0]->vout[0].nValue));
+
+    // Found a solution
+    {
+        LOCK(cs_main);
+        if (pblock->hashPrevBlock != chainActive.Tip()->GetBlockHash())
+            return error("BitcoinMiner: generated block is stale");
+    }
+
+    // Inform about the new block
+    GetMainSignals().BlockFound(pblock->GetHash());
+
+    // Process this block the same as if we had received it from another node
+    std::shared_ptr<const CBlock> block = std::make_shared<CBlock>(*pblock);
+    CValidationState state;
+    if (!ProcessNewBlock(Params(), block, true, nullptr))
+        return error("BitcoinMiner: ProcessNewBlock, block not accepted");
+
+    return true;
+}
+
 
 // NOTE: Assumes a conclusive result; if result is inconclusive, it must be handled by caller
 static UniValue BIP22ValidationResult(const CValidationState& state)
@@ -295,6 +335,7 @@ std::string gbt_vb_name(const Consensus::DeploymentPos pos) {
 
 UniValue getblocktemplate(const JSONRPCRequest& request)
 {
+
     if (request.fHelp || request.params.size() > 1)
         throw std::runtime_error(
             "getblocktemplate ( TemplateRequest )\n"
@@ -343,7 +384,12 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
             "         \"fee\": n,                    (numeric) difference in value between transaction inputs and outputs (in satoshis); for coinbase transactions, this is a negative Number of the total collected block fees (ie, not including the block subsidy); if key is not present, fee is unknown and clients MUST NOT assume there isn't one\n"
             "         \"sigops\" : n,                (numeric) total SigOps cost, as counted for purposes of block limits; if key is not present, sigop cost is unknown and clients MUST NOT assume it is zero\n"
             "         \"weight\" : n,                (numeric) total transaction weight, as counted for purposes of block limits\n"
-            "         \"required\" : true|false      (boolean) if provided and true, this transaction must be in the final block\n"
+            "         \"chargedsize\" : n,           (numeric) the bytes this transaction counts against committedsizelimit: its\n"
+            "                                      serialized size without criticalData, plus v3txcharge if it is nVersion 3\n"
+            "         \"required\" : true|false      (boolean) if provided and true, this transaction must be in the final block.\n"
+            "                                      From the SCDB commitment height every sidechain deposit, withdrawal payout,\n"
+            "                                      BMM request and the BMM fee transaction is required, in template order: the\n"
+            "                                      coinbase commits to the sidechain state they produce\n"
             "      }\n"
             "      ,...\n"
             "  ],\n"
@@ -355,12 +401,22 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
             "  \"target\" : \"xxxx\",                (string) The hash target\n"
             "  \"mintime\" : xxx,                  (numeric) The minimum timestamp appropriate for next block time in seconds since epoch (Jan 1 1970 GMT)\n"
             "  \"mutable\" : [                     (array of string) list of ways the block template may be changed \n"
-            "     \"value\"                          (string) A way the block template may be changed, e.g. 'time', 'transactions', 'prevblock'\n"
+            "     \"value\"                          (string) A way the block template may be changed, e.g. 'time', 'transactions', 'prevblock'.\n"
+            "                                      From the SCDB commitment height 'transactions' is not offered\n"
             "     ,...\n"
             "  ],\n"
             "  \"noncerange\" : \"00000000ffffffff\",(string) A range of valid nonces\n"
             "  \"sigoplimit\" : n,                 (numeric) limit of sigops in blocks\n"
             "  \"sizelimit\" : n,                  (numeric) limit of block size\n"
+            "  \"committedsizelimit\" : n,         (numeric) from the small-block flag day only: the consensus limit on the block's\n"
+            "                                      COMMITTED size, the measure the rule is enforced on. A block is valid only if\n"
+            "                                      80 (header) + compactsize(number of transactions) + the coinbase's serialized\n"
+            "                                      size (+ v3txcharge if the coinbase is nVersion 3) + the sum of \"chargedsize\" of\n"
+            "                                      every other transaction <= committedsizelimit. Summing wire bytes (the length of\n"
+            "                                      \"data\") against sizelimit is NOT enough: an nVersion 3 transaction is charged\n"
+            "                                      up to 21 bytes more than it occupies on the wire\n"
+            "  \"v3txcharge\" : n,                 (numeric) from the small-block flag day only: the fixed bytes added for every\n"
+            "                                      nVersion 3 transaction, already included in its \"chargedsize\"\n"
             "  \"weightlimit\" : n,                (numeric) limit of block weight\n"
             "  \"curtime\" : ttt,                  (numeric) current timestamp in seconds since epoch (Jan 1 1970 GMT)\n"
             "  \"bits\" : \"xxxxxxxx\",              (string) compressed target of next block\n"
@@ -419,6 +475,27 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
                 return "inconclusive-not-best-prevblk";
             CValidationState state;
             TestBlockValidity(state, Params(), block, pindexPrev, false, true);
+            // TestBlockValidity runs ConnectBlock with
+            // fJustCheck, which skips the SCDB commitment VALUE check, so a
+            // pool could not learn here that its block will be rejected. Run
+            // it: the same function the miner commits with.
+            if (state.IsValid() &&
+                    pindexPrev->nHeight + 1 >= Params().GetConsensus().SCDBCommitmentHeight) {
+                uint256 hashCommitted;
+                uint256 hashOut;
+                int nCommit = 0;
+                for (const CTxOut& out : block.vtx[0]->vout) {
+                    if (out.scriptPubKey.IsSCDBHashCommit(hashOut)) {
+                        hashCommitted = hashOut;
+                        nCommit++;
+                    }
+                }
+                if (nCommit != 1)
+                    return "bad-scdb-commitment-missing";
+                uint256 hashExpected;
+                if (!ComputeSCDBCommitment(block, pindexPrev, hashExpected) || hashExpected != hashCommitted)
+                    return "bad-scdb-commitment";
+            }
             return BIP22ValidationResult(state);
         }
 
@@ -443,7 +520,13 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     if(!g_connman)
         throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
 
-    if (g_connman->GetNodeCount(CConnman::CONNECTIONS_ALL) == 0)
+    // MineBlocksOnDemand is regtest, where "not connected" is the normal
+    // state: a single node is the whole network. Without this, a solitary
+    // regtest node cannot obtain a template at all, which costs every
+    // single-node fixture a second node it does not otherwise need - the
+    // reason some tests run one. Upstream carries the same
+    // exemption; it was lost here.
+    if (g_connman->GetNodeCount(CConnman::CONNECTIONS_ALL) == 0 && !Params().MineBlocksOnDemand())
         throw JSONRPCError(RPC_CLIENT_NOT_CONNECTED, "Bitcoin is not connected!");
 
     if (IsInitialBlockDownload())
@@ -501,7 +584,8 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     // If the caller is indicating segwit support, then allow CreateNewBlock()
     // to select witness transactions, after segwit activates (otherwise
     // don't).
-    bool fSupportsSegwit = setClientRules.find(segwit_info.name) != setClientRules.end();
+    bool fSupportsSegwit = true;
+ //   bool fSupportsSegwit = setClientRules.find(segwit_info.name) != setClientRules.end();
 
     // Update block
     static CBlockIndex* pindexPrev;
@@ -510,8 +594,26 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     // Cache whether the last invocation was with segwit support, to avoid returning
     // a segwit-block to a non-segwit caller.
     static bool fLastTemplateSupportsSegwit = true;
+    // A template is also built from sidechain state that is neither the tip
+    // nor the memory pool: the withdrawal bundles waiting for their hash
+    // commitment, the operator's withdrawal votes, the sidechain proposals and
+    // which of them this node acks. A change to it must rebuild the template
+    // too, or a bundle handed over with receivewithdrawalbundle stays out of
+    // the served template until an unrelated transaction arrives or the next
+    // block is found, while generate (which never caches) commits it at once.
+    // Not rate limited like the mempool test: off the block path it changes
+    // only when the local operator or a local sidechain makes an RPC call,
+    // never from the network.
+    //
+    // Compared by the database's change number, not by hashing the state:
+    // this line runs on EVERY call, with cs_main held, and the hash had to
+    // serialize and double-SHA256 every cached bundle to get there. See
+    // SidechainDB::GetTemplateStateSeq. Zero is never a live value.
+    static uint64_t nSidechainStateSeqLast = 0;
+    const uint64_t nSidechainStateSeq = scdb.GetTemplateStateSeq();
     if (pindexPrev != chainActive.Tip() ||
         (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast && GetTime() - nStart > 5) ||
+        nSidechainStateSeq != nSidechainStateSeqLast ||
         fLastTemplateSupportsSegwit != fSupportsSegwit)
     {
         // Clear pindexPrev so future calls make a new block, despite any failures from here on
@@ -519,22 +621,47 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
 
         // Store the pindexBest used before CreateNewBlock, to avoid races
         nTransactionsUpdatedLast = mempool.GetTransactionsUpdated();
+        nSidechainStateSeqLast = nSidechainStateSeq;
         CBlockIndex* pindexPrevNew = chainActive.Tip();
         nStart = GetTime();
         fLastTemplateSupportsSegwit = fSupportsSegwit;
 
+
+
+
+   // bool fBreakForBMM = gArgs.GetBoolArg("-minerbreakforbmm", false);
+   // int nBMMBreakAttempts = 0;
+
+        //if (!coinbaseScript || coinbaseScript->reserveScript.empty())
+         //   throw std::runtime_error("No coinbase script available (mining requires a wallet)");
+
+         //   unsigned int nTransactionsUpdatedLast = mempool.GetTransactionsUpdated();
+         //   CBlockIndex* pindexPrev = chainActive.Tip();
+
+            bool fAddedBMM = false;
+
+
+
         // Create new block
-        CScript scriptDummy = CScript() << OP_TRUE;
+        //
+        // WARNING: this coinbase pays to OP_TRUE, i.e. to nobody in particular,
+        // and it is handed to the caller verbatim as "coinbasetxn" below. A
+        // client that mines the template as given produces a block whose entire
+        // subsidy is anyone-can-spend. Callers MUST replace the coinbase payout
+        // themselves while preserving the drivechain commitment outputs, which
+        // are carried in this same transaction and are not available anywhere
+        // else in the template. See the getblocktemplate note in the release
+        // notes before pointing a pool at this RPC.
+	CScript scriptDummy = CScript() << OP_TRUE;
         pblocktemplate = BlockAssembler(Params()).CreateNewBlock(scriptDummy, fSupportsSegwit);
+	    
         if (!pblocktemplate)
             throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
-
         // Need to update only after we know CreateNewBlock succeeded
         pindexPrev = pindexPrevNew;
     }
     CBlock* pblock = &pblocktemplate->block; // pointer for convenience
     const Consensus::Params& consensusParams = Params().GetConsensus();
-
     // Update nTime
     UpdateTime(pblock, consensusParams, pindexPrev);
     pblock->nNonce = 0;
@@ -547,6 +674,12 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     UniValue transactions(UniValue::VARR);
     std::map<uint256, int64_t> setTxIndex;
     int i = 0;
+    // from SCDBCommitmentHeight the coinbase commits to
+    // the sidechain state this block's deposits and payouts produce, and BMM
+    // requests oblige coinbase commitments; a pool that drops or adds one
+    // builds a block every node rejects.
+    const bool fSCDBCommit = (pindexPrev->nHeight + 1) >= consensusParams.SCDBCommitmentHeight;
+    std::set<uint256> setCriticalTx;   // template transactions carrying criticalData
     for (const auto& it : pblock->vtx) {
         const CTransaction& tx = *it;
         uint256 txHash = tx.GetHash();
@@ -578,6 +711,41 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
         }
         entry.push_back(Pair("sigops", nTxSigOps));
         entry.push_back(Pair("weight", GetTransactionWeight(tx)));
+        // what this transaction counts against the small-block
+        // rule (GetChargedSerializedSize, the measure validation sums). An
+        // nVersion 3 transaction is charged a fixed SMALL_BLOCK_V3_TX_CHARGE_BYTES
+        // for its uncommitted criticalData span, which can be up to 21 bytes more
+        // than that span takes on the wire, so a pool that sums wire bytes
+        // against sizelimit can build a block every upgraded node rejects.
+        // Added, never renamed: existing pool software ignores unknown keys.
+        entry.push_back(Pair("chargedsize", (int64_t)GetChargedSerializedSize(tx)));
+
+        if (fSCDBCommit) {
+            // A deposit (M5) or payout (M6) creates or spends a drivechain
+            // output; a BMM request carries criticalData; the BMM fee
+            // transaction spends a BMM request's output in this template.
+            bool fRequired = !tx.criticalData.IsNull();
+            uint8_t nSlot;
+            for (const CTxOut& out : tx.vout) {
+                if (out.scriptPubKey.IsDrivechain(nSlot))
+                    fRequired = true;
+            }
+            for (const CTxIn& in : tx.vin) {
+                if (fRequired)
+                    break;
+                if (setCriticalTx.count(in.prevout.hash)) {
+                    fRequired = true;
+                } else {
+                    const Coin& coin = pcoinsTip->AccessCoin(in.prevout);
+                    if (!coin.IsSpent() && coin.out.scriptPubKey.IsDrivechain(nSlot))
+                        fRequired = true;
+                }
+            }
+            if (fRequired)
+                entry.push_back(Pair("required", true));
+        }
+        if (!tx.criticalData.IsNull())
+            setCriticalTx.insert(txHash);
 
         transactions.push_back(entry);
     }
@@ -589,7 +757,8 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
 
     UniValue aMutable(UniValue::VARR);
     aMutable.push_back("time");
-    aMutable.push_back("transactions");
+    if (!fSCDBCommit)
+        aMutable.push_back("transactions");
     aMutable.push_back("prevblock");
 
     UniValue result(UniValue::VOBJ);
@@ -654,13 +823,55 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     result.push_back(Pair("transactions", transactions));
     result.push_back(Pair("coinbaseaux", aux));
     result.push_back(Pair("coinbasevalue", (int64_t)pblock->vtx[0]->vout[0].nValue));
+    // BIP22 shape, matching the "transactions" entries above. This used to emit
+    // CTransaction::ToString(), a human-readable debug dump, which no client
+    // could turn back into a transaction. That mattered more here than it would
+    // upstream: the drivechain commitments live in this coinbase and appear
+    // nowhere else in the template, so this field is the only standard way a
+    // pool can obtain them.
+    UniValue coinbasetxn(UniValue::VOBJ);
+    coinbasetxn.push_back(Pair("data", EncodeHexTx(*pblock->vtx[0])));
+    coinbasetxn.push_back(Pair("txid", pblock->vtx[0]->GetHash().GetHex()));
+    coinbasetxn.push_back(Pair("hash", pblock->vtx[0]->GetWitnessHash().GetHex()));
+    result.push_back(Pair("coinbasetxn", coinbasetxn));
     result.push_back(Pair("longpollid", chainActive.Tip()->GetBlockHash().GetHex() + i64tostr(nTransactionsUpdatedLast)));
     result.push_back(Pair("target", hashTarget.GetHex()));
-    result.push_back(Pair("mintime", (int64_t)pindexPrev->GetMedianTimePast()+1));
+    int64_t nMinTime = (int64_t)pindexPrev->GetMedianTimePast()+1;
+    // Timewarp guard: advertise a mintime that keeps a first-of-period block
+    // from dating backward beyond MAX_TIMEWARP relative to its parent, matching
+    // the consensus rule enforced from TimewarpGuardHeight.
+    const int nTmplHeight = pindexPrev->nHeight + 1;
+    if (nTmplHeight >= consensusParams.TimewarpGuardHeight &&
+        nTmplHeight % consensusParams.DifficultyAdjustmentInterval() == 0) {
+        nMinTime = std::max(nMinTime, (int64_t)pindexPrev->GetBlockTime() - MAX_TIMEWARP);
+    }
+    result.push_back(Pair("mintime", nMinTime));
     result.push_back(Pair("mutable", aMutable));
     result.push_back(Pair("noncerange", "00000000ffffffff"));
+
+   //result.push_back(Pair("pblock",  pblock->ToString()));
+
     int64_t nSigOpLimit = MAX_BLOCK_SIGOPS_COST;
     int64_t nSizeLimit = MAX_BLOCK_SERIALIZED_SIZE;
+    int64_t nWeightLimit = MAX_BLOCK_WEIGHT;
+    // Small-block soft fork: the rule is in serialized bytes with witness at
+    // par, so sizelimit is the limit that binds and it is the consensus figure
+    // to the byte. weightlimit is the weight of the heaviest block that rule
+    // allows: one of MAX_SMALL_BLOCK_SERIALIZED_SIZE bytes with no witness
+    // data, WITNESS_SCALE_FACTOR times its size. No valid small block weighs
+    // more, and every template this node builds is inside both figures.
+    //
+    // This used to advertise the BYTE count as the weight limit, to keep a
+    // weight-only miner from building a 200,000-byte witness-heavy block. But
+    // a block that fills sizelimit with ordinary transactions weighs four
+    // times that figure, so the node's own templates were up to 3.5 times
+    // over the weightlimit served beside them, and a miner that honoured it
+    // could fill a quarter of the block. A miner must honour sizelimit either
+    // way - the weight figure alone has never been sufficient here.
+    if (pindexPrev->nHeight + 1 >= consensusParams.SmallBlockHeight) {
+        nSizeLimit = MAX_SMALL_BLOCK_SERIALIZED_SIZE;
+        nWeightLimit = WITNESS_SCALE_FACTOR * MAX_SMALL_BLOCK_SERIALIZED_SIZE;
+    }
     if (fPreSegWit) {
         assert(nSigOpLimit % WITNESS_SCALE_FACTOR == 0);
         nSigOpLimit /= WITNESS_SCALE_FACTOR;
@@ -669,17 +880,33 @@ UniValue getblocktemplate(const JSONRPCRequest& request)
     }
     result.push_back(Pair("sigoplimit", nSigOpLimit));
     result.push_back(Pair("sizelimit", nSizeLimit));
+    if (pindexPrev->nHeight + 1 >= consensusParams.SmallBlockHeight) {
+        // The consensus figure, unscaled, beside the per-transaction
+        // "chargedsize" it is measured in. sizelimit keeps its old meaning and
+        // value so nothing that already reads it changes behaviour.
+        result.push_back(Pair("committedsizelimit", (int64_t)MAX_SMALL_BLOCK_SERIALIZED_SIZE));
+        result.push_back(Pair("v3txcharge", (int64_t)SMALL_BLOCK_V3_TX_CHARGE_BYTES));
+    }
+
     if (!fPreSegWit) {
-        result.push_back(Pair("weightlimit", (int64_t)MAX_BLOCK_WEIGHT));
+        result.push_back(Pair("weightlimit", nWeightLimit));
     }
     result.push_back(Pair("curtime", pblock->GetBlockTime()));
     result.push_back(Pair("bits", strprintf("%08x", pblock->nBits)));
     result.push_back(Pair("height", (int64_t)(pindexPrev->nHeight+1)));
 
     if (!pblocktemplate->vchCoinbaseCommitment.empty() && fSupportsSegwit) {
+
+       // result.push_back(Pair("Original_Coinbase_txn", HexStr(coinbaseScript->reserveScript)));
+    result.push_back(Pair("NbCoinTxn", (int64_t)(pblock->vtx[0]->vout.size())));
+
+    int longueur = pblock->vtx[0]->vout.size();  
+        
+	for (int i = 0; i < longueur; i++) {
+        result.push_back(Pair("Modified_Coinbase_txn" + std::to_string(i), HexStr(pblock->vtx[0]->vout[i].scriptPubKey)));
+}
         result.push_back(Pair("default_witness_commitment", HexStr(pblocktemplate->vchCoinbaseCommitment.begin(), pblocktemplate->vchCoinbaseCommitment.end())));
     }
-
     return result;
 }
 
@@ -699,6 +926,61 @@ protected:
         found = true;
         state = stateIn;
     }
+};
+
+/**
+ * Keeps a CValidationInterface registered for the lifetime of the guard,
+ * unregisters it on every exit path including an exception, and waits for the
+ * background validation queue to drain before the caller's object dies.
+ *
+ * RegisterValidationInterface() connects every signal to the address it is
+ * given - BlockConnected among them - regardless of which ones the subclass
+ * actually overrides. submitblock registers a *stack* object, so any slot still
+ * able to fire after submitblock returns points into a destroyed frame.
+ *
+ * Unregistering alone is not enough. CMainSignals::BlockConnected does not run
+ * its slots inline; it queues them to the SingleThreadedSchedulerClient, which
+ * runs on the scheduler thread. boost::signals2 checks a slot's connected flag,
+ * releases the connection lock, and only then calls through the bound pointer
+ * (slot_call_iterator lock_next_callable() vs dereference()), while
+ * disconnect() merely clears the flag and returns without waiting for an
+ * invocation already past that check. So on every accepted block the unregister
+ * races the dispatch submitblock itself just queued: if the scheduler thread is
+ * preempted inside that window and the returning RPC thread then overwrites the
+ * frame, the slot calls through a clobbered `this` and the daemon dies in the
+ * scheduler thread.
+ *
+ * SyncWithValidationInterfaceQueue() closes that race: callbacks run strictly
+ * serially, so the drain marker is only reached once any invocation that could
+ * already have passed the connected-check has finished (harmlessly, since the
+ * object is still alive until this destructor returns), and anything scheduled
+ * afterwards observes the slot as disconnected.
+ *
+ * Deliberately scoped to this guard rather than folded into
+ * UnregisterValidationInterface(): at shutdown the scheduler threads are joined
+ * before the remaining interfaces are unregistered, so a drain there would wait
+ * forever on a queue nothing is servicing.
+ */
+class ValidationInterfaceRegistration
+{
+public:
+    explicit ValidationInterfaceRegistration(CValidationInterface* pInterfaceIn) : pInterface(pInterfaceIn)
+    {
+        RegisterValidationInterface(pInterface);
+    }
+    ~ValidationInterfaceRegistration()
+    {
+        UnregisterValidationInterface(pInterface);
+        // Must follow the unregister: anything still in flight completes while
+        // pInterface is alive, and anything later sees it disconnected.
+        SyncWithValidationInterfaceQueue();
+    }
+    ValidationInterfaceRegistration() = delete;
+    ValidationInterfaceRegistration(const ValidationInterfaceRegistration&) = delete;
+    ValidationInterfaceRegistration& operator=(const ValidationInterfaceRegistration&) = delete;
+
+private:
+    CValidationInterface* pInterface;
 };
 
 UniValue submitblock(const JSONRPCRequest& request)
@@ -756,10 +1038,14 @@ UniValue submitblock(const JSONRPCRequest& request)
         }
     }
 
+    // sc is declared before the guard so that it outlives the registration:
+    // destructors run in reverse order, so the guard unregisters first.
     submitblock_StateCatcher sc(block.GetHash());
-    RegisterValidationInterface(&sc);
-    bool fAccepted = ProcessNewBlock(Params(), blockptr, true, nullptr);
-    UnregisterValidationInterface(&sc);
+    bool fAccepted;
+    {
+        ValidationInterfaceRegistration registration(&sc);
+        fAccepted = ProcessNewBlock(Params(), blockptr, true, nullptr);
+    }
     if (fBlockPresent) {
         if (fAccepted && !sc.found) {
             return "duplicate-inconclusive";
@@ -771,7 +1057,6 @@ UniValue submitblock(const JSONRPCRequest& request)
     }
     return BIP22ValidationResult(sc.state);
 }
-
 UniValue estimatefee(const JSONRPCRequest& request)
 {
     throw JSONRPCError(RPC_METHOD_DEPRECATED, "estimatefee was removed in v0.17.\n"

@@ -10,12 +10,22 @@ QT_END_NAMESPACE
 
 struct SidechainWithdrawalTableObject
 {
+    // DEFAULT-INITIALISED ON PURPOSE. These are plain members read directly by
+    // data() during paint, and AddDemoData() builds objects field by field - so
+    // a member added here and missed there is an uninitialised read that renders
+    // as garbage in the table rather than failing anywhere a test would see it.
+    // Adding nMinWorkScore did exactly that before these initialisers existed.
     QString sidechain;
     QString hash;
-    uint16_t nAcks;
-    uint32_t nAge;
-    uint32_t nMaxAge;
-    bool fApproved;
+    uint32_t nAcks = 0;   // tracks nWorkScore
+    uint32_t nAge = 0;
+    uint32_t nMaxAge = 0;
+    //! Resolved from the HEIGHT-GATED accessors at refresh, not from the legacy
+    //! constants at paint time. data() runs per cell on every repaint and has no
+    //! height and no cs_main; refreshModel() has both. Storing the resolved
+    //! values is what lets the display follow the consensus parameters.
+    uint32_t nMinWorkScore = 0;
+    bool fApproved = false;
 };
 
 class SidechainWithdrawalTableModel : public QAbstractTableModel

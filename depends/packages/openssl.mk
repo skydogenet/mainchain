@@ -1,8 +1,9 @@
 package=openssl
-$(package)_version=1.0.1k
+$(package)_version=1.0.2u
 $(package)_download_path=https://www.openssl.org/source
 $(package)_file_name=$(package)-$($(package)_version).tar.gz
-$(package)_sha256_hash=8f9faeaebad088e772f4ef5e38252d472be4d878c6b3a2718c10a4fcebe7a41c
+$(package)_sha256_hash=ecd0c6ffb493dd06707d38b14bb4d8c2288bb7033735606569d8f90f89669d16
+$(package)_patches=0001-no-secure_getenv-for-glibc-back-compat.patch
 
 define $(package)_set_vars
 $(package)_config_env=AR="$($(package)_ar)" RANLIB="$($(package)_ranlib)" CC="$($(package)_cc)"
@@ -57,6 +58,7 @@ $(package)_config_opts_i686_mingw32=mingw
 endef
 
 define $(package)_preprocess_cmds
+  patch -p1 < $($(package)_patch_dir)/0001-no-secure_getenv-for-glibc-back-compat.patch && \
   sed -i.old "/define DATE/d" util/mkbuildinf.pl && \
   sed -i.old "s|engines apps test|engines|" Makefile.org
 endef
@@ -65,8 +67,19 @@ define $(package)_config_cmds
   ./Configure $($(package)_config_opts)
 endef
 
+# 1.0.2 stops with "you MUST do the following before building: make depend", and
+# skipping it breaks the build partway through libcrypto: no-rc4 removes rc4.h
+# while the shipped dependency files still name it.
+#
+# depend belongs here rather than chained onto Configure. funcs.mk runs
+# config_cmds as "$(config_env) <cmds>", a POSIX environment prefix, so the
+# variables bind to Configure alone and a second command after && would run
+# without them - including the PATH that puts the depends toolchain first. On
+# macOS the compiler exists only in that prefix, so depend would fail there
+# while passing on hosts that happen to have a compiler in /usr/bin. build_env
+# supplies the same PATH and make passes it to the sub-makes.
 define $(package)_build_cmds
-  $(MAKE) -j1 build_libs libcrypto.pc libssl.pc openssl.pc
+  $(MAKE) -j1 depend build_libs libcrypto.pc libssl.pc openssl.pc
 endef
 
 define $(package)_stage_cmds

@@ -195,6 +195,18 @@ void MultisigLoungeDialog::UpdateMultisigs()
         return;
     }
 
+    // Every m-of-n row below uses all n keys, so one size check covers
+    // them all. A P2SH redeem script over MAX_SCRIPT_ELEMENT_SIZE (520 bytes)
+    // can never be pushed when spending: 16 compressed keys make 547 bytes.
+    if (!vPubKey.empty() &&
+            GetScriptForMultisig(1, vPubKey).size() > MAX_SCRIPT_ELEMENT_SIZE) {
+        QMessageBox::critical(this, tr("Drivechain - error"),
+            tr("Too many keys: the redeem script would exceed 520 bytes and "
+               "coins sent to it could never be spent. Use at most 15.\n"),
+            QMessageBox::Ok);
+        return;
+    }
+
     ui->tableWidgetMultisig->setUpdatesEnabled(false);
     ui->tableWidgetMultisig->setRowCount(0);
 

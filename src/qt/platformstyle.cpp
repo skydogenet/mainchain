@@ -116,6 +116,11 @@ QIcon PlatformStyle::SingleColorIcon(const QIcon& icon) const
     return ColorizeIcon(icon, SingleColor());
 }
 
+QIcon PlatformStyle::TintedIcon(const QString& filename, const QColor& color) const
+{
+    return ColorizeIcon(filename, color);
+}
+
 QIcon PlatformStyle::TextColorIcon(const QString& filename) const
 {
     return ColorizeIcon(filename, TextColor());

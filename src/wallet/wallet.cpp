@@ -526,47 +526,106 @@ bool CWallet::HasWalletSpend(const uint256& txid) const
 bool CWallet::LoadScheduledTransactions()
 {
     LOCK(cs_wallet);
-    fs::path path = GetDataDir() / "drivechain" / "scheduledtx.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
-    if (filein.IsNull()) {
+    fs::path path = GetDataDir() / "skydoge" / "scheduledtx.dat";
+    std::vector<CDataStream> vCandidate;
+    // A file that is there but will not open is not the same as no file at all.
+    // Reporting "nothing to load" would let startup finish with an empty cache
+    // and shutdown write that emptiness over data nothing can rebuild, so say
+    // the load failed and leave the file alone.
+    const CacheRead read = ReadCacheFileCandidates(path, vCandidate);
+    if (read == CacheRead::UNOPENABLE)
+        return error("%s: %s exists but could not be opened", __func__, path.string());
+    if (read == CacheRead::MISSING) {
+        // No file yet is a complete read of nothing, not a failure.
+        fScheduledLoaded = true;
         return true;
     }
 
     std::vector<ScheduledTransaction> vScheduledIn;
-    try {
-        uint64_t nVersion;
-        filein >> nVersion;
-        if (nVersion != SCHEDULED_TX_DUMP_VERSION) {
-            return false;
-        }
+    bool fParsed = false;
+    bool fRecovered = false;
+    for (size_t c = 0; c < vCandidate.size(); c++) {
+        vScheduledIn.clear();
+        CDataStream& filein = vCandidate[c];
+        try {
+            uint64_t nVersion;
+            filein >> nVersion;
+            if (nVersion != SCHEDULED_TX_DUMP_VERSION)
+                continue;
 
-        int count = 0;
-        filein >> count;
-        for (int i = 0; i < count; i++) {
-            ScheduledTransaction tx;
-            filein >> tx;
-            vScheduledIn.push_back(tx);
+            int count = 0;
+            filein >> count;
+            for (int i = 0; i < count; i++) {
+                ScheduledTransaction tx;
+                filein >> tx;
+                vScheduledIn.push_back(tx);
+            }
         }
+        catch (const std::exception& e) {
+            LogPrintf("%s: Exception: %s\n", __func__, e.what());
+            continue;
+        }
+        // A parse that "succeeds" while leaving bytes behind is the
+        // signature of the text-mode corruption: the extra 0x0D bytes shift
+        // everything along, the reads still find enough data, and the loader
+        // returns garbage without ever throwing. Insist the whole stream was
+        // consumed before believing a candidate.
+        if (!filein.empty())
+            continue;
+        fParsed = true;
+        fRecovered = (c > 0);
+        break;
     }
-    catch (const std::exception& e) {
-        LogPrintf("%s: Exception: %s\n", __func__, e.what());
+    if (!fParsed)
         return false;
-    }
+    if (fRecovered)
+        LogPrintf("%s: %s was written in text mode by an older build; recovered it. "
+                  "It is rewritten in binary at the next clean shutdown.\n", __func__, path.string());
 
     vScheduled = vScheduledIn;
+    fScheduledLoaded = true;
 
     return true;
 }
 
-void CWallet::WriteScheduledTransactions()
+bool CWallet::WriteScheduledTransactions(std::string* pstrError)
 {
+    // Self-locking rather than relying on the caller: three callers
+    // (ScheduleTransaction, RemoveScheduledTransaction, UnscheduleTransaction)
+    // already hold cs_wallet, but Flush() calls this holding nothing, so on
+    // that path vScheduled was read while another thread could be mutating it
+    // under cs_wallet - the same torn-read class already locked in GetScheduled
+    // against. cs_wallet is recursive, so the in-lock callers are unaffected;
+    // it never takes cs_main, so it cannot invert the canonical order.
+    LOCK(cs_wallet);
+
+    // Startup may not have read the file - it may be unreadable, or startup may
+    // have stopped before reaching it. Writing then would put an empty list over
+    // schedules that exist in no block and cannot be rebuilt.
+    // Every failure below returns false with a reason. It used
+    // to return nothing, so the GUI reported a schedule as saved when it was
+    // not, and an unclean stop then lost it (or resurrected a removed one).
+    auto fail = [pstrError](const std::string& strReason) {
+        LogPrintf("WriteScheduledTransactions: %s\n", strReason);
+        if (pstrError)
+            *pstrError = strReason;
+        return false;
+    };
+    if (!fScheduledLoaded) {
+        return fail("The scheduled transactions were never read at startup, so the file was left alone and nothing was saved.");
+    }
+
     int count = vScheduled.size();
 
+    // The directory is created by whichever component writes first, and on a new
+    // datadir that may not have happened yet, so do not assume it is there.
+    TryCreateDirectories(GetDataDir() / "skydoge");
+
     // Write
-    fs::path path = GetDataDir() / "drivechain" / "scheduledtx.dat.new";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    fs::path path = GetDataDir() / "skydoge" / "scheduledtx.dat.new";
+    CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
-        return;
+        return fail(strprintf("Could not open %s for writing; the scheduled transactions were not saved.", path.string()));
     }
 
     try {
@@ -578,27 +637,48 @@ void CWallet::WriteScheduledTransactions()
         }
     }
     catch (const std::exception& e) {
-        LogPrintf("%s: Exception: %s\n", __func__, e.what());
+        // Serialisation stopped part way, so the replacement is incomplete.
+        return fail(strprintf("Writing the scheduled transactions failed (%s); they were not saved.", e.what()));
     }
 
-    FileCommit(fileout.Get());
+    if (!FileCommit(fileout.Get())) {
+        // The replacement never reached the disk. Renaming it over the previous
+        // file would trade a good copy for a truncated one, so keep what is
+        // there; the .new file is overwritten on the next attempt.
+        return fail("Failed to write the scheduled transactions to disk; the previous copy was kept.");
+    }
     fileout.fclose();
-    RenameOver(GetDataDir() / "drivechain" / "scheduledtx.dat.new", GetDataDir() /  "drivechain" / "scheduledtx.dat");
+    // The destination directory is the one the file is written in and read back
+    // from, spelled the same way. It used to be spelled with a capital S, which
+    // named a directory that does not exist on a case-sensitive filesystem, so
+    // the rename failed and the scheduled transactions were never saved. The
+    // result was discarded, so nothing said so.
+    if (!RenameOver(GetDataDir() / "skydoge" / "scheduledtx.dat.new",
+                    GetDataDir() / "skydoge" / "scheduledtx.dat")) {
+        return fail("Failed to replace the previous file; the scheduled transactions were not saved.");
+    }
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
+    return true;
 }
 
-bool CWallet::ScheduleTransaction(const uint256& wtxid, const std::string& strTime)
+bool CWallet::ScheduleTransaction(const uint256& wtxid, const std::string& strTime, std::string* pstrError)
 {
     LOCK2(cs_main, cs_wallet);
 
-    if (!mapWallet.count(wtxid))
+    if (!mapWallet.count(wtxid)) {
+        if (pstrError)
+            *pstrError = "The transaction is not in the wallet.";
         return false;
+    }
 
     // Check for duplicate
     for (const ScheduledTransaction& s : vScheduled) {
-        if (s.wtxid == wtxid)
+        if (s.wtxid == wtxid) {
+            if (pstrError)
+                *pstrError = "The transaction is already scheduled.";
             return false;
+        }
     }
 
     ScheduledTransaction schedule;
@@ -607,29 +687,80 @@ bool CWallet::ScheduleTransaction(const uint256& wtxid, const std::string& strTi
 
     vScheduled.push_back(schedule);
 
+    // Persist now, not only at clean shutdown. WriteScheduledTransactions used
+    // to run solely from Flush(), so an unclean stop lost every schedule made
+    // since the last one. Worse in the other direction too:
+    // a schedule the user removed (below) but that was never flushed would come
+    // back on restart and fire. The list is small and this is a wallet write,
+    // not a hot path, so write on every change and let the two states agree.
+    //
+    // If the write fails the schedule is rolled back and the
+    // caller told, so memory and file still agree and nothing claims success.
+    if (!WriteScheduledTransactions(pstrError)) {
+        vScheduled.pop_back();
+        return false;
+    }
+
     return true;
 }
 
-void CWallet::RemoveScheduledTransaction(const ScheduledTransaction& scheduled)
+bool CWallet::RemoveScheduledTransaction(const ScheduledTransaction& scheduled, std::string* pstrError)
 {
     LOCK2(cs_main, cs_wallet);
 
+    bool fRemoved = false;
     for (size_t i = 0; i < vScheduled.size(); i++) {
         if (vScheduled[i].wtxid == scheduled.wtxid) {
             vScheduled[i] = vScheduled.back();
             vScheduled.pop_back();
+            fRemoved = true;
             break;
         }
     }
+
+    // Persist the removal for the same reason a schedule is persisted on add:
+    // a removal lost to an unclean stop resurrects a spend the user cancelled.
+    if (fRemoved)
+        return WriteScheduledTransactions(pstrError);
+    return true;
 }
+
+bool CWallet::UnscheduleTransaction(const uint256& wtxid)
+{
+    AssertLockHeld(cs_wallet);
+
+    bool fRemoved = false;
+    for (size_t i = 0; i < vScheduled.size(); i++) {
+        if (vScheduled[i].wtxid == wtxid) {
+            vScheduled[i] = vScheduled.back();
+            vScheduled.pop_back();
+            fRemoved = true;
+            break;
+        }
+    }
+    if (fRemoved) {
+        const bool fWritten = WriteScheduledTransactions();
+        LogPrintf("%s: dropped scheduled broadcast of abandoned tx %s%s\n",
+                  __func__, wtxid.ToString(), fWritten ? "" : " (NOT saved to disk)");
+        return fWritten;
+    }
+    return true;
+}
+
 
 std::vector<ScheduledTransaction> CWallet::GetScheduled() const
 {
+    // Locked because vScheduled now has a cross-thread writer: since abandon
+    // unschedules, AbandonTransaction (an RPC-worker-thread path) mutates the
+    // vector under cs_wallet while the GUI's denial timer copies it here. cs_wallet
+    // is recursive, so callers that already hold it are unaffected.
+    LOCK(cs_wallet);
     return vScheduled;
 }
 
 bool CWallet::IsScheduled(const uint256& wtxid) const
 {
+    LOCK(cs_wallet);
     for (const ScheduledTransaction& s : vScheduled) {
         if (s.wtxid == wtxid)
             return true;
@@ -637,8 +768,75 @@ bool CWallet::IsScheduled(const uint256& wtxid) const
     return false;
 }
 
+bool ChainSyncedForScheduledDrop(const CChain& chain, const CBlockIndex* pindexBestKnownHeader, bool fInitialBlockDownload)
+{
+    if (!chain.Tip() || !pindexBestKnownHeader || fInitialBlockDownload)
+        return false;
+    return chain.Height() >= pindexBestKnownHeader->nHeight - 1;
+}
+
+bool IsSyncedForScheduledDrop()
+{
+    AssertLockHeld(cs_main);
+    return ChainSyncedForScheduledDrop(chainActive, pindexBestHeader, IsInitialBlockDownload());
+}
+
+bool CWallet::DropScheduledTransaction(const uint256& wtxid, std::string& strError)
+{
+    LOCK2(cs_main, cs_wallet);
+
+    // A schedule is only "missed" if the CHAIN says so. While this node is
+    // still catching up, an unbroadcast transaction with no memory-pool entry
+    // may simply not have been seen yet; abandoning it here frees its inputs
+    // and lets a conflicting spend be built while the original can still land.
+    // Refuse until synced.
+    if (!IsSyncedForScheduledDrop()) {
+        strError = "The node is still syncing; the missed schedule was not dropped.";
+        return false;
+    }
+
+    auto it = mapWallet.find(wtxid);
+    if (it == mapWallet.end() || it->second.GetDepthInMainChain() != 0 ||
+            it->second.InMempool() || it->second.isAbandoned()) {
+        // Nothing reserved wrongly: gone, confirmed, in the memory pool or
+        // already abandoned. Only the schedule goes.
+        UnscheduleTransaction(wtxid);
+        if (IsScheduled(wtxid)) {
+            strError = "The schedule could not be removed.";
+            return false;
+        }
+        return WriteScheduledTransactions(&strError);
+    }
+
+    // The unbroadcast transaction holds its inputs in mapTxSpends, so they
+    // are out of coin selection until it is abandoned. Abandoning releases
+    // them and also unschedules it (AbandonTransaction calls
+    // UnscheduleTransaction), so it can never fire later either.
+    std::string strReason;
+    if (!AbandonTransaction(wtxid, &strReason)) {
+        strError = "Could not release the coins of the missed transaction: " + strReason;
+        return false;
+    }
+    if (IsScheduled(wtxid)) {
+        UnscheduleTransaction(wtxid);
+        if (IsScheduled(wtxid)) {
+            strError = "The coins were released but the schedule could not be removed.";
+            return false;
+        }
+    }
+    // Make sure the removal reached the disk, and say so if it did not.
+    return WriteScheduledTransactions(&strError);
+}
+
 bool CWallet::BroadcastScheduled(const uint256& wtxid)
 {
+
+    // Reads IsScheduled/vScheduled and mutates mapWallet's entry, both guarded
+    // by cs_wallet everywhere else; AcceptToMemoryPool needs cs_main. This was
+    // the one path in the family that took neither, so a broadcast racing a
+    // wallet mutation was reading and writing shared state unlocked.
+    LOCK2(cs_main, cs_wallet);
+
     if (!IsScheduled(wtxid))
         return false;
 
@@ -646,6 +844,21 @@ bool CWallet::BroadcastScheduled(const uint256& wtxid)
         return false;
 
     CWalletTx& wtx = mapWallet[wtxid];
+
+    // Do not broadcast a transaction the user has abandoned - abandoning is how
+    // a pending spend is cancelled, and a scheduled broadcast is a pending
+    // spend. AbandonTransaction unschedules a tx it actively transitions to
+    // abandoned, but a tx already abandoned before it was scheduled (or
+    // abandoned on an older release, its schedule then carried into an upgrade)
+    // never re-enters that branch, so its entry survives; and
+    // AcceptToMemoryPool will happily re-accept an abandoned wtx. Refuse it here
+    // and drop the stale schedule so it stops being retried. This is the guard
+    // that makes "abandon cancels the broadcast" hold regardless of when or how
+    // the tx was abandoned.
+    if (wtx.isAbandoned()) {
+        UnscheduleTransaction(wtxid);
+        return false;
+    }
 
     CValidationState state;
     if (!wtx.AcceptToMemoryPool(1 * CENT, state))
@@ -1277,8 +1490,22 @@ bool CWallet::AbandonTransaction(const uint256& hashTx, std::string* pstrReason)
             wtx.MarkDirty();
             walletdb.WriteTx(wtx);
             NotifyTransactionChanged(this, wtx.GetHash(), CT_UPDATED);
+            // Abandoning is how a user cancels a pending spend, and a scheduled
+            // broadcast is a pending spend. Without this the timer still fires
+            // BroadcastScheduled on the abandoned txid and a spend the user
+            // believes they cancelled goes out anyway. Drop the schedule with
+            // the abandonment, for this tx and for every descendant the loop
+            // walks into.
+            UnscheduleTransaction(now);
             // Iterate over all its outputs, and mark transactions in the wallet that spend them abandoned too
-            TxSpends::const_iterator iter = mapTxSpends.lower_bound(COutPoint(hashTx, 0));
+            // Range over `now`, the tx being processed this iteration, not the
+            // original hashTx. Keyed on hashTx, every pass after the first
+            // sought hashTx's outpoints while the loop condition required
+            // `first.hash == now`, which is false immediately - so only the
+            // first generation of spends was ever visited and grandchildren
+            // were never abandoned (and, since abandon now unschedules, never
+            // unscheduled). Upstream Bitcoin fixed this the same way.
+            TxSpends::const_iterator iter = mapTxSpends.lower_bound(COutPoint(now, 0));
             while (iter != mapTxSpends.end() && iter->first.hash == now) {
                 if (!done.count(iter->second)) {
                     todo.insert(iter->second);
@@ -2887,7 +3114,14 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
     // that transactions that are delayed after signing for whatever reason,
     // e.g. high-latency mix networks and some CoinJoin implementations, have
     // better privacy.
-    if (GetRandInt(10) == 0)
+    //
+    // Never when the caller fixed the lock time or attached critical data. A
+    // BMM request is only valid for the one block whose height is its
+    // nLockTime + 1 (TestPackageTransactions, RemoveExpiredCriticalRequests),
+    // so back-dating it produced a request that was already expired when it
+    // reached the mempool: createbmmcriticaldatatx reported success and the
+    // bid was silently dropped at the next template, one call in ten.
+    if (nLockTimeOverride == 0 && criticalData.IsNull() && GetRandInt(10) == 0)
         txNew.nLockTime = std::max(0, (int)txNew.nLockTime - GetRandInt(100));
 
     assert(txNew.nLockTime <= (unsigned int)chainActive.Height());
@@ -3167,6 +3401,20 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CWalletT
             strFailReason = _("Transaction too large");
             return false;
         }
+
+        // Small-block soft fork: once the next block is bound by
+        // MAX_SMALL_BLOCK_SERIALIZED_SIZE, a transaction over
+        // MAX_STANDARD_TX_SMALL_BLOCK_SIZE cannot be mined at any fee. Fail
+        // here rather than hand back a transaction that broadcasts, pays a
+        // fee and then sits in the mempool until it expires. Callers sweeping
+        // many small inputs should split the spend across several
+        // transactions.
+        if ((chainActive.Height() + 1) >= Params().GetConsensus().SmallBlockHeight &&
+                ::GetSerializeSize(*wtxNew.tx, SER_NETWORK, PROTOCOL_VERSION) > MAX_STANDARD_TX_SMALL_BLOCK_SIZE)
+        {
+            strFailReason = _("Transaction too large for a small block: send a smaller amount, or select fewer inputs");
+            return false;
+        }
     }
 
     if (gArgs.GetBoolArg("-walletrejectlongchains", DEFAULT_WALLET_REJECT_LONG_CHAINS)) {
@@ -3200,11 +3448,6 @@ bool CWallet::CreateSidechainDeposit(CTransactionRef& tx, std::string& strFail, 
 {
     strFail = "Unknown error!";
 
-    if (!scdb.IsSidechainActive(nSidechain)) {
-        strFail = "Invalid Sidechain number!\n";
-        return false;
-    }
-
     if (vpwallets.empty()) {
         strFail = "No active wallet!\n";
         return false;
@@ -3232,9 +3475,28 @@ bool CWallet::CreateSidechainDeposit(CTransactionRef& tx, std::string& strFail, 
     // The deposit transaction
     CMutableTransaction mtx;
 
-    BlockUntilSyncedToCurrentChain();
+    // No BlockUntilSyncedToCurrentChain() here. Callers that need the wallet
+    // caught up to the tip do it before taking any lock; doing it from inside
+    // deadlocks the node whenever a caller already holds the locks, because
+    // the wait queues behind the wallet's own pending block callback, which
+    // needs the very lock the waiting thread is holding - with cs_main held,
+    // so block connection and most of the RPC surface stop with it. The
+    // assertions that would have caught it are compiled out of release
+    // builds. Do not "fix" a caller by hoisting its locks around this.
+    //
+    // The lock and the change key are this wallet's own: these methods select
+    // and sign this wallet's coins, so a multiwallet RPC dispatched to a
+    // non-first wallet must not lock or draw change from vpwallets[0].
+    LOCK2(cs_main, cs_wallet);
 
-    LOCK2(cs_main, vpwallets[0]->cs_wallet);
+    // Read under the lock: the global sidechain database is replaced wholesale
+    // by block connection and disconnection, so a lock-free read here can walk
+    // vectors whose buffers have just been freed. The graphical caller holds
+    // nothing at this point, which is where that was reachable.
+    if (!scdb.IsSidechainActive(nSidechain)) {
+        strFail = "Invalid Sidechain number!\n";
+        return false;
+    }
 
     // Select coins to cover sidechain deposit
     std::vector<COutput> vCoins;
@@ -3248,7 +3510,7 @@ bool CWallet::CreateSidechainDeposit(CTransactionRef& tx, std::string& strFail, 
 
     // Handle change if there is any
     const CAmount nChange = nAmountRet - (nAmount + nFee);
-    CReserveKey reserveKey(vpwallets[0]);
+    CReserveKey reserveKey(this);
     if (nChange > 0) {
         CScript scriptChange;
 
@@ -3282,13 +3544,33 @@ bool CWallet::CreateSidechainDeposit(CTransactionRef& tx, std::string& strFail, 
     // Note: It will be rejected if other nodes have seen a newer CTIP.
     SidechainCTIP ctip;
     CAmount returnAmount = CAmount(0);
-    if (::mempool.GetMemPoolCTIP(nSidechain, ctip)) {
+    bool fHaveCTIP = ::mempool.GetMemPoolCTIP(nSidechain, ctip);
+    if (!fHaveCTIP) {
+        // The mempool copy goes missing whenever this node's deposit cache is
+        // empty or stale, which several ordinary events can cause. Ask the
+        // sidechain database before giving up on it.
+        fHaveCTIP = scdb.GetCTIP(nSidechain, ctip);
+    }
+
+    if (fHaveCTIP) {
         returnAmount = ctip.amount;
         // Amount returning to sidechain
         mtx.vout.back().nValue += returnAmount;
         // Spend the existing CTIP
         mtx.vin.push_back(CTxIn(ctip.out));
+    } else if (!scdb.GetDeposits(nSidechain).empty()) {
+        // The slot has deposits but this node cannot say where the treasury
+        // is. Leaving the input out does not build a smaller deposit - it
+        // builds one that starts a SECOND treasury chain, which consensus
+        // accepts and which no later transaction can merge back, because a
+        // transaction may carry only one sidechain input. Refuse instead.
+        strFail = "This node does not know where the sidechain's treasury is, "
+                  "so it cannot build a deposit that extends it. Reindex, or "
+                  "wait for the deposit cache to catch up, and try again.";
+        return false;
     }
+    // Neither source knows of a treasury and the slot has no deposits: this is
+    // the first deposit to it, which correctly carries no sidechain input.
 
     // Dummy sign the transaction to calculate fee
     std::set<CInputCoin> setCoinsTemp = setCoins;
@@ -3375,9 +3657,11 @@ bool CWallet::CreateOPReturnTransaction(CTransactionRef& tx, std::string& strFai
 
     CMutableTransaction mtx;
 
-    BlockUntilSyncedToCurrentChain();
-
-    LOCK2(cs_main, vpwallets[0]->cs_wallet);
+    // No BlockUntilSyncedToCurrentChain() here, for the reason given in
+    // CreateSidechainDeposit above: called with the locks already held it
+    // deadlocks the whole node. The lock and the change key are this wallet's
+    // own, for the multiwallet reason given there too.
+    LOCK2(cs_main, cs_wallet);
 
     // Select coins to cover fee
     std::vector<COutput> vCoins;
@@ -3391,7 +3675,7 @@ bool CWallet::CreateOPReturnTransaction(CTransactionRef& tx, std::string& strFai
 
     // Handle change if there is any
     const CAmount nChange = nAmountRet - nFee;
-    CReserveKey reserveKey(vpwallets[0]);
+    CReserveKey reserveKey(this);
     if (nChange > 0) {
         CScript scriptChange;
 
@@ -3477,7 +3761,15 @@ bool CWallet::CreateOPReturnTransaction(CTransactionRef& tx, std::string& strFai
     wtxNew.SetTx(MakeTransactionRef(std::move(mtx)));
 
     CValidationState state;
-    if (!CommitTransaction(wtxNew, reserveKey, g_connman.get(), state, true /* fRemoveIfFail */, 1 * COIN /* nAbsurdFee */)) {
+    // CommitTransaction applies whichever of -maxtxfee and this ceiling is
+    // LARGER, so passing the raised ceiling unconditionally would put news
+    // transactions out of reach of -maxtxfee entirely: an operator who sets it
+    // precisely to bound accidental loss would keep that bound on every send
+    // except this one. If they set it, it is their number and it wins. The
+    // raised ceiling applies only where they expressed no preference.
+    const CAmount nFeeCeiling = gArgs.IsArgSet("-maxtxfee") ? maxTxFee : MAX_OP_RETURN_TX_FEE;
+
+    if (!CommitTransaction(wtxNew, reserveKey, g_connman.get(), state, true /* fRemoveIfFail */, nFeeCeiling /* nAbsurdFee */)) {
         strFail = "Failed to commit OP_RETURN transaction! Reject reason: " + FormatStateMessage(state) + "\n";
         return false;
     }
@@ -3499,7 +3791,16 @@ bool CWallet::DenyCoin(CWalletTx& wtx, std::string& strFail, const COutput& coin
         return false;
     }
 
-    LOCK2(cs_main, vpwallets[0]->cs_wallet);
+    // THIS wallet's lock, not vpwallets[0]'s. An earlier fix did exactly this in
+    // CreateSidechainDeposit and CreateOPReturnTransaction and did not reach
+    // here, so the third instance stayed. It is not only a lock-ordering
+    // hazard: below, mapWallet is indexed and LearnRelatedScripts is called on
+    // `this`, so under multiwallet a wallet other than the first was read and
+    // mutated with its own cs_wallet unheld, while GetKeyFromPool and
+    // CommitTransaction acquired it underneath a DIFFERENT wallet's lock.
+    // Today DenialDialog only drives vpwallets[0], which is what has kept this
+    // from biting; that is a property of the caller, not of this function.
+    LOCK2(cs_main, cs_wallet);
 
     CMutableTransaction mtx;
 
@@ -3644,8 +3945,18 @@ bool CWallet::DenyCoin(CWalletTx& wtx, std::string& strFail, const COutput& coin
     wtx.fFromMe = true;
     wtx.BindWallet(this);
 
-    // Lookup input coin's denial status
-    CWalletTx &spentTx = mapWallet[coin.tx->GetHash()];
+    // Lookup input coin's denial status. Look the entry up rather than
+    // indexing mapWallet: operator[] would default-construct an empty
+    // CWalletTx under coin.tx->GetHash() when the spent coin is not one this
+    // wallet owns, and an empty CWalletTx does not hash to that key. That
+    // breaks the invariant that every mapWallet key equals its value's txid,
+    // and the next balance read indexes the empty tx's outputs and crashes.
+    auto miSpent = mapWallet.find(coin.tx->GetHash());
+    if (miSpent == mapWallet.end()) {
+        strFail = "Input coin is not in the wallet!\n";
+        return false;
+    }
+    CWalletTx &spentTx = miSpent->second;
 
     // Set denial status
     wtx.nDenial = spentTx.nDenial + 1;
@@ -3703,10 +4014,18 @@ bool CWallet::CommitTransaction(CWalletTx& wtxNew, CReserveKey& reservekey, CCon
             // otherwise just for transaction history.
             AddToWallet(wtxNew);
 
-            // Notify that old coins are spent
+            // Notify that old coins are spent. Only coins the wallet holds can
+            // be: indexing the map inserts a default-constructed entry for one
+            // it does not, keyed by a hash that is not the entry's own, and
+            // that entry carries no transaction at all. A deposit spends the
+            // sidechain's treasury output, which is never ours, so every peg-in
+            // used to leave one behind for a later balance read to fall over.
             for (const CTxIn& txin : wtxNew.tx->vin)
             {
-                CWalletTx &coin = mapWallet[txin.prevout.hash];
+                std::map<uint256, CWalletTx>::iterator it = mapWallet.find(txin.prevout.hash);
+                if (it == mapWallet.end())
+                    continue;
+                CWalletTx &coin = it->second;
                 coin.BindWallet(this);
                 NotifyTransactionChanged(this, coin.GetHash(), CT_UPDATED);
             }
@@ -3786,8 +4105,13 @@ DBErrors CWallet::LoadWallet(bool& fFirstRunRet)
     if (nLoadWalletRet != DB_LOAD_OK)
         return nLoadWalletRet;
 
-    if (!LoadScheduledTransactions())
-        return DB_LOAD_FAIL;
+    if (!LoadScheduledTransactions()) {
+        // Not a reason to refuse the wallet. The wallet itself loaded; failing
+        // here stopped the node with a message naming wallet.dat, which is the
+        // wrong file and left no way past it. The write side is gated on this
+        // load having happened, so the unread file is not overwritten.
+        LogPrintf("%s: Could not read the scheduled transactions; continuing without them.\n", __func__);
+    }
 
     uiInterface.LoadWallet(this);
 
@@ -4179,7 +4503,11 @@ std::set< std::set<CTxDestination> > CWallet::GetAddressGroupings()
                 CTxDestination address;
                 if(!IsMine(txin)) /* If this input isn't mine, ignore it */
                     continue;
-                if(!ExtractDestination(mapWallet[txin.prevout.hash].tx->vout[txin.prevout.n].scriptPubKey, address))
+                std::map<uint256, CWalletTx>::const_iterator mi = mapWallet.find(txin.prevout.hash);
+                if (mi == mapWallet.end() || !mi->second.tx ||
+                        txin.prevout.n >= mi->second.tx->vout.size())
+                    continue;
+                if(!ExtractDestination(mi->second.tx->vout[txin.prevout.n].scriptPubKey, address))
                     continue;
                 grouping.insert(address);
                 any_mine = true;

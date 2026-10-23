@@ -94,7 +94,7 @@ CreateWalletDialog::~CreateWalletDialog()
 void CreateWalletDialog::on_pushButtonHelp_clicked()
 {
     QMessageBox messageBox;
-    messageBox.setWindowTitle("Paper Wallet Help");
+    messageBox.setWindowTitle("About the BIP39 Calculator");
 
     QString error = "Currently you may use this page to generate BIP 39 mnemonic wordlists.\n";
 

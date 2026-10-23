@@ -9,6 +9,7 @@
 #include <qt/optionsdialog.h>
 #include <qt/forms/ui_optionsdialog.h>
 
+#include <qt/skydogetheme.h>
 #include <qt/skydogeunits.h>
 #include <qt/guiconstants.h>
 #include <qt/guiutil.h>
@@ -113,6 +114,11 @@ OptionsDialog::OptionsDialog(QWidget *parent, bool enableWallet) :
     ui->thirdPartyTxUrls->setPlaceholderText("https://example.com/tx/%s");
 #endif
 
+    for (const SkydogeTheme::Info &info : SkydogeTheme::All())
+    {
+        ui->theme->addItem(info.name, QVariant(info.id));
+    }
+
     ui->unit->setModel(new BitcoinUnits(this));
 
     /* Widget-to-option mapper */
@@ -154,9 +160,6 @@ void OptionsDialog::setModel(OptionsModel *_model)
         mapper->toFirst();
 
         updateDefaultProxyNets();
-
-        // Set the current index of the theme selection combo box
-        ui->comboBoxTheme->setCurrentIndex(_model->getTheme());
 
         // Set the USD BTC conversion
         ui->spinBoxUSDBTC->setValue(_model->getUSDBTC());
@@ -210,10 +213,10 @@ void OptionsDialog::setMapper()
 
     /* Display */
     mapper->addMapping(ui->lang, OptionsModel::Language);
+    mapper->addMapping(ui->theme, OptionsModel::Theme);
     mapper->addMapping(ui->unit, OptionsModel::DisplayUnit);
     mapper->addMapping(ui->thirdPartyTxUrls, OptionsModel::ThirdPartyTxUrls);
 
-    mapper->addMapping(ui->comboBoxTheme, OptionsModel::Theme, "currentIndex");
     mapper->addMapping(ui->spinBoxUSDBTC, OptionsModel::USDBTC, "value");
 }
 

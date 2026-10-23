@@ -190,8 +190,8 @@ obj/build.h: FORCE
 libskydoge_util_a-clientversion.$(OBJEXT): obj/build.h
 
 # server: shared between skydoged and skydoge-qt
-libskydoge_server_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)
-libskydoge_server_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_server_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(MINIUPNPC_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS) -fPIC
+libskydoge_server_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 libskydoge_server_a_SOURCES = \
   addressbook.cpp \
   addrdb.cpp \
@@ -249,8 +249,8 @@ endif
 
 # wallet: shared between skydoged and skydoge-qt, but only linked
 # when wallet enabled
-libskydoge_wallet_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_wallet_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)  -fPIC
+libskydoge_wallet_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC  
 libskydoge_wallet_a_SOURCES = \
   wallet/crypter.cpp \
   wallet/db.cpp \
@@ -265,8 +265,16 @@ libskydoge_wallet_a_SOURCES = \
   $(DRIVECHAIN_CORE_H)
 
 # crypto primitives library
+# -fPIC belongs in the compiler flags, not the preprocessor flags. It was
+# appended to $(AM_CPPFLAGS) with no separating space, which with hardening
+# enabled produces the single token -D_FORTIFY_SOURCE=2-fPIC; that compiles only
+# because the preprocessor reads the undefined fPIC as 0, so the define happens
+# to evaluate to 2. The C sources here (the sph_* proof-of-work chain) got no
+# -fPIC at all from this, which is why unhardened test builds are needed unless
+# the caller passes it in CFLAGS.
 crypto_libskydoge_crypto_a_CPPFLAGS = $(AM_CPPFLAGS)
-crypto_libskydoge_crypto_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+crypto_libskydoge_crypto_a_CFLAGS = $(PIE_FLAGS) -fPIC
+crypto_libskydoge_crypto_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 crypto_libskydoge_crypto_a_SOURCES = \
   crypto/aes.cpp \
   crypto/aes.h \
@@ -331,8 +339,8 @@ crypto_libskydoge_crypto_a_SOURCES += crypto/sha256_sse4.cpp
 endif
 
 # consensus: shared between all executables that validate any consensus rules.
-libskydoge_consensus_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_consensus_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_consensus_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+libskydoge_consensus_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 libskydoge_consensus_a_SOURCES = \
   amount.h \
   arith_uint256.cpp \
@@ -366,8 +374,8 @@ libskydoge_consensus_a_SOURCES = \
   version.h
 
 # common: shared between skydoged, and skydoge-qt and non-server tools
-libskydoge_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_common_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+libskydoge_common_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 libskydoge_common_a_SOURCES = \
   base58.cpp \
   bech32.cpp \
@@ -391,8 +399,8 @@ libskydoge_common_a_SOURCES = \
 # util: shared between all executables.
 # This library *must* be included to make sure that the glibc
 # backward-compatibility objects and their sanity checks are linked.
-libskydoge_util_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_util_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_util_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+libskydoge_util_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 libskydoge_util_a_SOURCES = \
   support/lockedpool.cpp \
   chainparamsbase.cpp \
@@ -418,8 +426,8 @@ libskydoge_util_a_SOURCES += compat/glibc_compat.cpp
 endif
 
 # cli: shared between skydoge-cli and skydoge-qt
-libskydoge_cli_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-libskydoge_cli_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydoge_cli_a_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+libskydoge_cli_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 libskydoge_cli_a_SOURCES = \
   rpc/client.cpp \
   $(DRIVECHAIN_CORE_H)
@@ -429,9 +437,9 @@ nodist_libskydoge_util_a_SOURCES = $(srcdir)/obj/build.h
 
 # skydoged binary #
 skydoged_SOURCES = skydoged.cpp
-skydoged_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-skydoged_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-skydoged_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+skydoged_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+skydoged_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
+skydoged_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) -fPIC
 
 if TARGET_WINDOWS
 skydoged_SOURCES += skydoged-res.rc
@@ -455,9 +463,9 @@ skydoged_LDADD += $(BOOST_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPN
 
 # skydoge-cli binary #
 skydoge_cli_SOURCES = skydoge-cli.cpp
-skydoge_cli_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(EVENT_CFLAGS)
-skydoge_cli_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-skydoge_cli_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+skydoge_cli_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) $(EVENT_CFLAGS) -fPIC
+skydoge_cli_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
+skydoge_cli_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) -fPIC
 
 if TARGET_WINDOWS
 skydoge_cli_SOURCES += skydoge-cli-res.rc
@@ -474,9 +482,9 @@ skydoge_cli_LDADD += $(BOOST_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(EVENT_LIBS)
 
 # skydoge-tx binary #
 skydoge_tx_SOURCES = skydoge-tx.cpp
-skydoge_tx_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES)
-skydoge_tx_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-skydoge_tx_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
+skydoge_tx_CPPFLAGS = $(AM_CPPFLAGS) $(DRIVECHAIN_INCLUDES) -fPIC
+skydoge_tx_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
+skydoge_tx_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS) -fPIC
 
 if TARGET_WINDOWS
 skydoge_tx_SOURCES += skydoge-tx-res.rc
@@ -502,10 +510,10 @@ if GLIBC_BACK_COMPAT
   libskydogeconsensus_la_SOURCES += compat/glibc_compat.cpp
 endif
 
-libskydogeconsensus_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS)
+libskydogeconsensus_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS) -fPIC
 libskydogeconsensus_la_LIBADD = $(LIBSECP256K1)
-libskydogeconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1/include -DBUILD_DRIVECHAIN_INTERNAL
-libskydogeconsensus_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libskydogeconsensus_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/secp256k1/include -DBUILD_DRIVECHAIN_INTERNAL -fPIC
+libskydogeconsensus_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS) -fPIC
 
 endif
 #
@@ -565,10 +573,6 @@ if HARDEN
 	@echo "Checking binary security..."
 	$(AM_V_at) READELF=$(READELF) OBJDUMP=$(OBJDUMP) $(top_srcdir)/contrib/devtools/security-check.py < $(bin_PROGRAMS)
 endif
-
-%.pb.cc %.pb.h: %.proto
-	@test -f $(PROTOC)
-	$(AM_V_GEN) $(PROTOC) --cpp_out=$(@D) --proto_path=$(<D) $<
 
 if EMBEDDED_LEVELDB
 include Makefile.leveldb.include

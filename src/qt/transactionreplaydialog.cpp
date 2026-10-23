@@ -271,12 +271,16 @@ void TransactionReplayDialog::on_pushButtonCheckReplay_clicked()
         if (walletModel->GetReplayStatus(txid) == REPLAY_SPLIT)
             continue;
 
-        // TODO handle request failure
-        if (client.IsTxReplayed(txid)) {
-            walletModel->UpdateReplayStatus(txid, REPLAY_TRUE);
-        } else {
-            walletModel->UpdateReplayStatus(txid, REPLAY_FALSE);
+        // Only record an answer when one was actually obtained. A lookup that
+        // was switched off or that failed must stay unknown rather than be
+        // shown to the user as "not replayed".
+        bool fDetermined = false;
+        const bool fReplayed = client.IsTxReplayed(txid, fDetermined);
+        if (!fDetermined) {
+            walletModel->UpdateReplayStatus(txid, REPLAY_UNKNOWN);
+            continue;
         }
+        walletModel->UpdateReplayStatus(txid, fReplayed ? REPLAY_TRUE : REPLAY_FALSE);
     }
     progress.setValue(selection.size());
 

@@ -19,6 +19,8 @@
 #include <hash.h>
 #include <init.h>
 #include <merkleblock.h>
+#include <miner.h>
+
 #include <policy/fees.h>
 #include <policy/policy.h>
 #include <policy/rbf.h>
@@ -133,6 +135,31 @@ private:
     /** chainwork for the last block that preciousblock has been applied to. */
     arith_uint256 nLastPreciousChainwork = 0;
 
+    /**
+     * What ConnectBlock found wrong with this node's own SCDB caches, carried
+     * out to ConnectTip so the alert is raised only once the block is really on
+     * the chain.
+     *
+     * ConnectBlock is not the end of acceptance: ConnectTip can still fail its
+     * flush afterwards, and chainActive does not move until SetTip. It is also
+     * called by VerifyDB to re-verify historical blocks, which are not being
+     * accepted at all. Alerting from inside it therefore claimed things that
+     * were not true yet and sometimes never became true. Reset on entry to the
+     * SCDB section of every ConnectBlock, so a VerifyDB pass cannot leave a
+     * finding behind for the next real connect to report.
+     */
+    struct SCDBCacheFinding {
+        bool fCacheUnsound = false;
+        uint8_t nSlotUnsupported = 0;
+        size_t nStated = 0;
+        bool fRecordNewlyWritten = false;
+        SidechainDB::TreasuryLogAudit audit;
+
+        bool IsClean() const { return !fCacheUnsound && audit.IsClean(); }
+        void Reset() { *this = SCDBCacheFinding(); }
+    };
+    SCDBCacheFinding m_scdb_finding;
+
     /** In order to efficiently track invalidity of headers, we keep the set of
       * blocks which we tried to connect and found to be invalid here (ie which
       * were set to BLOCK_FAILED_VALID since the last restart). We can then
@@ -222,13 +249,13 @@ bool fHavePruned = false;
 bool fPruneMode = false;
 bool fIsBareMultisigStd = DEFAULT_PERMIT_BAREMULTISIG;
 bool fRequireStandard = true;
-bool fCMPCTWit = false;
 bool fCheckBlockIndex = false;
 bool fCheckpointsEnabled = DEFAULT_CHECKPOINTS_ENABLED;
 size_t nCoinCacheUsage = 5000 * 300;
 uint64_t nPruneTarget = 0;
 int64_t nMaxTipAge = DEFAULT_MAX_TIP_AGE;
 bool fEnableReplacement = DEFAULT_ENABLE_REPLACEMENT;
+bool fDrivechainPolicyBypass = false;
 
 uint256 hashAssumeValid;
 arith_uint256 nMinimumChainWork;
@@ -242,6 +269,13 @@ CTxMemPool mempool(&feeEstimator);
 AddressBook addressBook;
 
 SidechainDB scdb;
+
+//! Set for the lifetime of a SidechainVerifyGuard, i.e. while VerifyDB walks
+//! blocks down and back up. DisconnectBlock and ConnectBlock consult it before
+//! touching the mempool's sidechain bookkeeping: a verification walk has to
+//! leave the mempool as it found it, and a transaction it evicted could not be
+//! put back.
+static bool fSidechainVerifying = false;
 
 /** Constant stuff for coinbase transactions we create: */
 CScript COINBASE_FLAGS;
@@ -308,6 +342,7 @@ enum FlushStateMode {
 static bool FlushStateToDisk(const CChainParams& chainParams, CValidationState &state, FlushStateMode mode, int nManualPruneHeight=0);
 static void FindFilesToPruneManual(std::set<int>& setFilesToPrune, int nManualPruneHeight);
 static void FindFilesToPrune(std::set<int>& setFilesToPrune, uint64_t nPruneAfterHeight);
+static bool ResyncSCDBInto(SidechainDB& db, const CBlockIndex* pindex);
 bool CheckInputs(const CTransaction& tx, CValidationState &state, const CCoinsViewCache &inputs, bool fScriptChecks, unsigned int flags, bool cacheSigStore, bool cacheFullScriptStore, PrecomputedTransactionData& txdata, std::vector<CScriptCheck> *pvChecks = nullptr);
 static FILE* OpenUndoFile(const CDiskBlockPos &pos, bool fReadOnly = false);
 
@@ -434,6 +469,61 @@ bool CheckSequenceLocks(const CTransaction &tx, int flags, LockPoints* lp, bool 
 }
 
 // Returns the script flags which should be checked for a given block
+//! The block's serialized size AS COMMITTED - i.e. excluding criticalData.
+//!
+//! criticalData is written to the wire on version-3 transactions but is
+//! suppressed from BOTH the txid and the witness hash by
+//! SERIALIZE_TRANSACTION_NO_DRIVECHAIN (see CTransaction::ComputeHash and
+//! GetWitnessHash). Those bytes are therefore covered by NOTHING the block
+//! commits to, and enforcing a size limit that counts them means enforcing a
+//! limit on a quantity a third party can change without invalidating any
+//! commitment: pad a relayed copy, and a node rejects it under the HONEST
+//! block's hash.
+//!
+//! Measuring with the same flag the wtxid uses makes the enforced quantity a
+//! function of committed data only, so the cap cannot be moved by anyone but
+//! the miner who built the block. The suppressed span is small today - vBytes
+//! is bounded to MAX_CRITICAL_DATA_BYTES (21) at parse - but the property is
+//! what matters, and it stops being small if that bound is ever relaxed.
+//!
+//! Committing the field instead was considered and rejected: it would mean
+//! changing the txid and the witness hash, which are computed in
+//! CTransaction's constructor with no chain context, so it cannot be gated on
+//! a height - and every historical merkle root and witness commitment was
+//! built from the current values.
+//!
+//! Excluding the field is necessary but not sufficient: on its own it means
+//! 50,000 committed bytes bound neither the wire nor the disk size of a block
+//! (consensus/consensus.h derives ~1.9x). So every nVersion==3 transaction is
+//! charged SMALL_BLOCK_V3_TX_CHARGE_BYTES on top, whatever its criticalData
+//! holds. nVersion is committed, so the measure is still a function of
+//! committed data only, and the charge is the most the suppressed span can
+//! be, so the enforced number is an upper bound on the wire size again.
+//!
+//! The MINER measures this same charged quantity everywhere it budgets or
+//! checks a small block (miner.cpp, via GetChargedSerializedSize), so it can
+//! never build a block that passes its own check and fails this one. Keep
+//! both sides in step.
+uint64_t GetCommittedSerializedSize(const CBlock& block)
+{
+    uint64_t nSize = ::GetSerializeSize(block, SER_NETWORK,
+                                        PROTOCOL_VERSION | SERIALIZE_TRANSACTION_NO_DRIVECHAIN);
+    for (const CTransactionRef& tx : block.vtx) {
+        if (tx && tx->nVersion == 3)
+            nSize += SMALL_BLOCK_V3_TX_CHARGE_BYTES;
+    }
+    return nSize;
+}
+
+uint64_t GetChargedSerializedSize(const CTransaction& tx)
+{
+    uint64_t nSize = ::GetSerializeSize(tx, SER_NETWORK,
+                                        PROTOCOL_VERSION | SERIALIZE_TRANSACTION_NO_DRIVECHAIN);
+    if (tx.nVersion == 3)
+        nSize += SMALL_BLOCK_V3_TX_CHARGE_BYTES;
+    return nSize;
+}
+
 static unsigned int GetBlockScriptFlags(const CBlockIndex* pindex, const Consensus::Params& chainparams);
 
 static void LimitMempoolSize(CTxMemPool& pool, size_t limit, unsigned long age) {
@@ -622,6 +712,20 @@ bool GetDrivechainAmounts(const CCoinsView& coins, const CTransaction &tx,
     return true;
 }
 
+// Does the transaction spend a sidechain treasury (OP_DRIVECHAIN) coin at
+// all, whatever its value? The relay guard below keys on this, not only on
+// the value spent.
+static bool SpendsDrivechainCoin(const CCoinsView& coins, const CTransaction& tx)
+{
+    for (const CTxIn& in : tx.vin) {
+        Coin coin;
+        uint8_t nSidechainIn = 0;
+        if (coins.GetCoin(in.prevout, coin) && coin.out.scriptPubKey.IsDrivechain(nSidechainIn))
+            return true;
+    }
+    return false;
+}
+
 static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool& pool, CValidationState& state, const CTransactionRef& ptx,
                               bool* pfMissingInputs, int64_t nAcceptTime, std::list<CTransactionRef>* plTxnReplaced,
                               bool bypass_limits, const CAmount& nAbsurdFee, std::vector<COutPoint>& coins_to_uncache)
@@ -648,13 +752,25 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
 
     // Reject critical data / Skydoge BMM transactions before Skydoge are activated (override with -prematureskydoges)
     bool fCriticalData = !tx.criticalData.IsNull();
-    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), chainparams.GetConsensus());
-    if (!gArgs.GetBoolArg("-prematureskydoges", false) && fCriticalData && !skydogesEnabled) {
+    bool skydogeEnabled = IsSkydogeEnabled(chainActive.Tip(), chainparams.GetConsensus());
+    if (!gArgs.GetBoolArg("-prematureskydoges", false) && fCriticalData && !skydogeEnabled) {
         return state.DoS(0, false, REJECT_NONSTANDARD, "no-skydoges-yet", true);
     }
 
+    // Reject critical data that no block can ever commit to. ContextualCheckBlock
+    // demands a coinbase commit for every critical data transaction and finds it
+    // with IsCriticalHashCommit, which refuses to parse a commit whose hash is
+    // null. The miner writes the commit from the transaction's own hash, so a
+    // null one produces a commit that cannot be matched back: the assembled block
+    // is rejected as bad-critical-data-no-commit and template creation fails for
+    // as long as the transaction is held. It relays and pays a fee like any other
+    // transaction, so it must not be admitted in the first place.
+    if (fCriticalData && tx.criticalData.hashCritical.IsNull()) {
+        return state.DoS(0, false, REJECT_INVALID, "critical-data-null-hash", true);
+    }
+
     // Reject BMM requests with invalid prevBytes
-    if (skydogesEnabled && fCriticalData) {
+    if (skydogeEnabled && fCriticalData) {
         uint8_t nSidechain;
         std::string strPrevBlock = "";
         if (tx.criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
@@ -665,14 +781,84 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
         }
     }
 
+    // A BMM bid whose signed outputs commit to an h* must carry that same h*
+    // in its criticalData. criticalData is excluded from the txid, the witness
+    // hash and every signature, so anyone can relay a copy of an honest bid
+    // with their own h* swapped in; the copy has the SAME txid, and whichever
+    // version a miner sees first is the one it commits - the bidder pays for
+    // a proof of the attacker's block. The commitment (BMMBidCommitScript, put
+    // there by createbmmcriticaldatatx) is inside what the bidder signed, so a
+    // swapped copy fails here at every upgraded node and never reaches a
+    // mempool it can be mined from. Requests without a commitment are
+    // accepted exactly as before. fCorruptionPossible=true: the txid must NOT
+    // enter recentRejects, or the honest version arriving later by inv would
+    // be ignored as already-rejected - the very lockout this closes.
+    //
+    // criticalData is outside the txid, so a copy of an honest bid with
+    // different criticalData has the SAME txid. The commitment is inside what
+    // the bidder signed, so a transaction carrying it is a BMM request and
+    // nothing else: it must carry criticalData that parses as one, and whose
+    // h* matches. Corruption-possible for the same reason as the mismatch
+    // reject.
+    {
+        uint256 hashCommit;
+        bool fBidCommit = false;
+        for (const CTxOut& txout : tx.vout) {
+            if (txout.scriptPubKey.IsBMMBidCommit(hashCommit)) {
+                fBidCommit = true;
+                break;
+            }
+        }
+        if (fBidCommit) {
+            uint8_t nCommitSlot;
+            std::string strCommitPrev = "";
+            if (!fCriticalData || !tx.criticalData.IsBMMRequest(nCommitSlot, strCommitPrev))
+                return state.DoS(0, false, REJECT_INVALID, "bmm-bid-commit-mismatch", true);
+            if (hashCommit != tx.criticalData.hashCritical)
+                return state.DoS(0, false, REJECT_INVALID, "bmm-critical-data-mismatch", true);
+        }
+    }
+
     // TODO enable after fixing unit tests to properly activate sidechain for
     // mempool tests.
     // Reject BMM request with invalid nSidechain
 
     // Rather not work on nonstandard transactions (unless -testnet/-regtest)
+    //
+    // The small-block flag is keyed on the height of the NEXT block - the
+    // earliest one this transaction could be mined in - not on the tip, so a
+    // transaction is held to the rule of the first block that could carry it.
+    // That is the same height the miner and getblocktemplate use.
+    const bool smallBlockEnabled =
+        (chainActive.Height() + 1) >= chainparams.GetConsensus().SmallBlockHeight;
     std::string reason;
-    if (fRequireStandard && !IsStandardTx(tx, reason, witnessEnabled, skydogesEnabled))
-        return state.DoS(0, false, REJECT_NONSTANDARD, reason);
+    // the small-block size is measured on the wire,
+    // criticalData included, but criticalData is outside the txid. A peer
+    // can pad an honest v3 transaction's criticalData over the limit; if
+    // that reject were cached in recentRejects by txid, the honest copy
+    // would be locked out until the next block. So a size reject of a
+    // transaction that carries criticalData is corruption-possible (never
+    // cached); every other reject is unchanged.
+    const bool fSizeRejectMalleable = !tx.criticalData.IsNull();
+    if (fRequireStandard && !IsStandardTx(tx, reason, witnessEnabled, skydogeEnabled, smallBlockEnabled))
+        return state.DoS(0, false, REJECT_NONSTANDARD, reason,
+                         reason == "tx-size-small-block" && fSizeRejectMalleable);
+
+    // The small-block size cap is not a matter of standardness: once the next
+    // block is bound by MAX_SMALL_BLOCK_SERIALIZED_SIZE a transaction over
+    // MAX_STANDARD_TX_SMALL_BLOCK_SIZE cannot be mined at any fee, so it is
+    // refused on every node, including those that run with fRequireStandard
+    // off (the testnet and regtest default, -acceptnonstdtxn). Living only in
+    // IsStandardTx it was skipped there: such a node took the transaction
+    // back after the flag-day purge and reloaded it from mempool.dat on every
+    // restart, until the 14-day expiry. Same measure, same limit, same reject
+    // reason and score as the IsStandardTx test above, which already answered
+    // for a node that requires standard transactions - so nothing changes
+    // there. LoadMempool and the reorg resurrection path come through here
+    // too. Mempool policy only: block validity does not consult this.
+    if (smallBlockEnabled &&
+            ::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION) > MAX_STANDARD_TX_SMALL_BLOCK_SIZE)
+        return state.DoS(0, false, REJECT_NONSTANDARD, "tx-size-small-block", fSizeRejectMalleable);
 
     // Only accept nLockTime-using transactions that can be mined in the next
     // block; we don't want our mempool filled up with transactions that can't
@@ -690,8 +876,13 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
     std::map<uint8_t, SidechainCTIP> mapCTIPCopy;
     mapCTIPCopy = mempool.mapLastSidechainDeposit;
     bool fBurnFound = false;
-    uint8_t nSidechain;
-    if (skydogesEnabled)
+    // Initialised because it is copied into the mempool entry below whether or
+    // not this transaction turns out to be a deposit. The entry only reads it
+    // back when the deposit flag beside it is set, so the value is never used
+    // - but it is passed by value on every accept, and reading an
+    // uninitialised one to do that is undefined however harmless the result.
+    uint8_t nSidechain = 0;
+    if (skydogeEnabled)
     {
         // Get values to and from sidechain
         CCoinsViewMemPool poolCoins(pcoinsTip.get(), pool);
@@ -703,6 +894,16 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
         if (!GetDrivechainAmounts(poolCoins, tx, amountSidechainIn, amountIn,
                     amountSidechainOut, amountWithdrawn, strFail)) {
             return state.DoS(0, false, REJECT_INVALID, "get-drivechain-amounts: " + strFail);
+        }
+
+        // A treasury output worth ZERO is refused at relay, and from the fork
+        // height by consensus as well (bad-sidechain-zero-value-escrow).
+        if (!fDrivechainPolicyBypass) {
+            for (const CTxOut& out : tx.vout) {
+                uint8_t nSidechainOut = 0;
+                if (out.scriptPubKey.IsDrivechain(nSidechainOut) && out.nValue == 0)
+                    return state.DoS(0, false, REJECT_NONSTANDARD, "sidechain-zero-value-escrow");
+            }
         }
 
         if (amountSidechainIn > amountSidechainOut) {
@@ -773,16 +974,39 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
             if (!scdb.IsSidechainActive(nSidechain))
                 return state.DoS(0, false, REJECT_INVALID, "sidechain-deposit-invalid-sidechain-number");
 
-            // Check that CTIP input was spent if there is one
+            // Check that CTIP input was spent if there is one.
+            //
+            // The mempool copy is absent whenever this node's deposit cache is
+            // empty or stale, and skipping the check in that case fails open:
+            // a deposit that does not extend the treasury relays, is mined, and
+            // starts a second treasury chain that can never be merged back,
+            // because a transaction may carry only one sidechain input. Fall
+            // back to the sidechain database so the rule fails closed. This is
+            // the relay-side copy; from the fork height consensus enforces
+            // continuity too (CheckDepositContinuity).
+            SidechainCTIP ctipKnown;
+            bool fHaveCTIP = false;
             auto it = mempool.mapLastSidechainDeposit.find(nSidechain);
             if (it != mempool.mapLastSidechainDeposit.end()) {
+                ctipKnown = it->second;
+                fHaveCTIP = true;
+            } else if (scdb.GetCTIP(nSidechain, ctipKnown)) {
+                fHaveCTIP = true;
+            }
+            if (fHaveCTIP) {
                 int nCTIPSpent = 0;
-                const COutPoint out = it->second.out;
+                const COutPoint out = ctipKnown.out;
                 for (const CTxIn& in : tx.vin) {
                     if (in.prevout == out)
                         nCTIPSpent++;
                 }
-                if (nCTIPSpent != 1) {
+                // -drivechainpolicybypass lets this through, and only this
+                // node's own copy of the rule: a deposit that does not extend
+                // the treasury is exactly what a test needs in a block to
+                // find out whether consensus catches it, and no other route
+                // into a block exists in-tree. Regtest only, refused at
+                // startup everywhere else.
+                if (nCTIPSpent != 1 && !fDrivechainPolicyBypass) {
                     LogPrintf("%s: Reject sidechain deposit - invalid CTIP spend!\n", __func__);
                     return state.DoS(0, false, REJECT_INVALID, "sidechain-deposit-invalid-ctip-unspent");
                 }
@@ -795,7 +1019,26 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
             ctip.amount = amountSidechainOut;
             mapCTIPCopy[nSidechain] = ctip;
             fCTIPUpdated = true;
-        } else if (amountSidechainIn > 0) {
+        } else if (!fDrivechainPolicyBypass && (amountSidechainIn > 0 || SpendsDrivechainCoin(poolCoins, tx))) {
+            // A transaction whose drivechain input and output values are EQUAL
+            // is neither a withdrawal nor a deposit, and ConnectBlock's whole
+            // drivechain branch is behind a strict inequality that such a
+            // transaction fails; relay refuses it here, and from the fork
+            // height consensus does too (the destination and continuity
+            // rules). -drivechainpolicybypass lets it through on regtest only,
+            // so a test can see what consensus does with it; the flag is
+            // refused at startup on every other network.
+            //
+            // DoS(100) bans the peer that relayed it.
+            // That was right for the case this rule always covered (drivechain
+            // value in, every release refuses it, so no honest peer relays
+            // one). This release added the ZERO-value treasury-coin spend, which every
+            // earlier release accepts and relays as an ordinary transaction -
+            // banning for it would cut each upgraded node off from every
+            // not-yet-upgraded peer that forwards one (a network split during the
+            // fork window). That case is refused as non-standard, no ban.
+            if (amountSidechainIn == 0)
+                return state.DoS(0, false, REJECT_NONSTANDARD, "sidechain-invalid-ctip-spend");
             return state.DoS(100, false, REJECT_INVALID, "sidechain-invalid-ctip-spend");
         }
     }
@@ -917,18 +1160,6 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
             }
         }
 
-        if (nHeight < DrivechainHeight) {
-            bool fSpendsCriticalData = false;
-            if (skydogesEnabled) {
-                for (const CTxIn& txin : tx.vin) {
-                    const Coin &coin = view.AccessCoin(txin.prevout);
-                    if (coin.IsCriticalData()) {
-                        fSpendsCriticalData = true;
-                        break;
-                    }
-                }
-            }
-        }
 
         CTxMemPoolEntry entry(ptx, nFees, nAcceptTime, chainActive.Height(),
                               fSpendsCoinbase, fBurnFound, nSidechain,
@@ -1377,15 +1608,18 @@ CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams)
     if(halvings > 4){
         halvings = 4;
     }
-    if(nHeight ==2){
+    if(nHeight == 2){
         return 10000000000 * COIN;
     }
+    if(nHeight > 9450000){
+        return 0;
+    }
+
     CAmount nSubsidy = 50000 * COIN;
-    // Subsidy is cut in half every 210,000 blocks which will occur approximately every 4 years.
+    // Subsidy is cut in half every 2.100,000 blocks which will occur approximately every 4 years.
     nSubsidy >>= halvings;
     return nSubsidy;
 }
-
 bool IsInitialBlockDownload()
 {
     // Once this function has returned false, it must remain false.
@@ -1427,6 +1661,157 @@ static void AlertNotify(const std::string& strMessage)
     boost::replace_all(strCmd, "%s", safeStatus);
 
     boost::thread t(runCommand, strCmd); // thread runs free
+}
+
+/** Warn the operator that a block was rejected on SCDB state.
+ *
+ * The three ConnectBlock rejects tagged bad-withdrawal-spend,
+ * bad-withdrawal-spend-final and bad-scdb-update depend on this node's
+ * sidechain database, not only on the block itself. If the local database is
+ * what is wrong, the block still gets marked permanently invalid while the
+ * rest of the network accepts it, and this node quietly stops following the
+ * chain while otherwise appearing healthy. This makes that condition loud and
+ * actionable; it is diagnostics only and changes nothing about the rejection.
+ *
+ * Callers skip this under fJustCheck: a template test rejects the proposed
+ * block without marking anything in the block index, so there is nothing for
+ * an operator to recover.
+ *
+ * The log line fires on every occurrence. The -alertnotify alert (which
+ * spawns a shell per call) is rate-limited: a diverged node can hit these
+ * rejects once per block arriving on the majority branch, and a burst of
+ * blocks must not become a process per block. The latch is guarded by
+ * cs_main, which every caller already holds.
+ */
+//! Log an SCDB operator alert and, at most once an hour PER KEY, raise it
+//! externally.
+//!
+//! Rate-limited per key, not globally. A single shared latch let the first
+//! divergence of any kind mute every other kind for an hour - so a
+//! bad-withdrawal-spend alert would suppress a bad-scdb-commitment alert, which
+//! is exactly the distinction a flag day needs an operator to see. Keys are
+//! compile-time string literals, so the map holds a handful of entries at most.
+//! The LogPrintf is unconditional; only the external AlertNotify is throttled.
+static void AlertSCDBNotify(const char* pszKey, const std::string& strMessage)
+{
+    AssertLockHeld(cs_main);
+
+    LogPrintf("%s\n", strMessage);
+
+    static std::map<std::string, int64_t> mapLastAlert;
+    const int64_t nNow = GetTime();
+    int64_t& nLast = mapLastAlert[pszKey];
+    if (nNow >= nLast + 60 * 60) {
+        nLast = nNow;
+        AlertNotify(strMessage);
+    }
+}
+
+//! For a block this node REJECTED on SCDB state. Says the node may have stopped
+//! following the chain, and how to recover.
+//!
+//! Do NOT call this from an accept path. Its text asserts a rejection, tells the
+//! operator the node has stopped following the chain, and recommends
+//! reconsiderblock - all three false for a block that is being connected. Use
+//! AlertSCDBUnsoundRecord for that; a diagnostic that describes the wrong event
+//! is worse than none, because an operator acts on it.
+static void AlertSCDBDivergence(const uint256& hashBlock, const char* pszReject)
+{
+    AssertLockHeld(cs_main);
+
+    const std::string strMessage = strprintf(
+        "Warning: SCDB DIVERGENCE POSSIBLE: rejected block %s (%s): the sidechain "
+        "database on this node disagrees with the block. If the rest of the network "
+        "accepts this block, this node has stopped following the chain and will "
+        "not recover on its own. Recovery: upgrade to the latest release, then "
+        "run reconsiderblock %s and check getchaintips to confirm this block is "
+        "no longer marked invalid (reconsiderblock returns null whether or not "
+        "the block stayed reconsidered). If it is still marked invalid, restart "
+        "with -reindex - a FULL -reindex: -reindex-chainstate keeps the sidechain "
+        "records this node disagrees about.",
+        hashBlock.ToString(), pszReject, hashBlock.ToString());
+
+    AlertSCDBNotify(pszReject, strMessage);
+}
+
+//! For a block this node ACCEPTED while its own caches were already unsound.
+//!
+//! Nothing was rejected and the node is still following the chain, so this says
+//! neither. What it warns about is the record just written: it states the
+//! treasury of the slots this node holds a pointer for, and a slot it omits
+//! loses that pointer on any later replay of this block.
+//! Turn a list of slot numbers into "3" or "3, 7, 12".
+static std::string SlotList(const std::vector<uint8_t>& vSlot)
+{
+    std::string str;
+    for (size_t i = 0; i < vSlot.size(); i++)
+        str += strprintf("%s%u", i ? ", " : "", vSlot[i]);
+    return str;
+}
+
+//! For a block this node ACCEPTED while its own SCDB caches were already
+//! inconsistent. Raised from ConnectTip, after chainActive has moved.
+//!
+//! Nothing was rejected and the node is still following the chain, so this says
+//! neither. It reports TWO independent conditions, because they have different
+//! causes and different severities and conflating them is a false diagnosis:
+//!
+//!  - the deposit cache does not account for the treasury pointers. The record
+//!    is written from the pointers, NOT from the deposit cache, so the record
+//!    is very likely fine; what is unsound is this node's deposit history.
+//!  - mapTreasury disagreed with mapCTIP. That is an internal invariant break,
+//!    it is repaired in the record before it can do damage, and it should be
+//!    impossible - so it is reported at higher volume than the first.
+static void AlertSCDBUnsoundRecord(const uint256& hashBlock, bool fCacheUnsound,
+                                   uint8_t nSlotUnsupported, size_t nStated,
+                                   bool fRecordNewlyWritten,
+                                   const SidechainDB::TreasuryLogAudit& audit)
+{
+    AssertLockHeld(cs_main);
+
+    std::string strWhat;
+
+    if (!audit.IsClean()) {
+        // The serious one, and it is reported on its own merits rather than
+        // only when the deposit-cache check happens to fail as well. The two
+        // conditions are independent: the lockstep can break on a node whose
+        // deposit history is perfectly good, and gating this behind the other
+        // check meant exactly that case produced nothing but a log line.
+        strWhat += "THE TREASURY LOG DISAGREED WITH THE TREASURY POINTERS, which should be "
+                   "impossible and means this node's SCDB has been corrupted in memory or by "
+                   "a code defect. The record was built from the POINTERS, so it is correct "
+                   "and nothing was lost - but the disagreement itself is the finding. ";
+        if (!audit.vMissing.empty())
+            strWhat += strprintf("No log entry for slot(s) %s. ", SlotList(audit.vMissing));
+        if (!audit.vStale.empty())
+            strWhat += strprintf("Log entries for slot(s) %s hold no pointer and were dropped. ",
+                                 SlotList(audit.vStale));
+        if (!audit.vMismatched.empty())
+            strWhat += strprintf("Log entries for slot(s) %s named a different outpoint or "
+                                 "amount than the pointer and were overruled. ",
+                                 SlotList(audit.vMismatched));
+    }
+
+    if (fCacheUnsound) {
+        strWhat += strprintf(
+            "This node's deposit cache does not account for the treasury of sidechain %u. The "
+            "record states %u treasury pointer(s) and is written from those pointers, not from "
+            "the deposit cache, so it is NOT necessarily wrong - what is unsound is this node's "
+            "deposit history behind them. Withdrawal payout selection and any rebuild read that "
+            "history. ",
+            nSlotUnsupported, (unsigned)nStated);
+    }
+
+    const std::string strMessage = strprintf(
+        "Warning: SCDB STATE UNSOUND: this node ACCEPTED and connected block %s%s. The block is "
+        "fine and this node is still following the chain - do NOT run reconsiderblock. %s"
+        "Recovery: run rebuildscdb, or -reindex if that cannot repair it. Do not treat this node "
+        "as a reference for a pre-flag-day SCDB census until it is clean.",
+        hashBlock.ToString(),
+        fRecordNewlyWritten ? " and wrote its sidechain record" : " (its sidechain record was already on disk)",
+        strWhat);
+
+    AlertSCDBNotify("scdb-state-unsound", strMessage);
 }
 
 static void CheckForkWarningConditions()
@@ -1624,7 +2009,7 @@ bool CheckInputs(const CTransaction& tx, CValidationState &state, const CCoinsVi
                 return true;
             }
 
-            //bool fSkydogeEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+            //bool fSkydogeEnabled = IsSkydogeEnabled(chainActive.Tip(), Params().GetConsensus());
 
             for (unsigned int i = 0; i < tx.vin.size(); i++) {
                 const COutPoint &prevout = tx.vin[i].prevout;
@@ -1855,23 +2240,59 @@ DisconnectResult CChainState::DisconnectBlock(const CBlock& block, const CBlockI
         }
     }
 
-    // Load SCDB undo data from disk
-    if (!ResyncSCDB(pindex->pprev)) {
+    // Roll the sidechain database back on a copy and install it only once both
+    // halves have succeeded.
+    //
+    // Two steps are needed: load the record for the previous block, then undo
+    // what this block did to the parts that record does not cover. Applied
+    // straight to the global database, a failure in the second step would leave
+    // it describing neither block - the coins view is still being rolled back
+    // here, so the two would end up naming different blocks, and a node in that
+    // state can disagree with the network about whether a later block is valid.
+    // ConnectBlock already works this way, through the copy SidechainDB::Update
+    // takes; this is the same discipline on the way out.
+    //
+    // The copy is a full one, as it is on the connect side, because Undo reads
+    // the deposit cache and the sidechain table to decide what to remove.
+    SidechainDB scdbCopy = scdb;
+
+    if (!ResyncSCDBInto(scdbCopy, pindex->pprev)) {
         error("%s: Failed to re-sync SCDB for disconnected block: %s!", __func__, block.GetHash().ToString());
         return DISCONNECT_FAILED;
     }
 
-    // Apply undo to SCDB
-    if (!scdb.Undo(pindex->nHeight, block.GetHash(), block.GetPrevHash(), block.vtx, true /* fDebug */)) {
+    if (!scdbCopy.Undo(pindex->nHeight, block.GetHash(), block.GetPrevHash(), block.vtx, true /* fDebug */)) {
         error("%s: Failed to undo SCDB data for block: %s!", __func__, block.GetHash().ToString());
         return DISCONNECT_FAILED;
     }
 
-    // Update mempool CTIP
-    mempool.UpdateCTIPFromBlock(scdb.GetCTIP(), true /* fDisconnect */);
-
-    // move best block pointer to prevout block
+    // The copy is only worth taking if the coins rollback agreed. DisconnectTip
+    // throws its coins view away on any result other than DISCONNECT_OK and
+    // leaves the tip where it was, so installing the rolled-back database here
+    // would leave the two describing different blocks - which is the state this
+    // copy exists to prevent, and it survives a restart. Return before the
+    // install instead. The other two callers replay or verify and then re-sync
+    // the database from the tip, so they lose nothing by it.
+    // Move the best block pointer to the prevout block. This is the COINS
+    // view's own bookkeeping and it must happen on BOTH paths, which is why
+    // upstream sets it unconditionally. VerifyDB disconnects blocks in a loop
+    // and opens each iteration with
+    //     assert(coins.GetBestBlock() == pindex->GetBlockHash());
+    // so leaving the view pointing at the block we just rolled back makes the
+    // NEXT iteration abort the process - instead of letting VerifyDB report
+    // the very inconsistency it exists to find. Only the SCDB install below is
+    // what this early return means to withhold.
     view.SetBestBlock(pindex->pprev->GetBlockHash());
+
+    if (!fClean)
+        return DISCONNECT_UNCLEAN;
+
+    scdb = scdbCopy;
+
+    // Update mempool CTIP - unless this is a verification walk, which the
+    // guard in VerifyDB unwinds afterwards and which must not evict anything.
+    if (!fSidechainVerifying)
+        mempool.UpdateCTIPFromBlock(scdb.GetCTIP(), true /* fDisconnect */);
 
     // Log that we have disconnected a block
     LogPrintf("%s: Block disconnected:\n%s\n", __func__, block.ToString());
@@ -1879,27 +2300,53 @@ DisconnectResult CChainState::DisconnectBlock(const CBlock& block, const CBlockI
     return fClean ? DISCONNECT_OK : DISCONNECT_UNCLEAN;
 }
 
-void static FlushBlockFile(bool fFinalize = false)
+//! Flush the block and undo files, and say whether the data actually reached
+//! the disk.
+//!
+//! The caller writes the block index and then the chainstate on the strength of
+//! this having worked: both of those refer to block and undo data by file and
+//! offset. If the flush is reported as done when it was not, a crash can leave a
+//! chainstate that names block data the file does not contain, which no restart
+//! can reconcile - only a reindex. The two steps that follow this one already
+//! stop the node when they fail; this one used to be the exception.
+//!
+//! A file that will not open is left as it was: an empty datadir has no block
+//! file to flush, and refusing to start over that would be worse than the case
+//! being guarded against.
+static bool FlushBlockFile(bool fFinalize = false)
 {
     LOCK(cs_LastBlockFile);
 
+    bool fFlushed = true;
     CDiskBlockPos posOld(nLastBlockFile, 0);
 
     FILE *fileOld = OpenBlockFile(posOld);
     if (fileOld) {
-        if (fFinalize)
-            TruncateFile(fileOld, vinfoBlockFile[nLastBlockFile].nSize);
-        FileCommit(fileOld);
+        if (fFinalize && !TruncateFile(fileOld, vinfoBlockFile[nLastBlockFile].nSize)) {
+            LogPrintf("%s: Failed to truncate block file %i\n", __func__, nLastBlockFile);
+            fFlushed = false;
+        }
+        if (!FileCommit(fileOld)) {
+            LogPrintf("%s: Failed to flush block file %i to disk\n", __func__, nLastBlockFile);
+            fFlushed = false;
+        }
         fclose(fileOld);
     }
 
     fileOld = OpenUndoFile(posOld);
     if (fileOld) {
-        if (fFinalize)
-            TruncateFile(fileOld, vinfoBlockFile[nLastBlockFile].nUndoSize);
-        FileCommit(fileOld);
+        if (fFinalize && !TruncateFile(fileOld, vinfoBlockFile[nLastBlockFile].nUndoSize)) {
+            LogPrintf("%s: Failed to truncate undo file %i\n", __func__, nLastBlockFile);
+            fFlushed = false;
+        }
+        if (!FileCommit(fileOld)) {
+            LogPrintf("%s: Failed to flush undo file %i to disk\n", __func__, nLastBlockFile);
+            fFlushed = false;
+        }
         fclose(fileOld);
     }
+
+    return fFlushed;
 }
 
 static bool FindUndoPos(CValidationState &state, int nFile, CDiskBlockPos &pos, unsigned int nAddSize);
@@ -2040,6 +2487,119 @@ static int64_t nTimeCallbacks = 0;
 static int64_t nTimeTotal = 0;
 static int64_t nBlocksTotal = 0;
 
+//! Collect the sidechain deposits a block carries.
+//!
+//! Shared on purpose rather than for tidiness. Anything that rebuilds the
+//! deposit cache from block files has one way to do real harm: disagree with
+//! what ConnectBlock recorded when the block was first connected. A second
+//! implementation of connect-time semantics, drifting from this one, would
+//! manufacture exactly the divergence such a rebuild exists to repair. So there
+//! is one implementation and both paths call it.
+//!
+//! It needs no coins view. A deposit is identified by its own outputs, so this
+//! is a function of the block alone - which is what lets a rebuild skip script
+//! verification and the UTXO set entirely, and is the reason the sidechain-only
+//! pass is cheap where a reindex is not.
+//!
+//! `db` is only ever used for TxnToDeposit, which reads no state from it, so
+//! any instance gives the same answer.
+//!
+//! Returns false if a deposit transaction is malformed. ConnectBlock treats
+//! that as invalidating the block.
+static bool GetBlockDeposits(const CBlock& block, SidechainDB& db, std::vector<SidechainDeposit>& vDeposit)
+{
+    vDeposit.clear();
+
+    for (size_t i = 0; i < block.vtx.size(); i++) {
+        const CTransaction& tx = *(block.vtx[i]);
+
+        if (tx.IsCoinBase())
+            continue;
+
+        // Check for possible sidechain deposits
+        bool fSidechainOutput = false;
+        uint8_t nSidechain;
+        for (const CTxOut& out : tx.vout) {
+            const CScript& scriptPubKey = out.scriptPubKey;
+            if (scriptPubKey.IsDrivechain(nSidechain)) {
+                fSidechainOutput = true;
+                break;
+            }
+        }
+        if (!fSidechainOutput)
+            continue;
+
+        SidechainDeposit deposit;
+        if (!db.TxnToDeposit(tx, (int)i, block.GetHash(), deposit))
+            return false;
+
+        // Skip Withdrawal change return deposit, handled by SCDB::SpendWithdrawal
+        if (deposit.strDest == SIDECHAIN_WITHDRAWAL_RETURN_DEST)
+            continue;
+
+        vDeposit.push_back(deposit);
+    }
+
+    return true;
+}
+
+//! Do a block's deposits chain from the treasury pointers they extend?
+//!
+//! The rule: within a slot, the first deposit spends that slot's pointer, and
+//! each one after it spends the burn output of the one before - exactly once
+//! each. A slot holding no pointer leaves its first deposit unconstrained,
+//! because there is nothing for it to chain from and the alternative would
+//! make a slot's first-ever deposit unmineable; deposits after it still chain.
+//!
+//! This is the consensus form of the relay rule the mempool has enforced for
+//! years, and the rule whose absence let a deposit start a second treasury
+//! lineage and strand the coins on the branch the pointer did not follow.
+//!
+//! `vDeposit` must be in block order, which is what GetBlockDeposits produces,
+//! and `scdbIn` must hold the PARENT's pointers - the state before this block's
+//! deposits are applied. A pure function of those two, so every node computes
+//! the same answer; it reads no coins view.
+//!
+//! Written down as its own function rather than inline in ConnectBlock so that
+//! the reject paths can be exercised directly. They cannot be reached through
+//! a block: the wallet refuses to build a deposit that does not chain and the
+//! mempool refuses to relay one, so producing the block a test would need
+//! means a patched block producer.
+bool CheckDepositContinuity(const std::vector<SidechainDeposit>& vDeposit,
+        const SidechainDB& scdbIn, uint8_t& nSidechainFail, uint256& txidFail)
+{
+    std::map<uint8_t, COutPoint> mapExpected;
+
+    for (const SidechainDeposit& d : vDeposit) {
+        std::map<uint8_t, COutPoint>::iterator it = mapExpected.find(d.nSidechain);
+        if (it == mapExpected.end()) {
+            SidechainCTIP ctip;
+            if (!scdbIn.GetCTIP(d.nSidechain, ctip)) {
+                // Nothing to chain from; this deposit's own burn output is
+                // what the next one in the slot must spend.
+                mapExpected[d.nSidechain] = COutPoint(CTransaction(d.tx).GetHash(), d.nBurnIndex);
+                continue;
+            }
+            it = mapExpected.insert(std::make_pair(d.nSidechain, ctip.out)).first;
+        }
+
+        int nSpent = 0;
+        for (const CTxIn& in : d.tx.vin) {
+            if (in.prevout == it->second)
+                nSpent++;
+        }
+        if (nSpent != 1) {
+            nSidechainFail = d.nSidechain;
+            txidFail = CTransaction(d.tx).GetHash();
+            return false;
+        }
+
+        it->second = COutPoint(CTransaction(d.tx).GetHash(), d.nBurnIndex);
+    }
+
+    return true;
+}
+
 /** Apply the effects of this block (with given index) on the UTXO set represented by coins.
  *  Validity checks that depend on the UTXO set are also done; ConnectBlock()
  *  can fail if those validity checks fail (among other reasons). */
@@ -2051,6 +2611,25 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     // pindex->phashBlock can be null if called by CreateNewBlock/TestBlockValidity
     assert((pindex->phashBlock == nullptr) ||
            (*pindex->phashBlock == block.GetHash()));
+    // The protective drivechain rules - the "D"
+    // destination exclusivity, the withdrawal amount equations with the
+    // non-zero-change rule, and deposit continuity - start at the FORK
+    // instead of waiting for CTIPAnchorHeight, closing the 4,032-block window
+    // between them in which a destination-"D" treasury spend can orphan a
+    // pointer that the anchor then refuses EVERY block over.
+    //
+    // The gate is the later of EscrowRulesHeight and SCDBCommitmentHeight, and
+    // it is network-safe by construction with no new consensus field: mainnet
+    // sets them both to the fork height 1,976,112; testnet's EscrowRulesHeight
+    // (188,640) is already in the past, and its compiled-in commitment gate is
+    // parked at 1,000,000,000, so with the chainparams alone the maximum parks
+    // these rules with the anchor there and nothing is applied retroactively to
+    // testnet history. A testnet node that overrides the commitment height
+    // (-scdbcommitmentheight) applies these rules from the later of the
+    // two. Regtest sets both to 300. The anchor loop itself is unchanged and stays at CTIPAnchorHeight.
+    const int nCTIPRulesHeight = std::max(chainparams.GetConsensus().EscrowRulesHeight,
+                                          chainparams.GetConsensus().SCDBCommitmentHeight);
+
     int64_t nTimeStart = GetTimeMicros();
 
     // Check it again in case a previous version let a bad block in
@@ -2068,6 +2647,30 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     // GetAdjustedTime() to go backward).
     if (!CheckBlock(block, state, chainparams.GetConsensus(), !fJustCheck, !fJustCheck))
         return error("%s: Consensus::CheckBlock: %s", __func__, FormatStateMessage(state));
+
+    // Small-block soft fork: enforce the serialized size limit here as well
+    // as in ContextualCheckBlock (see the NOTE above - new rules enforced
+    // only there do not apply to blocks that were already stored before the
+    // node upgraded, or during -reindex-chainstate). Unlike the witness
+    // checks this needs no context beyond the height, so re-checking here is
+    // cheap and closes that gap: an oversized block stored by an older
+    // version fails to connect and its chain is abandoned.
+    // Reported as a permanent failure, unlike the matching gate in
+    // ContextualCheckBlock. That gate must tolerate malleation, because it sees
+    // blocks as they arrive from the network and criticalData padding does not
+    // change a block's hash. This one only ever sees blocks already written to
+    // disk -- AcceptBlock runs ContextualCheckBlock before SaveBlockToDisk, so an
+    // over-limit copy never gets stored -- meaning a failure here is a genuinely
+    // oversized block from an older version, not a malleated copy. Marking it
+    // invalid is therefore correct, and required: with corruptionPossible set,
+    // InvalidBlockFound() does nothing, so the block would stay in
+    // setBlockIndexCandidates and ActivateBestChain would retry it forever (this
+    // fork has no equivalent of upstream's "Corrupt block found" AbortNode).
+    if (pindex->nHeight >= chainparams.GetConsensus().SmallBlockHeight &&
+            GetCommittedSerializedSize(block) > MAX_SMALL_BLOCK_SERIALIZED_SIZE) {
+        return state.DoS(100, error("%s: serialized size limit failed", __func__),
+                         REJECT_INVALID, "bad-blk-size");
+    }
 
     // verify that the view's current state corresponds to the previous block
     uint256 hashPrevBlock = pindex->pprev == nullptr ? uint256() : pindex->pprev->GetBlockHash();
@@ -2160,7 +2763,11 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         nLockTimeFlags |= LOCKTIME_VERIFY_SEQUENCE;
     }
 
-    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+    // Consensus fix: key the drivechain gate to this block's own ancestry
+    // (pindex->pprev), never the mutable active tip. ConnectBlock is also
+    // reached for non-tip blocks (e.g. CVerifyDB level-4 replay), and a
+    // block's validity must not depend on receive/connect order.
+    bool skydogeEnabled = IsSkydogeEnabled(pindex->pprev, chainparams.GetConsensus());
 
     // Get the script flags for this block
     unsigned int flags = GetBlockScriptFlags(pindex, chainparams.GetConsensus());
@@ -2168,7 +2775,69 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     int64_t nTime2 = GetTimeMicros(); nTimeForks += nTime2 - nTime1;
     LogPrint(BCLog::BENCH, "    - Fork checks: %.2fms [%.2fs (%.2fms/blk)]\n", MILLI * (nTime2 - nTime1), nTimeForks * MICRO, nTimeForks * MILLI / nBlocksTotal);
 
+    // The working sidechain state this block is validated against, and the
+    // deferred commit: every SCDB
+    // read and mutation below goes to this copy, which is swapped into the
+    // global scdb only after the last rejection/error point (below, before
+    // view.SetBestBlock). A rejected block, a failed withdrawal spend / SCDB
+    // update, or a failed disk write therefore leaves the global SCDB (deposit
+    // cache + mapCTIP) unchanged instead of poisoning it. Copy cost is bounded
+    // by SCDB_DEPOSIT_CACHE_MAX and matches the copy scdb.Update already makes
+    // internally.
+    //
+    // Built by the shared seed helper - the copy of the global with the
+    // parent's record overlaid where that record is complete - so it is the
+    // same state the miner committed to (ComputeSCDBCommitment) and the
+    // state getscdbhash/getscdbstate report. See GetSCDBConsensusSeed for
+    // why and when the record stands in for the global.
+    SidechainDB scdbCache = GetSCDBConsensusSeed(pindex->pprev, chainparams.GetConsensus());
+
+    // a BMM request is valid only for a sidechain
+    // active as of THIS block's parent. ContextualCheckBlock answers that from
+    // the parent's record where it has one; without one it used to fall back
+    // to the tip state, so for a branch forking below a slot's activation a
+    // synced node and a fresh node judged the same block differently. Here the
+    // parent is the connected tip and scdbCache is its state before this
+    // block's own updates (an activation in this block does not count, as in
+    // the record check). Needed because ContextualCheckBlock skips this
+    // test for -reindex / -loadblock and never runs under -reindex-chainstate.
+    // Gated at SCDBCommitmentHeight (the fork), so no stored or historical
+    // block below it is judged by a new rule. IsSidechainActive equals the
+    // record test: the SCDB tables are always sized for every slot.
+    // NOT corruption-possible, deliberately: ContextualCheckBlock has already
+    // required each request's bytes, slot byte included, to match a coinbase
+    // commitment output (bad-critical-data-no-commit), so a relayed copy can
+    // drop a request but never introduce a slot the block did not commit to,
+    // and a reject here is a verdict on the block itself. Marking it failed
+    // also avoids the re-request storm of a corruption-possible reject.
+    if (pindex->nHeight >= chainparams.GetConsensus().SCDBCommitmentHeight) {
+        for (const CTransactionRef& tx : block.vtx) {
+            if (tx->criticalData.IsNull())
+                continue;
+            uint8_t nSidechain;
+            std::string strPrevBlock = "";
+            if (!tx->criticalData.IsBMMRequest(nSidechain, strPrevBlock))
+                continue;
+            if (!scdbCache.IsSidechainActive(nSidechain)) {
+                return state.DoS(0, error("%s: BMM request %s for sidechain %u, which is not active as of the parent of block %s",
+                                          __func__, tx->GetHash().ToString(), nSidechain, block.GetHash().ToString()),
+                                 REJECT_INVALID, "bad-critical-bmm-nsidechain-inactive");
+            }
+        }
+    }
+
     CBlockUndo blockundo;
+
+    // Declared before `control` on purpose, and it must stay that way. The
+    // queued script checks hold raw pointers into this vector, and local
+    // objects are destroyed in reverse order of declaration: `control`'s
+    // destructor is what waits for the worker threads to finish. If txdata were
+    // declared after it, any early return from this function would free the
+    // vector while those threads were still reading it. There are several such
+    // returns between the point where checks are queued and where they are
+    // waited on.
+    std::vector<PrecomputedTransactionData> txdata;
+    txdata.reserve(block.vtx.size()); // Required so that pointers to individual PrecomputedTransactionData don't get invalidated
 
     CCheckQueueControl<CScriptCheck> control(fScriptChecks && nScriptCheckThreads ? &scriptcheckqueue : nullptr);
 
@@ -2177,9 +2846,6 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     int nInputs = 0;
     int64_t nSigOpsCost = 0;
     blockundo.vtxundo.reserve(block.vtx.size() - 1);
-    std::vector<PrecomputedTransactionData> txdata;
-    txdata.reserve(block.vtx.size()); // Required so that pointers to individual PrecomputedTransactionData don't get invalidated
-    std::vector<std::tuple<CTransaction, int, uint256>> vDepositTx;
     std::vector<std::tuple<uint8_t, CTransaction, int>> vWithdrawalToSpend;
     std::vector<OPReturnData> vOPReturnData;
     for (unsigned int i = 0; i < block.vtx.size(); i++)
@@ -2188,33 +2854,16 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
 
         nInputs += tx.vin.size();
 
-        // Search for OP_RETURN outputs
-        for (const CTxOut& o : tx.vout) {
-            const CScript scriptPubKey = o.scriptPubKey;
-            if (!scriptPubKey.size())
-                continue;
-            if (scriptPubKey[0] != OP_RETURN)
-                continue;
-
-            OPReturnData data;
-            data.txid = tx.GetHash();
-            data.script = scriptPubKey;
-            data.nSize = ::GetSerializeSize(tx, SER_DISK, CLIENT_VERSION);
-
-            // Using CheckTxInputs to calculate fees and copy to OP_RETURN data
-            data.fees = CAmount(0);
-            if (!tx.IsCoinBase() && !Consensus::CheckTxInputs(tx, state, view, pindex->nHeight, data.fees)) {
-                return error("%s: OP_RETURN DB fee calculation CheckTxInputs: %s, %s", __func__, tx.GetHash().ToString(), FormatStateMessage(state));
-            }
-
-            vOPReturnData.push_back(data);
-        }
-
-        bool fSidechainInputs = false;
-        uint8_t nSidechain = 0;
-        if (!tx.IsCoinBase())
-        {
-            CAmount txfee = 0;
+        // Compute this transaction's fee and serialized size ONCE. These are
+        // per-transaction values; the OP_RETURN indexing loop below previously
+        // recomputed CheckTxInputs (O(inputs+outputs)) and GetSerializeSize
+        // (O(tx size)) for EVERY OP_RETURN output, making block validation
+        // O(outputs^2) - a cheap-to-mine, network-wide validation-stall DoS.
+        // CheckTxInputs has no side effects on the UTXO view, so computing the
+        // fee here (instead of once per OP_RETURN output and again below) is
+        // behaviour-identical; the block is still rejected on the same failure.
+        CAmount txfee = 0;
+        if (!tx.IsCoinBase()) {
             if (!Consensus::CheckTxInputs(tx, state, view, pindex->nHeight, txfee)) {
                 return error("%s: Consensus::CheckTxInputs: %s, %s", __func__, tx.GetHash().ToString(), FormatStateMessage(state));
             }
@@ -2223,19 +2872,36 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                 return state.DoS(100, error("%s: accumulated fee in the block out of range.", __func__),
                                  REJECT_INVALID, "bad-txns-accumulated-fee-outofrange");
             }
+        }
+        const unsigned int nTxSize = ::GetSerializeSize(tx, SER_DISK, CLIENT_VERSION);
 
+        // Search for OP_RETURN outputs (index them for the OP_RETURN DB)
+        for (const CTxOut& o : tx.vout) {
+            const CScript& scriptPubKey = o.scriptPubKey;
+            if (!scriptPubKey.size())
+                continue;
+            if (scriptPubKey[0] != OP_RETURN)
+                continue;
+
+            OPReturnData data;
+            data.txid = tx.GetHash();
+            data.script = scriptPubKey;
+            data.nSize = nTxSize;
+            data.fees = txfee; // 0 for coinbase
+            vOPReturnData.push_back(data);
+        }
+
+        bool fSidechainInputs = false;
+        uint8_t nSidechain = 0;
+        if (!tx.IsCoinBase())
+        {
             if (!view.HaveInputs(tx))
                 return state.DoS(100, error("ConnectBlock(): inputs missing/spent"),
                                  REJECT_INVALID, "bad-txns-inputs-missingorspent");
 
 
             // Set fSidechainInputs & nSidechain
-            if (nHeight < DrivechainHeight) {
-                if (skydogesEnabled) {
-                    std::vector<CScript> vScript; }
-            } else {
-                if (drivechainsEnabled) {
-            
+                if (skydogeEnabled) {
                     for (const CTxIn& in : tx.vin) {
                         Coin coin = view.AccessCoin(in.prevout);
                         if (coin.out.scriptPubKey.IsDrivechain(nSidechain)) {
@@ -2244,7 +2910,6 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                         }
                     }
                 }
-            }
 
             // Check that transaction is BIP68 final
             // BIP68 lock checks (as opposed to nLockTime checks) must
@@ -2297,12 +2962,40 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
          * coins held in the CTIP output of the sidechain.
          */
 
-        if (skydogesEnabled && fSidechainInputs) {
+        // From the fork a ZERO-value escrow output is invalid in a block,
+        // not only refused at relay (sidechain-zero-value-escrow, policy).
+        // This protects a newly activated slot's treasury pointer. No
+        // honest block changes: the miner and the
+        // wallet never build such an output, and a withdrawal's zero
+        // treasury change is already refused from the same height.
+        // A pure function of the transaction's bytes, so DoS(100). Every
+        // transaction, not only those spending a treasury: a first deposit
+        // into a pointer-less slot spends none.
+        if (skydogeEnabled && pindex->nHeight >= nCTIPRulesHeight) {
+            for (const CTxOut& out : tx.vout) {
+                uint8_t nSidechainZero = 0;
+                if (out.scriptPubKey.IsDrivechain(nSidechainZero) && out.nValue == 0)
+                    return state.DoS(100,
+                        error("ConnectBlock(): bad-sidechain-zero-value-escrow: zero-value escrow output for sidechain %u: %s",
+                              nSidechainZero, tx.GetHash().ToString()),
+                        REJECT_INVALID, "bad-sidechain-zero-value-escrow");
+            }
+        }
+
+        if (skydogeEnabled && fSidechainInputs) {
             // We must get the Withdrawal hash as work is applied to
             // Withdrawal before inputs and the change output are known.
             uint256 hashBlind;
+            // Consensus failures below must be signalled through `state`. The
+            // Drivechain helpers take no CValidationState and cannot set one
+            // themselves (unlike CheckInputs above), so a bare error() would
+            // leave the block unmarked and be handled as a local system error
+            // rather than as an invalid block.
             if (!tx.GetBlindHash(hashBlind))
-                return error("ConnectBlock(): Withdrawal (full id): %s has invalid format", tx.GetHash().ToString());
+                return state.DoS(100,
+                    error("ConnectBlock(): Withdrawal (full id): %s has invalid format",
+                          tx.GetHash().ToString()),
+                    REJECT_INVALID, "bad-withdrawal-format");
 
             // Get values to and from sidechain
             CAmount amountSidechainIn = CAmount(0);
@@ -2311,31 +3004,151 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
             CAmount amountWithdrawn = CAmount(0);
             std::string strFail = "";
             if (!GetDrivechainAmounts(view, tx, amountSidechainIn, amountIn, amountSidechainOut, amountWithdrawn, strFail))
-                return error("ConnectBlock(): Calculating Drivechain amounts failed: %s txid: %s", strFail, tx.GetHash().ToString());
+                return state.DoS(100,
+                    error("ConnectBlock(): Calculating Drivechain amounts failed: %s txid: %s",
+                          strFail, tx.GetHash().ToString()),
+                    REJECT_INVALID, "bad-drivechain-amounts");
 
             if (amountSidechainIn > amountSidechainOut) {
-                // Check if withdrawal bundle tx can be spent and track it
-                if (scdb.SpendWithdrawal(nSidechain, block.GetHash(), tx, i, true /* fJustCheck */, true /* fDebug */)) {
+                // Escrow rules (BIP300 796c80eb): from EscrowRulesHeight the
+                // fee-commitment output of a withdrawal payout, vout[1], must
+                // carry no value. Its value used to be counted into the blind
+                // value out and so burnt from the treasury, on top of the fee
+                // the output encodes. A pure function of the transaction's
+                // bytes, so DoS(100); it runs before the SpendWithdrawal probe
+                // below, which refuses the same thing at DoS(0). A payout with
+                // fewer than two outputs is refused by that probe anyway.
+                if (pindex->nHeight >= chainparams.GetConsensus().EscrowRulesHeight &&
+                        tx.vout.size() >= 2 && tx.vout[1].nValue != 0)
+                    return state.DoS(100,
+                        error("ConnectBlock(): bad-withdrawal-fee-value: withdrawal fee output carries %d: %s",
+                              tx.vout[1].nValue, tx.GetHash().ToString()),
+                        REJECT_INVALID, "bad-withdrawal-fee-value");
+
+                // Treasury anchor soft fork, the amount half: from
+                // nCTIPRulesHeight (the fork, not the anchor)
+                // a withdrawal's amounts must satisfy the
+                // same two equations SpendWithdrawal checks below, but read
+                // from the coin actually spent rather than from the recorded
+                // treasury pointer. Every term is a pure function of the
+                // block's bytes and the view, so every node computes the same
+                // answer - which is what makes this DoS(100) where the probe
+                // below has to stay at DoS(0). It must come first, or the
+                // probe rejects at DoS(0) and the escalation never takes.
+                //
+                // Both legs are needed. The second restates the change
+                // equation (sidechaindb.cpp, "Check change amount"); the first
+                // restates the output equation, which independently pins the
+                // LAST output's value to the treasury change - GetBlindValueOut
+                // pops the final output, so the two agree only when that final
+                // output is the change return. Carrying one leg without the
+                // other would be objectively weaker than the probe it escalates.
+                if (pindex->nHeight >= nCTIPRulesHeight) {
+                    // Three outputs is the withdrawal format's own minimum -
+                    // the destination marker, the fee total, and the treasury
+                    // change - and the same bound SpendWithdrawal takes below.
+                    // Fewer is not a withdrawal at all, which is a statement
+                    // about the block's bytes rather than about this node.
+                    // GetBlindValueOut joins the same reject rather than
+                    // getting its own: it fails only on an empty vin or vout,
+                    // which CheckTransaction has already refused, so this adds
+                    // no reachable rejection - it just stops a failure
+                    // arriving as a silent zero blind value.
+                    CAmount amountBlind = 0;
+                    CAmount amountFees = 0;
+                    if (tx.vout.size() < 3 ||
+                            !tx.GetBlindValueOut(amountBlind) ||
+                            !DecodeWithdrawalFees(tx.vout[1].scriptPubKey, amountFees))
+                        return state.DoS(100,
+                            error("ConnectBlock(): withdrawal fee output unreadable: %s",
+                                  tx.GetHash().ToString()),
+                            REJECT_INVALID, "bad-withdrawal-amounts");
+
+                    if (amountBlind != amountWithdrawn)
+                        return state.DoS(100,
+                            error("ConnectBlock(): withdrawal output amount does not match the change return: %s",
+                                  tx.GetHash().ToString()),
+                            REJECT_INVALID, "bad-withdrawal-amounts");
+
+                    if (amountSidechainOut != amountSidechainIn - (amountBlind + amountFees))
+                        return state.DoS(100,
+                            error("ConnectBlock(): withdrawal change amount does not match the spent treasury: %s",
+                                  tx.GetHash().ToString()),
+                            REJECT_INVALID, "bad-withdrawal-amounts");
+
+                    // The change return must carry value: a ZERO-value change
+                    // coin would become a treasury pointer outside the
+                    // drivechain rules and close the slot. Relay refuses this
+                    // at receivewithdrawalbundle ("non-zero change") and the
+                    // assembler declines to pay it; from this height consensus
+                    // refuses it as well.
+                    if (amountSidechainOut == 0)
+                        return state.DoS(100,
+                            error("ConnectBlock(): bad-withdrawal-zero-change: withdrawal leaves a zero-value treasury change return: %s",
+                                  tx.GetHash().ToString()),
+                            REJECT_INVALID, "bad-withdrawal-zero-change");
+                }
+
+                // Check if withdrawal bundle tx can be spent and track it.
+                // Probed against the working state built above - where the
+                // parent's record was complete this is the parent's state, so
+                // the answer no longer depends on what order this node saw the
+                // chain in. Probed before this block's deposits are added
+                // (below), exactly as it always was.
+                if (scdbCache.SpendWithdrawal(nSidechain, block.GetHash(), tx, i, pindex->nHeight, true /* fJustCheck */, true /* fDebug */)) {
                     vWithdrawalToSpend.push_back(std::make_tuple(nSidechain, tx, i));
                 } else {
-                    return error("ConnectBlock(): Spend Withdrawal failed (blind Withdrawal hash : txid): %s : %s", hashBlind.ToString(), tx.GetHash().ToString());
+                    // DoS(0), not DoS(100). Validating from the
+                    // parent's record makes this node's answer reproducible,
+                    // but a ban asserts something about what every other node
+                    // computed, and nodes that diverged before the record was
+                    // complete - or whose records predate it - can still
+                    // disagree. DoS(0) still marks the block invalid, without
+                    // a peer ban.
+                    if (!fJustCheck)
+                        AlertSCDBDivergence(block.GetHash(), "bad-withdrawal-spend");
+                    return state.DoS(0,
+                        error("ConnectBlock(): Spend Withdrawal failed (blind Withdrawal hash : txid): %s : %s",
+                              hashBlind.ToString(), tx.GetHash().ToString()),
+                        REJECT_INVALID, "bad-withdrawal-spend");
+                }
+            } else if (pindex->nHeight >= nCTIPRulesHeight) {
+                // Treasury anchor soft fork, the DESTINATION half.
+                // (Activation height: see nCTIPRulesHeight above - the fork,
+                // not the anchor.)
+                //
+                // "D" (SIDECHAIN_WITHDRAWAL_RETURN_DEST) marks a withdrawal's
+                // change return, which SpendWithdrawal accounts for - which is
+                // why GetBlockDeposits skips it rather than recording it as a
+                // deposit. From this height "D" belongs to withdrawals only: a
+                // treasury spend that is not a withdrawal may not claim it, so
+                // every node's recorded treasury pointer stays the coin the
+                // chain actually holds.
+                //
+                // A pure function of the block's bytes and the coins view -
+                // no SCDB state - so every node computes the same answer and
+                // DoS(100) is safe, unlike the DoS(0) reject above. The
+                // destination sits in an OP_RETURN output committed by the
+                // merkle root, so a relayed copy cannot be doctored into
+                // failing this; not corruption-possible.
+                //
+                // This only brings consensus level with policy, which
+                // already refuses both shapes: a strict deposit carrying "D"
+                // on the destination test in AcceptToMemoryPoolWorker, and an
+                // equal-value treasury spend on the
+                // "sidechain-invalid-ctip-spend" branch beside it, whose own
+                // comment notes it is the only thing standing in the way and
+                // that a miner does not consult it. This is that rule, on the
+                // side a miner cannot skip.
+                SidechainDeposit depositDest;
+                if (scdbCache.TxnToDeposit(tx, i, block.GetHash(), depositDest) &&
+                        depositDest.strDest == SIDECHAIN_WITHDRAWAL_RETURN_DEST) {
+                    return state.DoS(100,
+                        error("ConnectBlock(): bad-deposit-withdrawal-dest: treasury spend claims the withdrawal-return destination without being a withdrawal: %s",
+                              tx.GetHash().ToString()),
+                        REJECT_INVALID, "bad-deposit-withdrawal-dest");
                 }
             }
-        }
-
-        if (skydogesEnabled && !tx.IsCoinBase() && !fJustCheck) {
-            // Check for possible sidechain deposits
-            bool fSidechainOutput = false;
-            uint8_t nSidechain;
-            for (const CTxOut out : tx.vout) {
-                const CScript& scriptPubKey = out.scriptPubKey;
-                if (scriptPubKey.IsDrivechain(nSidechain)) {
-                    fSidechainOutput = true;
-                    break;
-                }
-            }
-            if (fSidechainOutput)
-                vDepositTx.push_back(std::make_tuple(tx, i, block.GetHash()));
         }
 
         CTxUndo undoDummy;
@@ -2359,27 +3172,88 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     int64_t nTime4 = GetTimeMicros(); nTimeVerify += nTime4 - nTime2;
     LogPrint(BCLog::BENCH, "    - Verify %u txins: %.2fms (%.3fms/txin) [%.2fs (%.2fms/blk)]\n", nInputs - 1, MILLI * (nTime4 - nTime2), nInputs <= 1 ? 0 : MILLI * (nTime4 - nTime2) / (nInputs-1), nTimeVerify * MICRO, nTimeVerify * MILLI / nBlocksTotal);
 
-    if (skydogesEnabled && !fJustCheck && vDepositTx.size()) {
-        // Convert deposit transactions into SidechainDeposit objects
+    // (scdbCache - the working sidechain state and deferred commit - was built
+    // above, before the transaction loop, so the withdrawal probe in the loop
+    // reads the same object the committing calls below do.)
+
+    // Runs under fJustCheck too. The deposit conversion below is the only place
+    // a malformed deposit is caught, and it rejects the whole block at DoS(100);
+    // leaving it out of the template check let a miner assemble a block that
+    // every node - including the miner's own - then refused, rebuild the same
+    // template next block, and be banned by its own peers for it.
+    //
+    // This cannot make a valid block invalid. ConnectBlock is only ever called
+    // with fJustCheck true from TestBlockValidity (below), and TestBlockValidity
+    // has two callers, CreateNewBlock and the getblocktemplate proposal mode -
+    // neither on the block acceptance path. A stricter check here can only stop
+    // this node building a template that was going to be rejected anyway.
+    if (skydogeEnabled) {
+        // Collected here rather than inside the transaction loop above, so that
+        // the rebuild pass can reach the same code with only a block in hand.
+        // The scan is over outputs the loop has already touched and costs
+        // nothing beside the script verification it sits next to.
         std::vector<SidechainDeposit> vDeposit;
-        for (size_t i = 0; i <  vDepositTx.size(); i++) {
-            const CTransaction tx = std::get<0>(vDepositTx[i]);
-            int nTx = std::get<1>(vDepositTx[i]);
-            uint256 hashBlock = std::get<2>(vDepositTx[i]);
-            SidechainDeposit deposit;
-            if (!scdb.TxnToDeposit(tx, nTx, hashBlock, deposit)) {
-                LogPrintf("%s: Deposits invalid from block: %s\n", __func__, block.GetHash().ToString());
-                return error("%s: Deposits invalid from block: %s", __func__, block.GetHash().ToString());
-            }
-            // Skip Withdrawal change return deposit, handled by SCDB::SpendWithdrawal
-            if (deposit.strDest == SIDECHAIN_WITHDRAWAL_RETURN_DEST)
-                continue;
-            vDeposit.push_back(deposit);
+        if (!GetBlockDeposits(block, scdbCache, vDeposit)) {
+            LogPrintf("%s: Deposits invalid from block: %s\n", __func__, block.GetHash().ToString());
+            return state.DoS(100,
+                error("%s: Deposits invalid from block: %s", __func__, block.GetHash().ToString()),
+                REJECT_INVALID, "bad-sidechain-deposit");
         }
-        scdb.AddDeposits(vDeposit);
+        // Treasury anchor soft fork, the continuity half: from nCTIPRulesHeight
+        // (the fork, not the anchor) a slot
+        // that already holds a treasury pointer may only receive
+        // deposits that chain from it - the first spends the pointer, each
+        // one after it spends the burn output of the one before, and each
+        // spends its predecessor exactly once. This is the consensus form of
+        // the relay rule the mempool has enforced for years (the CTIP-spend
+        // check in AcceptToMemoryPoolWorker), whose comment has named this
+        // flag day since it was written; it is also the rule whose absence
+        // let a deposit start a second treasury lineage and strand the coins
+        // on the branch the pointer did not follow.
+        //
+        // The reference is the PARENT's pointer - scdbCache still holds it,
+        // since this block's deposits are applied just below - so the check is
+        // a pure function of (parent pointer, block bytes). Record-derived,
+        // hence DoS(0) with the rest of that family rather than a ban.
+        //
+        // A slot holding no pointer leaves its first deposit unconstrained:
+        // there is nothing for it to chain from, and the alternative would
+        // make a slot's first-ever deposit unmineable. Deposits after it in
+        // the same block still chain.
+        //
+        // Note what this forbids: a payout and a deposit for the SAME slot in
+        // one block. The payout spends the pointer, so a deposit chaining from
+        // that pointer would double-spend it, and one chaining from the
+        // payout's change return does not chain from the parent pointer. No
+        // relayable deposit can be in that position anyway - the mempool rule
+        // makes deposits spend the current pointer - so this costs nothing a
+        // miner could reach honestly. Other slots are unaffected.
+        if (skydogeEnabled && pindex->nHeight >= nCTIPRulesHeight) {
+            uint8_t nSidechainFail = 0;
+            uint256 txidFail;
+            if (!CheckDepositContinuity(vDeposit, scdbCache, nSidechainFail, txidFail)) {
+                if (!fJustCheck)
+                    AlertSCDBDivergence(block.GetHash(), "bad-deposit-continuity");
+                return state.DoS(0,
+                    error("%s: deposit does not chain from the treasury of sidechain %u: %s",
+                          __func__, nSidechainFail, txidFail.ToString()),
+                    REJECT_INVALID, "bad-deposit-continuity");
+            }
+        }
+
+        // Mutates the copy only; committed below after all rejection points.
+        // Kept log-and-continue (as before): a sort failure here must NOT reject
+        // the block, or one crafted block could halt upgraded nodes while
+        // un-upgraded nodes accept it.
+        //
+        // Still skipped under fJustCheck: the copy is discarded on that path, so
+        // the sort would be paid for nothing, and skipping it keeps what the
+        // withdrawal spend below sees exactly as it was before.
+        if (!fJustCheck)
+            scdbCache.AddDeposits(vDeposit);
     }
 
-    if (skydogesEnabled && vWithdrawalToSpend.size()) {
+    if (skydogeEnabled && vWithdrawalToSpend.size()) {
         for (size_t i = 0; i < vWithdrawalToSpend.size(); i++) {
             uint8_t nSidechain = std::get<0>(vWithdrawalToSpend[i]);
             const CTransaction tx = std::get<1>(vWithdrawalToSpend[i]);
@@ -2387,21 +3261,204 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
 
             uint256 hashBlind;
             tx.GetBlindHash(hashBlind);
-            if (!scdb.SpendWithdrawal(nSidechain, block.GetHash(), tx, nTx, fJustCheck, true /* fDebug */)) {
-                return error("ConnectBlock(): Final spend Withdrawal failed (blind Withdrawal hash : txid): %s : %s.\n nSidechain: %u\n", hashBlind.ToString(), tx.GetHash().ToString(), nSidechain);
+            if (!scdbCache.SpendWithdrawal(nSidechain, block.GetHash(), tx, nTx, pindex->nHeight, fJustCheck, true /* fDebug */)) {
+                // DoS(0): an SCDB-state-dependent reject; see bad-withdrawal-spend above.
+                if (!fJustCheck)
+                    AlertSCDBDivergence(block.GetHash(), "bad-withdrawal-spend-final");
+                return state.DoS(0,
+                    error("ConnectBlock(): Final spend Withdrawal failed (blind Withdrawal hash : txid): %s : %s.\n nSidechain: %u\n",
+                          hashBlind.ToString(), tx.GetHash().ToString(), nSidechain),
+                    REJECT_INVALID, "bad-withdrawal-spend-final");
             }
         }
     }
 
-    if (skydogesEnabled) {
-        // Update / synchronize SCDB
-        if (!scdb.Update(pindex->nHeight, block.GetHash(), block.GetPrevHash(), block.vtx[0]->vout, fJustCheck, true /* fDebug */)) {
-            LogPrintf("%s: SCDB failed to update with block: %s\n", __func__, block.GetHash().ToString());
-            return error("%s: SCDB update failed for block: %s", __func__, block.GetHash().ToString());
+    if (skydogeEnabled) {
+        // Security fix (height-gated): reject a block whose coinbase
+        // carries a malformed sidechain proposal commitment. The try/catch in
+        // DeserializeFromProposalScript already stops such a block from
+        // permanently halting THIS node (the proposal is skipped rather than
+        // throwing up through ConnectBlock), but a skipped-and-accepted block
+        // would still be relayed to un-upgraded peers, where it wedges them.
+        // Marking it invalid here with real `state` stops propagation and keeps
+        // it off the best chain. DeserializeFromProposalScript is a pure
+        // function of the script bytes, so all nodes agree deterministically.
+        // Height-gated at SmallBlockHeight (the coordinated flag day) so it
+        // never retroactively invalidates a stored or historical block.
+        if (pindex->nHeight >= chainparams.GetConsensus().SmallBlockHeight) {
+            for (const CTxOut& out : block.vtx[0]->vout) {
+                if (!out.scriptPubKey.IsSidechainProposalCommit())
+                    continue;
+                Sidechain proposalCheck;
+                if (!proposalCheck.DeserializeFromProposalScript(out.scriptPubKey)) {
+                    return state.DoS(100,
+                        error("%s: malformed sidechain proposal commitment in block: %s",
+                              __func__, block.GetHash().ToString()),
+                        REJECT_INVALID, "bad-sidechain-proposal");
+                }
+                // Bounded size (see SIDECHAIN_PROPOSAL_MAX_TEXT_BYTES).
+                // A pure function of the script bytes, like the check above.
+                if (proposalCheck.title.size() + proposalCheck.description.size() > SIDECHAIN_PROPOSAL_MAX_TEXT_BYTES) {
+                    return state.DoS(100,
+                        error("%s: oversized sidechain proposal commitment (%u bytes of title and description, limit %u) in block: %s",
+                              __func__, (unsigned)(proposalCheck.title.size() + proposalCheck.description.size()),
+                              (unsigned)SIDECHAIN_PROPOSAL_MAX_TEXT_BYTES, block.GetHash().ToString()),
+                        REJECT_INVALID, "bad-sidechain-proposal-size");
+                }
+            }
         }
-        // After updating SCDB make sure mempool deposits are still valid
-        if (!fJustCheck)
-            mempool.UpdateCTIPFromBlock(scdb.GetCTIP(), false);
+
+        // Update / synchronize SCDB
+        if (!scdbCache.Update(pindex->nHeight, block.GetHash(), block.GetPrevHash(), block.vtx[0]->vout, fJustCheck, true /* fDebug */)) {
+            LogPrintf("%s: SCDB failed to update with block: %s\n", __func__, block.GetHash().ToString());
+            // DoS(0): an SCDB-state-dependent reject; see bad-withdrawal-spend above.
+            if (!fJustCheck)
+                AlertSCDBDivergence(block.GetHash(), "bad-scdb-update");
+            return state.DoS(0,
+                error("%s: SCDB update failed for block: %s", __func__, block.GetHash().ToString()),
+                REJECT_INVALID, "bad-scdb-update");
+        }
+        // (mempool CTIP is refreshed at the commit point below, after all
+        // rejection/error points, so a later-rejected block never updates it.)
+
+        // SCDB commitment soft fork, the value half: from SCDBCommitmentHeight
+        // the committed hash must equal GetCommitmentHash() of the post-connect
+        // state scdbCache now holds. Gated on !fJustCheck because deposit
+        // application is deliberately skipped under fJustCheck (above), so
+        // there the cache is not the post-connect state and an ungated check
+        // would make TestBlockValidity reject the miner's own valid template.
+        // Presence and shape were settled at DoS(100) in ContextualCheckBlock;
+        // this is the SCDB-state-dependent half, so it stays DoS(0) like the
+        // three rejects above: the reject already forks a diverged node off
+        // the chain loudly, without punishing the peer that relayed the block.
+        if (!fJustCheck &&
+                pindex->nHeight >= chainparams.GetConsensus().SCDBCommitmentHeight) {
+            uint256 hashCommitted;
+            uint256 hashDummy;
+            int nCommit = 0;
+            for (const CTxOut& out : block.vtx[0]->vout) {
+                if (out.scriptPubKey.IsSCDBHashCommit(hashDummy)) {
+                    hashCommitted = hashDummy;
+                    nCommit++;
+                }
+            }
+            // Exactly one, the same count ContextualCheckBlock demands. This
+            // loop used to take the LAST match and say nothing about how many
+            // there were, so the two surfaces disagreed: a block carrying two
+            // commitments is refused outright by contextual validation but,
+            // reaching here without it - a block already on disk being
+            // replayed by -reindex-chainstate, which never calls AcceptBlock -
+            // was judged on whichever commitment happened to come last. A pure
+            // function of the coinbase's bytes, which the merkle root commits
+            // to, so every node answers identically and a relayed copy cannot
+            // be doctored into failing it: DoS(100), not corruption-possible,
+            // exactly as in ContextualCheckBlock. Same reason string too, so
+            // the two surfaces are also indistinguishable in the logs.
+            if (nCommit != 1) {
+                LogPrintf("%s: expected exactly 1 SCDB hash commitment in block %s, found %d\n",
+                          __func__, block.GetHash().ToString(), nCommit);
+                return state.DoS(100,
+                    error("%s: expected exactly 1 SCDB hash commitment, found %d", __func__, nCommit),
+                    REJECT_INVALID, "bad-scdb-commitment-missing");
+            }
+            const uint256 hashComputed = scdbCache.GetCommitmentHash(pindex->nHeight);
+            if (hashCommitted != hashComputed) {
+                LogPrintf("%s: SCDB commitment mismatch in block %s: committed %s computed %s\n",
+                          __func__, block.GetHash().ToString(),
+                          hashCommitted.ToString(), hashComputed.ToString());
+                AlertSCDBDivergence(block.GetHash(), "bad-scdb-commitment");
+                return state.DoS(0,
+                    error("%s: SCDB commitment mismatch for block: %s", __func__, block.GetHash().ToString()),
+                    REJECT_INVALID, "bad-scdb-commitment");
+            }
+        }
+
+        // Treasury anchor soft fork, the anchor itself: from CTIPAnchorHeight
+        // every treasury pointer this node carries must name a coin that
+        // actually exists in the unspent output set, with the treasury script
+        // for its own slot and exactly the amount recorded against it.
+        //
+        // The pointer stays maintained state and its transition is untouched -
+        // this anchors the answer to the one store every node shares, it never
+        // derives the pointer from that store. Deriving it is the form that was
+        // analysed and rejected: the treasury script is anyone-can-spend and
+        // uniqueness is not enforced, so a slot can hold more than one
+        // candidate, and mainnet already does.
+        //
+        // Gated on !fJustCheck for the same reason as the commitment check
+        // above: deposits are not applied under fJustCheck, so there the state
+        // is not the post-connect state and an ungated check would reject the
+        // miner's own template. The block's own outputs are already in the
+        // view by this point, so a pointer this block just moved anchors to
+        // the coin this block just created.
+        //
+        // DoS(0), permanently. A failure says this node's pointer disagrees
+        // with the chain's coins, which is real and worth stopping on, but the
+        // pointer is record-derived and two honest nodes can hold different
+        // ones in the forked states already on chain - so a ban would assert
+        // something about the peer that this check cannot establish.
+        //
+        // Cost is one point lookup per slot holding a pointer, plus - only when
+        // a pointer does not anchor - one input scan of the block.
+        //
+        // Refuse the block only when
+        // the block itself is what broke the pointer. A pointer whose coin
+        // THIS BLOCK spent and did not move is the event this anchor exists
+        // to stop, and it still stops it (DoS(0), as before). A pointer that
+        // was already unanchored before this block - its coin already spent,
+        // or a coin of the wrong script or amount, neither of which any block
+        // can cause - is state every node agrees on, and refusing every block
+        // over it halts the whole upgraded set at once while no block can
+        // repair it (continuity demands spending a coin that is gone). It is
+        // reported (log line plus a throttled alert under its own key) and the
+        // block is accepted; the slot stays frozen - no deposits, no
+        // withdrawals - until the pointer is repaired by invalidating the
+        // block that broke it, or by a release that moves the anchor. The
+        // PRE-EXISTING break must be surfaced, which is why the alert keeps
+        // its own key here rather than folding into the reject above.
+        if (!fJustCheck &&
+                pindex->nHeight >= chainparams.GetConsensus().CTIPAnchorHeight) {
+            for (const std::pair<const uint8_t, SidechainCTIP>& p : scdbCache.GetCTIP()) {
+                const Coin& coin = view.AccessCoin(p.second.out);
+                uint8_t nSidechainCoin;
+                if (!coin.IsSpent() &&
+                        coin.out.scriptPubKey.IsDrivechain(nSidechainCoin) &&
+                        nSidechainCoin == p.first &&
+                        coin.out.nValue == p.second.amount)
+                    continue;
+
+                bool fSpentByThisBlock = false;
+                if (coin.IsSpent()) {
+                    for (const CTransactionRef& ptx : block.vtx) {
+                        for (const CTxIn& in : ptx->vin) {
+                            if (in.prevout == p.second.out) {
+                                fSpentByThisBlock = true;
+                                break;
+                            }
+                        }
+                        if (fSpentByThisBlock)
+                            break;
+                    }
+                }
+
+                if (!fSpentByThisBlock) {
+                    const std::string strMessage = strprintf(
+                        "Warning: treasury pointer of sidechain %u is already unanchored going into block %s (%s names no matching unspent output) and was NOT refused: this block did not break it, and no block can repair it. The slot is frozen for deposits and withdrawals until the block that broke it is invalidated or a release moves the anchor.",
+                        p.first, block.GetHash().ToString(), p.second.out.ToString());
+                    AlertSCDBNotify("ctip-anchor-preexisting", strMessage);
+                    continue;
+                }
+
+                LogPrintf("%s: treasury pointer of sidechain %u is not anchored in block %s: %s\n",
+                          __func__, p.first, block.GetHash().ToString(),
+                          p.second.out.ToString());
+                AlertSCDBDivergence(block.GetHash(), "bad-ctip-anchor");
+                return state.DoS(0,
+                    error("%s: treasury pointer of sidechain %u names no matching unspent output",
+                          __func__, p.first),
+                    REJECT_INVALID, "bad-ctip-anchor");
+            }
+        }
     }
 
     if (fJustCheck)
@@ -2418,24 +3475,165 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     if (!WriteTxIndexDataForBlock(block, state, pindex))
         return false;
 
-    // TODO
-    // Instead of writing the entire vector of sidechains with each block for
-    // undo purposes, store the sidechain only once with LDB and then maintain
-    // only a list of sidechain hashes per block. Then if we need to re-activate
-    // an old sidechain we can look it up by hash.
+    // The record no longer carries the entire sidechain table: only the active
+    // slots are stored (see below), and ApplyLDBData rebuilds the rest on read.
+    // A possible later step: keeping a single copy of each
+    // sidechain in the database and storing only its hash per block, so that an
+    // old sidechain could be re-activated by looking it up by hash.
     SidechainBlockData data;
-    data.vWithdrawalStatus = scdb.GetState();
-    data.vActivationStatus = scdb.GetSidechainActivationStatus();
-    data.vSidechain = scdb.GetSidechains();
+    data.vWithdrawalStatus = scdbCache.GetState();
+    data.vActivationStatus = scdbCache.GetSidechainActivationStatus();
+    data.vSidechain = scdbCache.GetSidechains();
 
-    if (data.vSidechain.empty()) {
-        // Initialize with blank inactive sidechains
-        data.vSidechain.resize(SIDECHAIN_ACTIVATION_MAX_ACTIVE);
-        for (size_t i = 0; i < data.vSidechain.size(); i++)
-            data.vSidechain[i].nSidechain = i;
+    // DELTA or CUMULATIVE, decided by the anchor cadence. On a delta block
+    // vFailed and vSpent carry only what THIS block failed and spent; on an
+    // anchor they carry the whole set, which is what makes an anchor the
+    // restore point a reconstruction walk stops at.
+    bool fAnchorRecord =
+            (pindex->nHeight % SCDB_RECORD_ANCHOR_INTERVAL) == 0;
+
+    // AND ALWAYS AN ANCHOR WHEN THIS BLOCK DROPPED FAILURES.
+    // A delta only ADDS to the failed set, so a delta chain that spanned a
+    // drop would put the dropped failures back on every restore. Anchoring the
+    // dropping block means no walk ever crosses one: every walk stops at or
+    // after the most recent drop. At most one extra anchor per failure, and
+    // the cap bounds failures to 32 per slot per 129,600 blocks on mainnet.
+    // If Update did not run for this block the value is the previous block's,
+    // which can only force an anchor that was not needed - the safe direction.
+    if (scdbCache.GetFailedPrunedLastUpdate() > 0)
+        fAnchorRecord = true;
+
+    // AND ALWAYS AN ANCHOR WHEN THE PARENT CANNOT BE A BASE. A delta is only
+    // meaningful if the record chain behind it terminates at one that states
+    // both sets in full, and that is NOT guaranteed by the cadence alone: a node
+    // upgraded IN PLACE from 0.44.0 ('S' records) or 0.44.05 ('V') has a history
+    // of records that state neither set, so the very first delta it wrote would
+    // sit on top of one. Forcing an anchor there makes every delta chain
+    // terminate correctly BY CONSTRUCTION, which is what lets
+    // RestoreFailedSpentFromRecords be a walk rather than a guess.
+    //
+    // A delta parent is fine - it recurses to its own base by induction. A
+    // missing parent record (genesis, or a gap) is not, so it forces an anchor
+    // too, which is the conservative direction.
+    if (!fAnchorRecord) {
+        SidechainBlockData parentRecord;
+        const bool fParentUsable =
+                pindex->pprev && psidechaintree &&
+                psidechaintree->GetBlockData(pindex->pprev->GetBlockHash(), parentRecord) &&
+                (parentRecord.IsFailedSpentAnchor() || parentRecord.HasFailedSpentDelta());
+        if (!fParentUsable)
+            fAnchorRecord = true;
     }
 
-    if (!psidechaintree->HaveBlockData(block.GetHash()) &&
+    // The treasury pointer of each sidechain as of this block, and the bundle
+    // failures standing at it. Both used to survive only in files written at
+    // shutdown, so an unclean stop left the treasury describing an older block
+    // with nothing to notice it. Recorded against the block, they are restored
+    // by ResyncSCDB like the lists above.
+    //
+    // Taken from scdbCache, not the global: this is the copy that has the
+    // block's effects applied and that is about to be moved over the global at
+    // the commit point, exactly as the three lists above are.
+    m_scdb_finding.Reset();
+    data.vTreasury = scdbCache.GetTreasuryLog(&m_scdb_finding.audit);
+    data.vFailed = fAnchorRecord
+            ? scdbCache.GetFailedWithdrawalCache()
+            : scdbCache.GetBlockFailedWithdrawals(block.GetHash());
+
+    // A record is read back as a statement about the treasury of every active
+    // sidechain - ApplyLDBData clears mapCTIP and installs exactly what the
+    // record lists - so writing one from caches this node already knows are
+    // inconsistent publishes that inconsistency into its own future, and a
+    // slot the record fails to mention loses its pointer on every later
+    // replay. It is still written: refusing would break the chain of records,
+    // and dropping the treasury key would drop the spent-bundle key and the
+    // compact table with it. But it must not be written SILENTLY, because the
+    // resulting divergence is otherwise indistinguishable from a healthy node.
+    //
+    // Scope: DepositCacheSupportsTreasury sees only the caches, not the
+    // chain, so it catches the deposits-present / pointer-absent shape only.
+    // That is why every node runs a full -reindex on this release before the
+    // fork height (see the release notes).
+    //
+    // Only MEASURED here, where scdbCache is still the copy the record was built
+    // from. The alert is raised after the commit point below, because until then
+    // the block is not accepted: a failed disk write returns an error from here,
+    // and an alert saying the block was accepted and the record written would be
+    // false - and would burn the one-hour notification throttle that the real
+    // alert needs when the block is retried successfully.
+    m_scdb_finding.fCacheUnsound =
+            !scdbCache.DepositCacheSupportsTreasury(m_scdb_finding.nSlotUnsupported);
+    m_scdb_finding.nStated = data.vTreasury.size();
+
+    // The spent bundles, for the same reason and from the same copy. This field
+    // has been in the record's serialisation from the start and nothing ever
+    // filled it; see DB_SIDECHAIN_BLOCK_OP_SPENT for why it matters and why the
+    // key rather than the contents has to say so.
+    //
+    // The whole cache, not just this block's spends, matching vFailed above:
+    // ApplyLDBData restores state as of the block, not a per-block delta, and
+    // each entry carries the block it belongs to so the map rebuilds exactly.
+    // Unbounded in principle, as vFailed already is, and bounded in practice by
+    // how rarely a bundle is paid out.
+    if (fAnchorRecord) {
+        data.vSpent = scdbCache.GetSpentWithdrawalCache();
+    } else {
+        data.vSpent = scdbCache.GetBlockSpentWithdrawals(block.GetHash());
+    }
+
+    // The sidechain table is a fixed 256-slot list; almost every block has at
+    // most one active slot (the rest are canonical blanks). Serializing all 256
+    // entries into the blocks/sidechain index on every block is what bloats that
+    // DB (~15 KB/block). Persist only the ACTIVE slots (each carries its own
+    // nSidechain index); SidechainDB::ApplyLDBData rebuilds the canonical
+    // 256-slot blank table and overlays these back on read, so the restored
+    // in-memory SCDB is byte-identical. Local-index serialization only --
+    // nothing here is hashed into a block.
+    {
+        std::vector<Sidechain> vActive;
+        for (const Sidechain& s : data.vSidechain) {
+            if (s.fActive)
+                vActive.push_back(s);
+        }
+        // A full (256-entry) vector marks the legacy/complete format on read, so
+        // only substitute the sparse form when it is strictly smaller.
+        // ApplyLDBData decides whether to re-expand from the vector's length
+        // rather than from the key, so the compact table and the treasury log
+        // are independent choices and the record below carries both.
+        if (vActive.size() < data.vSidechain.size())
+            data.vSidechain = std::move(vActive);
+
+        // Written under its own DB key (see DB_SIDECHAIN_BLOCK_OP_SPENT, and
+        // DB_SIDECHAIN_BLOCK_OP_TREASURY below it) so that an older binary,
+        // which can neither re-expand the compact table nor read the appended
+        // treasury fields nor tell a populated vSpent from the empty one it
+        // always wrote, gets a clean "no data" and reindexes instead of
+        // silently mis-reading a record it only partly understands.
+        // The wide key from SidechainParamsHeight, where the window values
+        // stop fitting the legacy 37-byte withdrawal-state form. Below it the
+        // record is written exactly as 0.44.08 wrote it, which is what keeps
+        // every existing blocks/sidechain database readable.
+        //
+        // Four keys, two independent dimensions: withdrawal-state WIDTH (by
+        // height, consensus) and whether vFailed/vSpent are a DELTA (by the
+        // node-local anchor cadence). Both dimensions get a key so that setting
+        // SidechainParamsHeight later cannot silently drop the delta form.
+        const bool fWideRecord =
+                pindex->nHeight >= chainparams.GetConsensus().SidechainParamsHeight;
+        if (fAnchorRecord) {
+            data.sidechainop = fWideRecord ? DB_SIDECHAIN_BLOCK_OP_WIDE
+                                           : DB_SIDECHAIN_BLOCK_OP_SPENT;
+        } else {
+            data.sidechainop = fWideRecord ? DB_SIDECHAIN_BLOCK_OP_DELTA_WIDE
+                                           : DB_SIDECHAIN_BLOCK_OP_DELTA;
+        }
+    }
+
+    // Whether the record was NEWLY written matters to the alert: reconnecting a
+    // block whose record is already on disk writes nothing, so saying "and wrote
+    // its sidechain record" would be false there.
+    m_scdb_finding.fRecordNewlyWritten = !psidechaintree->HaveBlockData(block.GetHash());
+    if (m_scdb_finding.fRecordNewlyWritten &&
             !psidechaintree->WriteSidechainBlockData(
                 std::make_pair(block.GetHash(), data)))
     {
@@ -2449,7 +3647,27 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         return state.Error("Failed to write block OP_RETURN data!");
     }
 
+    // SCDB commit point: every rejection/error above has passed (withdrawal
+    // spends, SCDB update, and both disk writes), so publish the SCDB mutations
+    // globally now, atomically with block acceptance under cs_main. Until here
+    // the global SCDB was untouched, so a reject or disk-write error left it
+    // unpoisoned. fJustCheck returned earlier, so TestBlockValidity never
+    // reaches this and can no longer mutate the global SCDB.
+    // Checked before the commit below, not after. The sidechain state and the
+    // coins view have to move to this block together; publishing one and then
+    // stopping on a failed check would leave the two describing different
+    // blocks, which is not something a restart can work out.
     assert(pindex->phashBlock);
+
+    if (skydogeEnabled) {
+        scdb = std::move(scdbCache);
+        // A verification walk (level 4 reconnects) is unwound by the guard in
+        // VerifyDB; re-anchoring the mempool on each intermediate block would
+        // evict deposits that are valid at the real tip.
+        if (!fSidechainVerifying)
+            mempool.UpdateCTIPFromBlock(scdb.GetCTIP(), false);
+    }
+
     // add this block to the view's block chain
     view.SetBestBlock(pindex->GetBlockHash());
 
@@ -2520,13 +3738,31 @@ bool static FlushStateToDisk(const CChainParams& chainparams, CValidationState &
         bool fPeriodicFlush = mode == FLUSH_STATE_PERIODIC && nNow > nLastFlush + (int64_t)DATABASE_FLUSH_INTERVAL * 1000000;
         // Combine all conditions that result in a full cache flush.
         fDoFullFlush = (mode == FLUSH_STATE_ALWAYS) || fCacheLarge || fCacheCritical || fPeriodicFlush || fFlushForPrune;
+        // Durability point for the sidechain / OP_RETURN indexes. Their per-block
+        // records are buffered in memory (txdb.cpp) rather than written as they
+        // are produced, and are persisted here in a single synchronous batch
+        // *before* the chainstate best-block pointer advances. That ordering
+        // keeps the invariant index-durable >= chainstate-durable: after any
+        // crash, every block the chainstate knows about already has its snapshot
+        // on disk (ResyncSCDB looks it up by hash). Because nothing is written
+        // between these points there is no partially-written state to strand, so
+        // the guarantee does not depend on the database's internal log handling.
+        // Done before the pruning/block-index section below so that a failure
+        // here cannot leave pruned block files deleted with a stale coins tip.
+        if (fDoFullFlush) {
+            if (psidechaintree && !psidechaintree->FlushBuffer())
+                return AbortNode(state, "Failed to flush sidechain database");
+            if (popreturndb && !popreturndb->FlushBuffer())
+                return AbortNode(state, "Failed to flush OP_RETURN database");
+        }
         // Write blocks and block index to disk.
-        if ((fDoFullFlush || fPeriodicWrite) && !fCMPCTWit) {
+        if ((fDoFullFlush || fPeriodicWrite)) {
             // Depend on nMinDiskSpace to ensure we can write block index
             if (!CheckDiskSpace(0))
                 return state.Error("out of disk space");
             // First make sure all block and undo data is flushed to disk.
-            FlushBlockFile();
+            if (!FlushBlockFile())
+                return AbortNode(state, "Failed to flush block data to disk");
             // Then update all block file information (which may refer to block and undo files).
             {
                 std::vector<std::pair<int, const CBlockFileInfo*> > vFiles;
@@ -2829,14 +4065,58 @@ bool CChainState::ConnectTip(CValidationState& state, const CChainParams& chainp
     mempool.removeForBlock(blockConnecting.vtx, pindexNew->nHeight);
     disconnectpool.removeForBlock(blockConnecting.vtx);
 
+    // Small-block soft fork: the block just connected may be the last one
+    // before the rule binds. Transactions admitted under the old standardness
+    // limit are not grandfathered - once the next block is bound by
+    // MAX_SMALL_BLOCK_SERIALIZED_SIZE an oversized one can never be mined by
+    // an assembler that holds back SMALL_BLOCK_COINBASE_RESERVE_BYTES, so
+    // leaving it in place would pin it and its descendants in every mempool
+    // until the 14-day expiry while it holds a fee that can never be
+    // collected. Fires only on the crossing block: from there on
+    // AcceptToMemoryPool refuses them at the door, so there is nothing to
+    // sweep and no per-block cost.
+    //
+    // Applied on -acceptnonstdtxn nodes too, and that is deliberate. Such a
+    // node took the relay cap off on purpose and a transaction between the
+    // cap and the block limit could in principle be mined by some other
+    // assembler, so this does drop something it chose to keep. From this
+    // block on AcceptToMemoryPool refuses the same transaction on every node,
+    // whatever fRequireStandard says, so the purge and the door agree: one
+    // rule beats two.
+    {
+        const int nSmallBlockHeight = chainparams.GetConsensus().SmallBlockHeight;
+        if (pindexNew->nHeight + 1 >= nSmallBlockHeight &&
+                (!pindexNew->pprev || pindexNew->pprev->nHeight + 1 < nSmallBlockHeight)) {
+            mempool.removeForSmallBlockActivation(MAX_STANDARD_TX_SMALL_BLOCK_SIZE);
+        }
+    }
+
     // Update mempool CTIP
-    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
-    if (skydogesEnabled)
+    bool skydogeEnabled = IsSkydogeEnabled(chainActive.Tip(), Params().GetConsensus());
+    if (skydogeEnabled)
         mempool.UpdateCTIPFromBlock(scdb.GetCTIP(), false /* fDisconnect */);
 
     // Update chainActive & related variables.
     chainActive.SetTip(pindexNew);
     UpdateTip(pindexNew, chainparams);
+
+    // Diagnostic only. While a configured -acksidechainproposal
+    // value names no pending proposal, say so every block (not during initial
+    // sync, when the proposal it names may simply not have been reached yet).
+    if (!IsInitialBlockDownload())
+        LogConfiguredSidechainProposalAckStatus(false /* fStartup */);
+
+    // Only now is the block really on this node's chain: the flush above
+    // succeeded and chainActive has moved. Anything ConnectBlock noticed about
+    // this node's own SCDB caches is reported here, where every claim the alert
+    // makes is true. VerifyDB reaches ConnectBlock without coming through here
+    // at all, which is the point - re-verifying history is not acceptance.
+    if (!m_scdb_finding.IsClean()) {
+        AlertSCDBUnsoundRecord(pindexNew->GetBlockHash(), m_scdb_finding.fCacheUnsound,
+                               m_scdb_finding.nSlotUnsupported, m_scdb_finding.nStated,
+                               m_scdb_finding.fRecordNewlyWritten, m_scdb_finding.audit);
+    }
+    m_scdb_finding.Reset();
 
     int64_t nTime6 = GetTimeMicros(); nTimePostConnect += nTime6 - nTime5; nTimeTotal += nTime6 - nTime1;
     LogPrint(BCLog::BENCH, "  - Connect postprocess: %.2fms [%.2fs (%.2fms/blk)]\n", (nTime6 - nTime5) * MILLI, nTimePostConnect * MICRO, nTimePostConnect * MILLI / nBlocksTotal);
@@ -2916,6 +4196,68 @@ void CChainState::PruneBlockIndexCandidates() {
     assert(!setBlockIndexCandidates.empty());
 }
 
+//! Put the deposit cache back when a disconnect has left it unable to account
+//! for the treasury it is serving.
+//!
+//! A slot can change occupant: a proposal naming an already-active slot
+//! activates, and the incoming sidechain starts clean, so activation clears
+//! that slot's deposits. That is right going forwards. Going backwards it is
+//! not. The per-block record restores the slot table and the treasury pointer,
+//! but the deposits have no per-block representation to be restored from -
+//! they carry whole transactions and are re-derivable, which is why they were
+//! deliberately kept out of the record - and Undo only ever removes deposits,
+//! never puts them back. The node therefore comes out of the reorg naming a
+//! treasury output it holds no deposits behind. The output is still on chain
+//! and still unspent; the node has simply lost track of where it is.
+//!
+//! The repair is the pass a stale cache already gets at startup, for the same
+//! reason it is used there: rebuilding from blocks reuses the production
+//! collection rather than adding a second implementation of connect-time
+//! semantics, which is the one way a repair of this kind manufactures the
+//! divergence it exists to remove.
+//!
+//! Only called where blocks were actually disconnected. Connecting a block
+//! cannot produce this state, so a node moving forwards never pays for the
+//! check.
+static void RepairSidechainDepositsIfNeeded()
+{
+    AssertLockHeld(cs_main);
+
+    // Set when a rebuild ran and did not settle it. A state this pass cannot
+    // fix then costs one pass rather than one for every block that follows.
+    // Cleared as soon as the cache is sound again, by whatever route.
+    static bool fRepairDidNotTake = false;
+
+    uint8_t nSlot = 0;
+    if (scdb.DepositCacheSupportsTreasury(nSlot)) {
+        fRepairDidNotTake = false;
+        return;
+    }
+
+    if (fRepairDidNotTake)
+        return;
+
+    LogPrintf("%s: Deposit cache does not account for the treasury of sidechain %u "
+              "after disconnecting blocks; rebuilding it from blocks.\n",
+              __func__, nSlot);
+
+    std::string strError;
+    if (!RebuildSidechainDeposits(strError)) {
+        fRepairDidNotTake = true;
+        LogPrintf("%s: Sidechain rebuild failed: %s\n", __func__, strError);
+        return;
+    }
+
+    if (!scdb.DepositCacheSupportsTreasury(nSlot)) {
+        fRepairDidNotTake = true;
+        LogPrintf("%s: Deposit cache still does not account for the treasury of "
+                  "sidechain %u after rebuilding.\n", __func__, nSlot);
+        return;
+    }
+
+    LogPrintf("%s: Deposit cache rebuilt.\n", __func__);
+}
+
 /**
  * Try to make some progress towards making pindexMostWork the active block.
  * pblock is either nullptr or a pointer to a CBlock corresponding to pindexMostWork.
@@ -2989,6 +4331,12 @@ bool CChainState::ActivateBestChainStep(CValidationState& state, const CChainPar
         // If any blocks were disconnected, disconnectpool may be non empty.  Add
         // any disconnected transactions back to the mempool.
         UpdateMempoolForReorg(disconnectpool, true);
+
+        // Done after the reconnects above rather than beside the disconnects,
+        // so a reorg that removes a slot handover and then puts one back is
+        // judged on where it ended up. The check is over the active sidechains
+        // and costs nothing when the cache is sound.
+        RepairSidechainDepositsIfNeeded();
     }
     mempool.check(pcoinsTip.get());
 
@@ -3191,6 +4539,13 @@ bool CChainState::InvalidateBlock(CValidationState& state, const CChainParams& c
     // back to the mempool.
     UpdateMempoolForReorg(disconnectpool, true);
 
+    // This route reaches its final tip here rather than in ActivateBestChain:
+    // by the time the caller gets there the most-work chain is already the
+    // active one, so it returns before doing any work. The repair has to be
+    // made where the disconnecting happened.
+    if (pindex_was_in_chain)
+        RepairSidechainDepositsIfNeeded();
+
     // The resulting new best tip may not be in setBlockIndexCandidates anymore, so
     // add it again.
     BlockMap::iterator it = mapBlockIndex.begin();
@@ -3353,7 +4708,12 @@ static bool FindBlockPos(CDiskBlockPos &pos, unsigned int nAddSize, unsigned int
         if (!fKnown) {
             LogPrintf("Leaving block file %i: %s\n", nLastBlockFile, vinfoBlockFile[nLastBlockFile].ToString());
         }
-        FlushBlockFile(!fKnown);
+        // The file being left behind is finalized here and never written again,
+        // so if it cannot be flushed do not move on to the next one - the block
+        // about to be stored would be recorded against a file whose contents
+        // are not known to be on disk.
+        if (!FlushBlockFile(!fKnown))
+            return error("%s: failed to flush block file %i", __func__, nLastBlockFile);
         nLastBlockFile = nFile;
     }
 
@@ -3471,7 +4831,7 @@ bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::P
 
     // Check transactions
     for (const auto& tx : block.vtx)
-        if (!CheckTransaction(*tx, state, true))
+        if (!CheckTransaction(*tx, state))
             return state.Invalid(false, state.GetRejectCode(), state.GetRejectReason(),
                                  strprintf("Transaction check failed (tx hash %s) %s", tx->GetHash().ToString(), state.GetDebugMessage()));
 
@@ -3495,14 +4855,10 @@ bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& pa
     return (VersionBitsState(pindexPrev, params, Consensus::DEPLOYMENT_SEGWIT, versionbitscache) == THRESHOLD_ACTIVE);
 }
 
-bool IsDrivechainEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
+bool IsSkydogeEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params)
 {
-    if (nHeight < DrivechainHeight) {
-        LOCK(cs_main);
-        return (VersionBitsState(pindexPrev, params, Consensus::DEPLOYMENT_SKYDOGE, versionbitscache) == THRESHOLD_ACTIVE);
-    } else {
+    LOCK(cs_main);
     return (pindexPrev && pindexPrev->nHeight + 1 >= params.DrivechainHeight);
-    }
 }
 
 // Compute at which vout of the block's coinbase transaction the witness
@@ -3561,6 +4917,26 @@ std::vector<unsigned char> GenerateCoinbaseCommitment(CBlock& block, const CBloc
     return commitment;
 }
 
+CTxOut GetCriticalHashCommitmentOut(const CCriticalData& data)
+{
+    CTxOut out;
+    out.nValue = 0;
+    out.scriptPubKey.resize(37);
+    out.scriptPubKey[0] = OP_RETURN;
+    out.scriptPubKey[1] = 0xD1;
+    out.scriptPubKey[2] = 0x61;
+    out.scriptPubKey[3] = 0x73;
+    out.scriptPubKey[4] = 0x68;
+
+    memcpy(&out.scriptPubKey[5], &data.hashCritical, 32);
+
+    // Add bytes (optional)
+    if (!data.vBytes.empty())
+        out.scriptPubKey += CScript(data.vBytes.begin(), data.vBytes.end());
+
+    return out;
+}
+
 void GenerateCriticalHashCommitments(CBlock& block)
 {
     /*
@@ -3571,34 +4947,11 @@ void GenerateCriticalHashCommitments(CBlock& block)
     if (block.vtx.size() < 2)
         return;
 
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
 
-        std::vector<CCriticalData> vCriticalData = GetCriticalDataRequests(block, consensusParams);
-    } else {
     std::vector<CCriticalData> vCriticalData = GetCriticalDataRequests(block);
-    }
     std::vector<CTxOut> vout;
-    for (const CCriticalData& d : vCriticalData) {
-        CTxOut out;
-        out.nValue = 0;
-        out.scriptPubKey.resize(37);
-        out.scriptPubKey[0] = OP_RETURN;
-        out.scriptPubKey[1] = 0xD1;
-        out.scriptPubKey[2] = 0x61;
-        out.scriptPubKey[3] = 0x73;
-        out.scriptPubKey[4] = 0x68;
-
-        memcpy(&out.scriptPubKey[5], &d.hashCritical, 32);
-
-        // Add bytes (optional)
-        if (!d.vBytes.empty())
-            out.scriptPubKey += CScript(d.vBytes.begin(), d.vBytes.end());
-
-        vout.push_back(out);
-    }
+    for (const CCriticalData& d : vCriticalData)
+        vout.push_back(GetCriticalHashCommitmentOut(d));
 
     // Update coinbase in block
     if (!vout.empty()) {
@@ -3617,11 +4970,6 @@ void GenerateLNCriticalHashCommitment(CBlock& block)
      * BIP: 300 & 301
      */
 
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
-    }
     // TODO
     std::vector<CCriticalData> vCriticalData; // = GetLNBMMRequests();
     std::vector<CTxOut> vout;
@@ -3659,39 +5007,7 @@ void GenerateLNCriticalHashCommitment(CBlock& block)
     }
 }
 
-// old DC activation
-void GenerateSCDBHashMerkleRootCommitment(CBlock& block, const uint256& hashSCDB, const Consensus::Params& consensusParams)
-{
-    /*
-     * "M1, M2, M3, M4"
-     * Sidechain DB data once per block hashMerkleRoot commitment.
-     * BIP: 300 & 301
-     */
 
-    // Check for activation of Skydoge
-    if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-        return;
-
-    // Create output that commitment will be added to
-    CTxOut out;
-    out.nValue = 0;
-
-    // Add script header
-    out.scriptPubKey.resize(37);
-    out.scriptPubKey[0] = OP_RETURN;
-    out.scriptPubKey[1] = 0xD2;
-    out.scriptPubKey[2] = 0x8E;
-    out.scriptPubKey[3] = 0x50;
-    out.scriptPubKey[4] = 0x8C;
-
-    // Add SCDB hashMerkleRoot
-    memcpy(&out.scriptPubKey[5], &hashSCDB, 32);
-
-    // Update coinbase in block
-    CMutableTransaction mtx(*block.vtx[0]);
-    mtx.vout.push_back(out);
-    block.vtx[0] = MakeTransactionRef(std::move(mtx));
-}
 
 //void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const uint8_t nSidechain, const Consensus::Params& consensusParams)
 void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const uint8_t nSidechain)
@@ -3702,11 +5018,6 @@ void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const 
      * BIP: 300 & 301
      */
 
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
-    }
 
     CTxOut out;
     out.nValue = 0;
@@ -3733,11 +5044,6 @@ void GenerateWithdrawalHashCommitment(CBlock& block, const uint256& hash, const 
 
 void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidechain)
 {
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
-    }
     CTxOut out;
     out.nValue = 0;
 
@@ -3752,11 +5058,6 @@ void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidecha
 
 void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash)
 {
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
-    }
 
     CTxOut out;
     out.nValue = 0;
@@ -3776,16 +5077,217 @@ void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash)
     block.vtx[0] = MakeTransactionRef(std::move(mtx));
 }
 
+void GenerateSCDBHashCommitment(CBlock& block, const uint256& hashCommitment)
+{
+    CTxOut out;
+    out.nValue = 0;
+
+    // Add script header
+    out.scriptPubKey.resize(37);
+    out.scriptPubKey[0] = OP_RETURN;
+    out.scriptPubKey[1] = 0xD8;
+    out.scriptPubKey[2] = 0x5C;
+    out.scriptPubKey[3] = 0xDB;
+    out.scriptPubKey[4] = 0xC0;
+
+    memcpy(&out.scriptPubKey[5], &hashCommitment, 32);
+    // Update coinbase in block
+    CMutableTransaction mtx(*block.vtx[0]);
+    mtx.vout.push_back(out);
+    block.vtx[0] = MakeTransactionRef(std::move(mtx));
+}
+
+//! Defined beside ResyncSCDBInto, which is its other caller; forward-declared
+//! here because the consensus seed below is compiled ~3,500 lines earlier.
+static bool RestoreFailedSpentFromRecords(SidechainDB& db, const CBlockIndex* pindex);
+
+SidechainDB GetSCDBConsensusSeed(const CBlockIndex* pindexPrev, const Consensus::Params& consensusParams)
+{
+    AssertLockHeld(cs_main);
+
+    SidechainDB scdbSeed = scdb;
+
+    // Where the parent's record is complete, the consensus sections are taken
+    // from that record rather than from whatever the global happened to hold,
+    // so decisions made against this state are a function of (parent record,
+    // block) and not of the order this node received blocks in - the same
+    // discipline DisconnectBlock applies on the way out. The copy still
+    // supplies the node-local halves the record deliberately omits: the
+    // deposit history, whose newest entries the pointer moves are derived
+    // from, and the caches no validity decision reads.
+    //
+    // Only a record carrying the spent-bundle key stands in for the parent -
+    // that key implies the treasury key, so such a record states every
+    // consensus section. An older record holds neither the treasury nor the
+    // spent bundles, and a working state built from one would reject blocks
+    // the network accepts. Missing or old, the copy of the global stands,
+    // which is the pre-record behaviour exactly - strictly additive on old
+    // history, order-independent on new.
+    //
+    // The gate is IsSkydogeEnabled on the parent, spelled out rather than
+    // reduced to the null check it happens to equal while DrivechainHeight
+    // is 1, so this helper reproduces ConnectBlock's gate literally on every
+    // chain rather than a currently-equivalent restatement of it.
+    if (IsSkydogeEnabled(pindexPrev, consensusParams) &&
+            pindexPrev->GetBlockHash() != consensusParams.hashGenesisBlock) {
+        SidechainBlockData parentData;
+        if (psidechaintree &&
+                psidechaintree->GetBlockData(pindexPrev->GetBlockHash(), parentData) &&
+                parentData.HasSpent()) {
+            scdbSeed.ApplyLDBData(pindexPrev->GetBlockHash(), parentData);
+
+            // Same reason as ResyncSCDBInto. If the rebuild fails the record
+            // chain is broken, and seeding from a half-restored set would be
+            // worse than not seeding: leave the copy of the global standing,
+            // which is exactly what happens for a record too old to seed from.
+            if (parentData.HasFailedSpentDelta() &&
+                    !RestoreFailedSpentFromRecords(scdbSeed, pindexPrev)) {
+                return scdb;
+            }
+        }
+    }
+
+    return scdbSeed;
+}
+
+bool ComputeSCDBCommitment(const CBlock& block, const CBlockIndex* pindexPrev, uint256& hashCommitment)
+{
+    AssertLockHeld(cs_main);
+
+    if (!pindexPrev || block.vtx.empty() || !block.vtx[0])
+        return false;
+
+    const int nHeight = pindexPrev->nHeight + 1;
+
+    // The working state ConnectBlock will use for this block, from the shared
+    // seed helper: the copy of the global with the tip's record overlaid
+    // where the record is complete. On a healthy node the two are identical;
+    // on a diverged one, only this choice makes the miner commit the value
+    // its own ConnectBlock will check, so the disagreement surfaces as the
+    // network rejecting the block rather than the node rejecting its own
+    // template.
+    SidechainDB scdbSim = GetSCDBConsensusSeed(pindexPrev, Params().GetConsensus());
+
+    // The block hash cannot exist yet, so every step below receives a
+    // placeholder. Legitimate only because every field the placeholder lands
+    // in - hashBlockLastSeen, the spent entries' provenance, the deposit
+    // cache - is excluded from the committed form; which fields those had to
+    // be was decided by exactly this call site. ApplyUpdate refuses a null
+    // block hash, so the placeholder is 1 rather than 0 - a value no real
+    // block can take, since it would need to beat every proof-of-work target.
+    const uint256 hashPlaceholder = uint256S("0x1");
+
+    // The connect path's steps, in its order: discover this block's payouts,
+    // collect and apply the block's deposits, spend the payouts, then scan the
+    // finished coinbase. Kept as a sequence of the same public calls
+    // ConnectBlock makes rather than a shared helper - extraction would
+    // refactor interleaved per-transaction rejects that were just stabilised,
+    // and drift between the two halves cannot survive a single test run,
+    // because a drifted miner's own block fails its own ConnectBlock commitment
+    // check at the next height.
+    //
+    // The payouts are discovered from the block and the coin view the same way
+    // ConnectBlock discovers them - a transaction that spends a sidechain
+    // treasury output (a CTIP) and takes more sidechain value out than it puts
+    // back - rather than trusted from a list maintained beside the block. Such
+    // a list cannot see a payout the block carries by another route: a
+    // hand-placed one (-blockplacetx) changes SCDB during connection but would
+    // be absent from the list, so the miner would commit a hash its own
+    // ConnectBlock then rejects while older nodes accepted the block. The view
+    // is walked forward as ConnectBlock walks it - each transaction's outputs
+    // applied before the next is judged - so a payout that spends an output
+    // created earlier in the same block is still seen.
+    std::vector<std::pair<uint8_t, size_t>> vPayout;
+    {
+        CCoinsViewCache viewSim(pcoinsTip.get());
+        for (size_t i = 0; i < block.vtx.size(); i++) {
+            const CTransaction& tx = *(block.vtx[i]);
+            if (!tx.IsCoinBase()) {
+                // The template is not yet CheckBlock-clean the way a connected
+                // block is, so validate before walking it: UpdateCoins below
+                // asserts on a duplicate input, which CheckTransaction rejects
+                // and HaveInputs does not. Without this a malformed placed
+                // transaction would abort the miner here instead of failing.
+                CValidationState txState;
+                if (!CheckTransaction(tx, txState))
+                    return false;
+                if (!viewSim.HaveInputs(tx))
+                    return false;
+                uint8_t nSidechain = 0;
+                bool fSidechainInputs = false;
+                for (const CTxIn& in : tx.vin) {
+                    if (viewSim.AccessCoin(in.prevout).out.scriptPubKey.IsDrivechain(nSidechain)) {
+                        fSidechainInputs = true;
+                        break;
+                    }
+                }
+                if (fSidechainInputs) {
+                    CAmount amountSidechainIn = 0, amountIn = 0;
+                    CAmount amountSidechainOut = 0, amountWithdrawn = 0;
+                    std::string strFail;
+                    if (!GetDrivechainAmounts(viewSim, tx, amountSidechainIn,
+                                amountIn, amountSidechainOut, amountWithdrawn, strFail))
+                        return false;
+                    if (amountSidechainIn > amountSidechainOut)
+                        vPayout.push_back(std::make_pair(nSidechain, i));
+                }
+            }
+            UpdateCoins(tx, viewSim, nHeight);
+        }
+    }
+
+    std::vector<SidechainDeposit> vDeposit;
+    if (!GetBlockDeposits(block, scdbSim, vDeposit))
+        return false;
+    scdbSim.AddDeposits(vDeposit);
+
+    for (const std::pair<uint8_t, size_t>& payout : vPayout) {
+        if (payout.second >= block.vtx.size() || !block.vtx[payout.second])
+            return false;
+        if (!scdbSim.SpendWithdrawal(payout.first, hashPlaceholder,
+                    *block.vtx[payout.second], (int)payout.second, nHeight,
+                    false /* fJustCheck */, true /* fDebug */))
+            return false;
+    }
+
+    if (!scdbSim.Update(nHeight, hashPlaceholder, pindexPrev->GetBlockHash(),
+                block.vtx[0]->vout, false /* fJustCheck */, true /* fDebug */))
+        return false;
+
+    hashCommitment = scdbSim.GetCommitmentHash(nHeight);
+    return true;
+}
+
+//! True if a withdrawal-bundle index can be written as a two-byte upvote
+//! without colliding with a sentinel BYTE PAIR that ParseSCDBBytes would read
+//! back as abstain or downvote.
+//!
+//! The encoding is little-endian, so the colliding indices are NOT the two
+//! largest. 0xFEFF (65279) encodes as (0xFF,0xFE), which the reader takes as a
+//! DOWNVOTE - an upvote silently inverted into its opposite. The guard this
+//! replaced tested `n > 65533`, which let 65279 through and needlessly rejected
+//! 65534. Both halves were wrong, in opposite directions.
+//!
+//! Kept as a named function so the writer's rule can be tested against the
+//! reader's decode directly, rather than by restating the constants in a test
+//! and having both agree on the same mistake.
+bool ScdbVoteIndexIsEncodable(size_t n)
+{
+    if (n > 0xFFFF)
+        return false;
+    const unsigned char lo = n & 0xFF;
+    const unsigned char hi = (n >> 8) & 0xFF;
+    // The two sentinel pairs, exactly as ParseSCDBBytes matches them.
+    if (lo == 0xFF && (hi == 0xFF || hi == 0xFE))
+        return false;
+    return true;
+}
+
 bool GenerateSCDBByteCommitment(CBlock& block, CScript& scriptOut, const std::vector<std::vector<SidechainWithdrawalState>>& vScores, const std::vector<std::string>& vVote)
 {
-    if (nHeight < DrivechainHeight) {
         // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return;
-    } else {
     if (vVote.size() != SIDECHAIN_ACTIVATION_MAX_ACTIVE)
         return false;
-    }
 
     // Create output that bytes will be added to
     CTxOut out;
@@ -3810,9 +5312,17 @@ bool GenerateSCDBByteCommitment(CBlock& block, CScript& scriptOut, const std::ve
         uint8_t nSidechain = vWithdrawal.front().nSidechain;
 
         // Add bytes to script based on our vote settings.
-        // 0-65533 = index of withdrawal bundle to upvote for this sidechain.
-        // 65534 = downvote withdrawals for this sidechain.
-        // 65535 = abstain withdrawals for this sidechain.
+        //
+        // THE RESERVED INDICES ARE 65279 AND 65535, NOT 65534 AND 65535. The
+        // sentinels are defined by their BYTE PAIRS - ParseSCDBBytes tests
+        // bytes[i]/bytes[i+1] directly - while an index is written LITTLE-ENDIAN
+        // (low byte first). So the pair that means downvote, (0xFF,0xFE), is the
+        // little-endian encoding of 0xFEFF = 65279, and 65534 = 0xFFFE encodes as
+        // (0xFE,0xFF), which collides with nothing.
+        //
+        //   0..65534 except 65279 = upvote that index
+        //   65279  (0xFF,0xFE)    = RESERVED, collides with downvote
+        //   65535  (0xFF,0xFF)    = RESERVED, collides with abstain
         if (vVote[nSidechain].size() == 64) {
             uint256 hash = uint256S(vVote[nSidechain]);
 
@@ -3820,13 +5330,19 @@ bool GenerateSCDBByteCommitment(CBlock& block, CScript& scriptOut, const std::ve
                 return false;
 
             // Lookup index of withdrawal bundle in SCDB
-            uint16_t n = 0;
+            // size_t, not uint16_t: the counter wrapped at 65,535 before the
+            // n < size() test could terminate, so a longer vector was an
+            // INFINITE LOOP in the miner. The wire format is still two bytes,
+            // so an index that cannot be named is treated as abstain rather
+            // than emitted as a sentinel - see the reserved-index note above
+            // for WHICH indices those actually are.
+            size_t n = 0;
             for (; n < vWithdrawal.size(); n++)
                 if (vWithdrawal[n].hash == hash)
                     break;
 
             // If bundle exists add index bytes. Otherwise add abstain bytes.
-            if (n == vWithdrawal.size()) {
+            if (n == vWithdrawal.size() || !ScdbVoteIndexIsEncodable(n)) {
                 out.scriptPubKey.push_back(0xFF);
                 out.scriptPubKey.push_back(0xFF);
             } else {
@@ -3835,14 +5351,30 @@ bool GenerateSCDBByteCommitment(CBlock& block, CScript& scriptOut, const std::ve
             }
         }
         else
-        if (vVote[nSidechain].front() == SCDB_ABSTAIN) {
+        if (!vVote[nSidechain].empty() && vVote[nSidechain].front() == SCDB_ABSTAIN) {
             out.scriptPubKey.push_back(0xFF);
             out.scriptPubKey.push_back(0xFF);
         }
         else
-        if (vVote[nSidechain].front() == SCDB_DOWNVOTE) {
+        if (!vVote[nSidechain].empty() && vVote[nSidechain].front() == SCDB_DOWNVOTE) {
             out.scriptPubKey.push_back(0xFF);
             out.scriptPubKey.push_back(0xFE);
+        }
+        else {
+            // Terminal default: abstain. Every branch above must emit exactly
+            // one byte PAIR, because ParseSCDBBytes walks this payload two
+            // bytes at a time and reads each pair positionally. A vote string
+            // outside the validated set used to fall through emitting NOTHING,
+            // which did not just lose this sidechain's vote - it shifted every
+            // following slot's pair by two, so the remaining sidechains were
+            // read against the wrong votes.
+            //
+            // This is producer-side only. Validation re-derives the votes from
+            // the raw coinbase bytes, so a misaligned commitment was never a
+            // consensus split - it only yielded a block other nodes reject.
+            // Abstain is the safe default: it is what an entry initialises to.
+            out.scriptPubKey.push_back(0xFF);
+            out.scriptPubKey.push_back(0xFF);
         }
     }
 
@@ -3884,11 +5416,6 @@ std::vector<CCriticalData> GetCriticalDataRequests(const CBlock& block)
 {
     std::vector<CCriticalData> vCriticalData;
 
-    if (nHeight < DrivechainHeight) {
-        // Check for activation of Skydoge
-        if (!IsDrivechainEnabled(chainActive.Tip(), consensusParams))
-            return vCriticalData;
-    }
     if (block.vtx.size() < 2)
         return vCriticalData;
 
@@ -3940,6 +5467,20 @@ bool ContextualCheckBlockHeader(const CBlockHeader& block, CValidationState& sta
     if (block.GetBlockTime() > nAdjustedTime + MAX_FUTURE_BLOCK_TIME)
         return state.Invalid(false, REJECT_INVALID, "time-too-new", "block timestamp too far in the future");
 
+    // Security fix (timewarp, tightening soft fork, BIP94-style): from
+    // TimewarpGuardHeight, the first block of each difficulty adjustment period
+    // may not date backward more than MAX_TIMEWARP relative to its parent. This
+    // bounds the fake time a miner can inject per retarget window, neutralizing
+    // the timewarp attack against the historic off-by-one retarget window in
+    // CalculateNextWorkRequired. Height-gated so no historical block is
+    // retroactively invalidated.
+    if (nHeight >= consensusParams.TimewarpGuardHeight &&
+        nHeight % consensusParams.DifficultyAdjustmentInterval() == 0 &&
+        block.GetBlockTime() < pindexPrev->GetBlockTime() - MAX_TIMEWARP) {
+        return state.DoS(100, false, REJECT_INVALID, "time-timewarp-attack", false,
+                         "first block of difficulty period dates backward beyond MAX_TIMEWARP");
+    }
+
     // Reject outdated version blocks when 95% (75% on testnet) of the network has upgraded:
     // check for version 2, 3 and 4 upgrades
     if((block.nVersion < 2 && nHeight >= consensusParams.BIP34Height) ||
@@ -3947,6 +5488,45 @@ bool ContextualCheckBlockHeader(const CBlockHeader& block, CValidationState& sta
        (block.nVersion < 4 && nHeight >= consensusParams.BIP65Height))
             return state.Invalid(false, REJECT_OBSOLETE, strprintf("bad-version(0x%08x)", block.nVersion),
                                  strprintf("rejected nVersion=0x%08x block", block.nVersion));
+
+    return true;
+}
+
+//! Answer "was this sidechain slot active as of pindexPrev" from the parent's
+//! per-block record, so the answer is a function of this block's own ancestry
+//! rather than of the tip-tracking global. Returns false when no record can
+//! answer - the caller falls back to the global, which is the pre-record
+//! behaviour. Any record vintage will do: the sidechain table has been in the
+//! record since the original key, unlike the treasury and spent sections.
+static bool SidechainActiveAsOf(const CBlockIndex* pindexPrev, uint8_t nSidechain, bool& fActive)
+{
+    if (!psidechaintree || !pindexPrev)
+        return false;
+
+    // Nothing can be active as of the genesis block, which has no record.
+    if (pindexPrev->GetBlockHash() == Params().GetConsensus().hashGenesisBlock) {
+        fActive = false;
+        return true;
+    }
+
+    SidechainBlockData data;
+    if (!psidechaintree->GetBlockData(pindexPrev->GetBlockHash(), data))
+        return false;
+
+    // The table is stored either complete (256 entries) or sparse (the active
+    // slots only, each carrying its own index) - the same rule ApplyLDBData
+    // re-expands by.
+    fActive = false;
+    if (data.vSidechain.size() < (size_t)SIDECHAIN_ACTIVATION_MAX_ACTIVE) {
+        for (const Sidechain& s : data.vSidechain) {
+            if (s.nSidechain == nSidechain && s.fActive) {
+                fActive = true;
+                break;
+            }
+        }
+    } else if (nSidechain < data.vSidechain.size()) {
+        fActive = data.vSidechain[nSidechain].fActive;
+    }
 
     return true;
 }
@@ -4025,20 +5605,126 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
         }
     }
 
+    // Security fix: a v3 transaction's criticalData is counted in the
+    // serialized size/weight gates below but is NOT committed to the block hash
+    // (it is stripped from both the txid and the witness merkle leaf). Those
+    // gates reject with corruptionIn=false, so a peer could pad a copy of an
+    // honest block past the cap without changing its hash and get that hash
+    // marked permanently invalid. Enforce the per-tx bound here, before the
+    // gates, with corruptionIn=true so a malleated copy never poisons the honest
+    // block's hash. (Deserialization also bounds vBytes; this is defense in
+    // depth for any in-memory block that bypasses that path.)
+    for (const auto& tx : block.vtx) {
+        if (!tx->criticalData.IsNull() &&
+                tx->criticalData.vBytes.size() > (size_t)MAX_CRITICAL_DATA_BYTES) {
+            return state.DoS(100, false, REJECT_INVALID, "bad-critical-data-bytes", true,
+                             strprintf("%s : critical data bytes size > MAX_CRITICAL_DATA_BYTES", __func__));
+        }
+    }
+
     // After the coinbase witness nonce and commitment are verified,
     // we can check if the block weight passes (before we've checked the
     // coinbase witness, it would be possible for the weight to be too
     // large by filling up the coinbase witness, which doesn't change
     // the block hash, so we couldn't mark the block as permanently
     // failed).
+    //
+    // Reported as corruption-possible, unlike upstream. Upstream can treat an
+    // over-weight block as permanently invalid because, once the witness
+    // commitment above has been checked, nothing left in the weight is
+    // malleable. That does not hold here: a v3 transaction's criticalData is
+    // counted in the weight but is committed to by neither the txid nor the
+    // witness merkle leaf, so a peer can still pad a copy of an honest block
+    // (within the per-tx bound enforced above) without changing its hash. If
+    // this rejected with corruptionIn=false, that padded copy would get the
+    // honest block's hash marked permanently invalid. The block is rejected
+    // either way -- only the caching of the failure changes.
     if (GetBlockWeight(block) > MAX_BLOCK_WEIGHT) {
-        return state.DoS(100, false, REJECT_INVALID, "bad-blk-weight", false, strprintf("%s : weight limit failed", __func__));
+        return state.DoS(100, false, REJECT_INVALID, "bad-blk-weight", true, strprintf("%s : weight limit failed", __func__));
     }
 
-    bool skydogesEnabled = IsDrivechainEnabled(chainActive.Tip(), Params().GetConsensus());
+    // Small-block soft fork: at and after SmallBlockHeight the block's
+    // COMMITTED serialized size (GetCommittedSerializedSize: witness at par,
+    // criticalData excluded, a fixed charge per nVersion-3 transaction) must
+    // fit in MAX_SMALL_BLOCK_SERIALIZED_SIZE bytes. Witness bytes count at
+    // par, so this also removes the witness discount for blocks bound by this
+    // rule. Like the weight check above, this may only run after the witness
+    // commitment has been validated: witness data does not affect the block
+    // hash, so rejecting on witness bytes any earlier would let a peer
+    // malleate an honest block into one we mark permanently invalid.
+    //
+    // NOT corruption-possible, deliberately, and this is a change: while the
+    // rule counted criticalData - bytes nothing in the block commits to - a
+    // rejection could not be pinned on the hash, because a padded relayed
+    // copy of an honest block would have failed it. Every input to the
+    // measure is now committed data, so an over-size verdict is a verdict on
+    // the block itself and is marked as such. The alternative was measured on
+    // a test network: with corruptionPossible set nothing marks the
+    // block failed, it stays a candidate, and an honest un-upgraded peer that
+    // keeps announcing it is asked for it again ~100 times a second.
+    if (nHeight >= consensusParams.SmallBlockHeight &&
+            GetCommittedSerializedSize(block) > MAX_SMALL_BLOCK_SERIALIZED_SIZE) {
+        return state.DoS(100, false, REJECT_INVALID, "bad-blk-size", false, strprintf("%s : committed size limit failed", __func__));
+    }
+
+    // SCDB commitment soft fork: at and after SCDBCommitmentHeight the
+    // coinbase must carry exactly one SCDB hash commitment output. Presence
+    // and shape only - a pure function of the block bytes and the height, so
+    // every node answers identically and DoS(100) is safe. Requiring presence
+    // is what makes divergence unable to hide behind omission. NOT
+    // corruption-possible: a coinbase output is committed by the merkle root,
+    // so a relayed copy cannot be doctored into failing this check. Whether
+    // the committed value is right is ConnectBlock's question, not this one's.
+    if (nHeight >= consensusParams.SCDBCommitmentHeight) {
+        int nCommit = 0;
+        uint256 hashCommitment;
+        for (const CTxOut& out : block.vtx[0]->vout) {
+            if (out.scriptPubKey.IsSCDBHashCommit(hashCommitment))
+                nCommit++;
+        }
+        if (nCommit != 1)
+            return state.DoS(100, false, REJECT_INVALID, "bad-scdb-commitment-missing", false, strprintf("%s : expected exactly 1 SCDB hash commitment, found %d", __func__, nCommit));
+    }
+
+    // Consensus fix: key the drivechain rule gate to this block's own context
+    // (pindexPrev), not the active tip, so validating this block does not
+    // depend on the order in which blocks were received and connected.
+    bool skydogeEnabled = IsSkydogeEnabled(pindexPrev, consensusParams);
+
+    // From
+    // SCDBCommitmentHeight every critical hash commitment in the coinbase must
+    // be matched by a transaction in this block carrying exactly that
+    // criticalData. criticalData is outside the txid and the merkle root, so a
+    // relay could strip a BMM request out of an honest block without changing
+    // its hash, and nodes given the stripped copy and nodes given the honest
+    // one could judge the block differently (ConnectBlock's slot-active rule
+    // reads the request). With this rule a stripped copy is refused here,
+    // before it is stored - corruption-possible, so the honest copy is still
+    // accepted when it arrives - and every node judges the same bytes. The
+    // reverse direction (a request with no commitment) is
+    // bad-critical-data-no-commit below. No honest block changes: the miner
+    // writes commitments only for transactions already in the block
+    // (GenerateCriticalHashCommitments) and only appends transactions after.
+    if (skydogeEnabled && nHeight >= consensusParams.SCDBCommitmentHeight) {
+        for (const CTxOut& out : block.vtx[0]->vout) {
+            uint256 hashCommit;
+            std::vector<unsigned char> vBytesCommit;
+            if (!out.scriptPubKey.IsCriticalHashCommit(hashCommit, vBytesCommit))
+                continue;
+            bool fMatched = false;
+            for (size_t i = 1; i < block.vtx.size() && !fMatched; i++) {
+                const CCriticalData& data = block.vtx[i]->criticalData;
+                fMatched = !data.IsNull() && data.hashCritical == hashCommit &&
+                           data.vBytes == vBytesCommit;
+            }
+            if (!fMatched)
+                return state.DoS(100, false, REJECT_INVALID, "bad-critical-commit-unmatched", true,
+                                 strprintf("%s : coinbase critical hash commitment %s has no matching transaction in the block", __func__, hashCommit.ToString()));
+        }
+    }
 
     // Check critical data transactions (outputs, not spending)
-    if (skydogesEnabled) {
+    if (skydogeEnabled) {
         // Track existence of BMM h* commit requests per sidechain
         std::vector<bool> vSidechainBMM;
         vSidechainBMM.resize(SIDECHAIN_ACTIVATION_MAX_ACTIVE);
@@ -4073,15 +5759,74 @@ static bool ContextualCheckBlock(const CBlock& block, CValidationState& state, c
                     return state.DoS(100, false, REJECT_INVALID, "bad-critical-data-no-commit", true, strprintf("%s : no commit found for critical data", __func__));
 
                 // Enforce 1 BMM h* per sidechain per block & validate BMM txns.
-                // When loading a block from disk we skip this step as we may be
-                // reindexing and SCDB will not be up to date yet.
+                //
+                // Only the ACTIVE-SLOT test is skipped when loading from disk.
+                // The three that follow it are pure functions of the block's
+                // own bytes - a sidechain number's range, the previous block's
+                // low bytes, and whether one slot was committed twice in this
+                // block - and none of them reads SCDB, so a reindexing node
+                // whose SCDB is not yet at the tip answers them exactly as a
+                // synchronised one does.
+                //
+                // They used to sit under the same !fFromDisk gate as the
+                // active-slot test, which meant -reindex and -loadblock
+                // accepted blocks that normal network validation rejects: a
+                // block imported from disk with two BMM commitments for one
+                // slot, or with prev-block bytes naming some other parent,
+                // became this node's active chain while every peer refused it.
+                // ConnectBlock does not repeat contextual validation (see its
+                // NOTE), so nothing downstream caught it. Running them on both
+                // paths cannot reject a block the network accepts, because
+                // AcceptBlock already applies them to every block that arrives
+                // over the wire at every height - a block in the canonical
+                // chain has passed them by construction, or no node could have
+                // synced it.
                 uint8_t nSidechain;
                 std::string strPrevBlock = "";
-                if (!fFromDisk && tx->criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
-                    if (!scdb.IsSidechainActive(nSidechain)) {
-                        return state.DoS(100, false, REJECT_INVALID,
-                                "bad-critical-bmm-nsidechain-inactive", true,
-                                strprintf("%s : Invalid (inactive) sidechain number: %u in BMM commitment", __func__, nSidechain));
+                if (tx->criticalData.IsBMMRequest(nSidechain, strPrevBlock)) {
+                    // Answered from the parent's record where one exists, so
+                    // that which sidechains were active is a fact about this
+                    // block's own ancestry rather than about the tip the global
+                    // happens to track. The global remains the fallback for a
+                    // parent that was never connected (this check runs from
+                    // AcceptBlock, which does not require it to have been) -
+                    // that is the pre-record behaviour exactly. Still skipped
+                    // for fFromDisk, where reindexing may not have built the
+                    // records yet: this is the one test here that reads state
+                    // a reindex has not rebuilt.
+                    bool fSidechainActive = false;
+                    if (!fFromDisk) {
+                        if (!SidechainActiveAsOf(pindexPrev, nSidechain, fSidechainActive)) {
+                            // No record for the parent: this node never
+                            // connected it (a side branch, or a block that
+                            // arrived before its parent was connected).
+                            // Below SCDBCommitmentHeight the tip state stands
+                            // in, exactly as before, so an upgraded node and a
+                            // 0.44.8 node still agree on every pre-fork block.
+                            // From it the tip says
+                            // nothing about this block's ancestry - a synced
+                            // and a fresh node answered differently, a
+                            // possible split - so this pre-connect check does
+                            // not decide; ConnectBlock does, against the
+                            // parent's own state, on every path including
+                            // -reindex and -reindex-chainstate.
+                            if (nHeight >= consensusParams.SCDBCommitmentHeight)
+                                fSidechainActive = true;
+                            else
+                                fSidechainActive = scdb.IsSidechainActive(nSidechain);
+                        }
+                        if (!fSidechainActive) {
+                            // DoS(0), not DoS(100). The parent's record
+                            // makes this node's answer reproducible, but a ban
+                            // asserts what every other node computed, and a node
+                            // whose records predate the treasury/spent keys - or
+                            // that diverged before them - can still disagree. Keep
+                            // at DoS(0) to match the three equivalent rejects in
+                            // ConnectBlock.
+                            return state.DoS(0, false, REJECT_INVALID,
+                                    "bad-critical-bmm-nsidechain-inactive", true,
+                                    strprintf("%s : Invalid (inactive) sidechain number: %u in BMM commitment", __func__, nSidechain));
+                        }
                     }
 
                     // Check sidechain number
@@ -4716,11 +6461,48 @@ CVerifyDB::~CVerifyDB()
     uiInterface.ShowProgress("", 100, false);
 }
 
+namespace {
+//! Holds the process-global sidechain database still across a verification
+//! walk. Levels 3 and 4 disconnect, and level 4 reconnects, the last blocks
+//! to check their undo data against a throwaway coins cache - but
+//! DisconnectBlock and ConnectBlock publish the sidechain state they compute
+//! to the global object, and level 3 never walks it back up. Left alone, a
+//! level-3 check leaves this node's sidechain state several blocks behind
+//! its own tip: it can no longer build a block (the template fails with
+//! bad-scdb-update) until the next block from a peer or a restart repairs
+//! it, and a level-4 check replays slot replacements against the live
+//! operator caches on the way back up. The startup path resyncs afterwards
+//! (init.cpp); the RPC had nothing.
+//!
+//! The walk itself is left exactly as it was, so what it checks does not
+//! change; only its side effects are undone. Whatever exit the walk takes -
+//! success, an error return, a shutdown request or a thread interruption -
+//! the destructor puts the saved state back, and while the guard is alive
+//! the mempool's sidechain bookkeeping is not touched (fSidechainVerifying),
+//! since a transaction removed from it could not be restored.
+//!
+//! Needs cs_main for its whole lifetime, which VerifyDB holds: nothing can
+//! connect a block in between, so the state put back is the current one.
+class SidechainVerifyGuard
+{
+public:
+    SidechainVerifyGuard() : saved(scdb) { fSidechainVerifying = true; }
+    ~SidechainVerifyGuard() { scdb = saved; fSidechainVerifying = false; }
+    SidechainVerifyGuard(const SidechainVerifyGuard&) = delete;
+    SidechainVerifyGuard& operator=(const SidechainVerifyGuard&) = delete;
+private:
+    SidechainDB saved;
+};
+} // namespace
+
 bool CVerifyDB::VerifyDB(const CChainParams& chainparams, CCoinsView *coinsview, int nCheckLevel, int nCheckDepth)
 {
     LOCK(cs_main);
     if (chainActive.Tip() == nullptr || chainActive.Tip()->pprev == nullptr)
         return true;
+
+    // Everything below may rewind the global sidechain database; see the guard.
+    SidechainVerifyGuard scdbGuard;
 
     // Verify blocks in the best chain
     if (nCheckDepth <= 0 || nCheckDepth > chainActive.Height())
@@ -5045,33 +6827,6 @@ void UnloadBlockIndex()
     fHavePruned = false;
 
     g_chainstate.UnloadBlockIndex();
-}
-
-void CompactWitBlockIndex()
-{
-    LOCK(cs_main);
-    chainActive.SetTip(nullptr);
-    pindexBestInvalid = nullptr;
-    pindexBestHeader = nullptr;
-    mempool.clear();
-    mapBlocksUnlinked.clear();
-    vinfoBlockFile.clear();
-    nLastBlockFile = 0;
-    fCMPCTWit = true;
-    setDirtyBlockIndex.clear();
-    setDirtyFileInfo.clear();
-    versionbitscache.Clear();
-    for (int b = 0; b < VERSIONBITS_NUM_BITS; b++) {
-        warningcache[b].clear();
-    }
-
-    for (BlockMap::value_type& entry : mapBlockIndex) {
-        delete entry.second;
-    }
-    mapBlockIndex.clear();
-    fHavePruned = false;
-
-    g_chainstate.UnloadWBlockIndex();
 }
 
 bool LoadBlockIndex(const CChainParams& chainparams)
@@ -5577,9 +7332,17 @@ bool DumpMempool(void)
         }
 
         file << mapDeltas;
-        FileCommit(file.Get());
+        // Keep the previous dump rather than replacing it with one that never
+        // reached the disk.
+        if (!FileCommit(file.Get())) {
+            LogPrintf("Failed to dump mempool: could not flush the file. Continuing anyway.\n");
+            return false;
+        }
         file.fclose();
-        RenameOver(GetDataDir() / "mempool.dat.new", GetDataDir() / "mempool.dat");
+        if (!RenameOver(GetDataDir() / "mempool.dat.new", GetDataDir() / "mempool.dat")) {
+            LogPrintf("Failed to dump mempool: could not replace the previous file. Continuing anyway.\n");
+            return false;
+        }
         int64_t last = GetTimeMicros();
         LogPrintf("Dumped mempool: %gs to copy, %gs to dump\n", (mid-start)*MICRO, (last-mid)*MICRO);
     } catch (const std::exception& e) {
@@ -5591,11 +7354,98 @@ bool DumpMempool(void)
 
 static const uint64_t SCDB_DUMP_VERSION = 1;
 
-bool LoadCustomVoteCache()
+//! Version for deposit.dat alone, which carries a field the other dump files do
+//! not. It is separate from SCDB_DUMP_VERSION so that adding it does not
+//! invalidate withdrawal.dat and the rest, which would force a reindex on every
+//! upgrade for no reason.
+//!
+//! Version 1 is the historical layout: a count and the deposits. Version 2
+//! prefixes the block the cache corresponds to, which is what makes a stale
+//! cache detectable at all - see LoadDepositCache.
+static const uint64_t SCDB_DEPOSIT_DUMP_VERSION_LEGACY = 1;
+static const uint64_t SCDB_DEPOSIT_DUMP_VERSION = 2;
+
+//! Read a cache file, tolerating one that an older Windows build wrote in text
+//! mode.
+//!
+//! Those builds opened these files with "w", so the C runtime turned every 0x0A
+//! into 0x0D 0x0A on the way out. Reading such a file back in binary gives
+//! misaligned data, and for the fixed-width ones it does not even throw - it
+//! returns success with garbage, which the next clean shutdown then writes back
+//! over the real thing.
+//!
+//! Both candidate readings are produced here and handed to the caller in order:
+//! the bytes as they sit on disk, then the same bytes with the expansion undone.
+//! The caller parses the first that works. Undoing the expansion in memory
+//! rather than reopening in text mode keeps the behaviour identical on every
+//! platform, which means it can be tested somewhere other than Windows.
+CacheRead ReadCacheFileCandidates(const fs::path& path, std::vector<CDataStream>& vCandidate)
+{
+    vCandidate.clear();
+
+    if (!fs::exists(path))
+        return CacheRead::MISSING;
+
+    FILE* file = fsbridge::fopen(path, "rb");
+    if (!file)
+        return CacheRead::UNOPENABLE;
+
+    std::string strRaw;
+    {
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), file)) > 0)
+            strRaw.append(buf, n);
+        const bool fReadError = ferror(file) != 0;
+        fclose(file);
+        if (fReadError)
+            return CacheRead::UNOPENABLE;
+    }
+
+    vCandidate.emplace_back(strRaw.data(), strRaw.data() + strRaw.size(), SER_DISK, CLIENT_VERSION);
+
+    std::string strUndone;
+    strUndone.reserve(strRaw.size());
+    for (size_t i = 0; i < strRaw.size(); i++) {
+        if (strRaw[i] == '\r' && i + 1 < strRaw.size() && strRaw[i + 1] == '\n')
+            continue;
+        strUndone.push_back(strRaw[i]);
+    }
+    if (strUndone.size() != strRaw.size())
+        vCandidate.emplace_back(strUndone.data(), strUndone.data() + strUndone.size(), SER_DISK, CLIENT_VERSION);
+
+    return CacheRead::OK;
+}
+
+namespace {
+/** 0.45.2: the custom withdrawal votes (one string per slot: the abstain or
+ *  downvote character, or the hash of the bundle this node upvotes) read
+ *  from customvotes.dat while blocks are still to be connected, held back
+ *  until they have been - every sidechain activation a replay connects
+ *  resets that slot's vote to abstain. Empty when nothing is held. */
+CCriticalSection cs_vote_replay;
+std::vector<std::string> g_vVoteAfterReplay GUARDED_BY(cs_vote_replay);
+//! slot -> occupant (Sidechain::GetSerHash) when the file was written; a slot
+//! missing here means the file does not say (written before 0.45.2).
+std::map<uint8_t, uint256> g_mapVoteOccupant GUARDED_BY(cs_vote_replay);
+
+bool IsAbstainVote(const std::string& strVote)
+{
+    return strVote.size() == 1 && strVote.front() == SCDB_ABSTAIN;
+}
+} // namespace
+
+bool LoadCustomVoteCache(bool fHold)
 {
     fs::path path = GetDataDir() / "skydoge" / "customvotes.dat";
     CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
+        // A file that is there but will not open is not the same as no file
+        // at all. Reporting "nothing to load" would let startup finish with an
+        // empty cache and shutdown write that emptiness over data nothing can
+        // rebuild, so say the load failed and leave the file alone.
+        if (fs::exists(path))
+            return error("%s: %s exists but could not be opened", __func__, path.string());
         return true;
     }
 
@@ -5624,6 +7474,35 @@ bool LoadCustomVoteCache()
         return false;
     }
 
+    // 0.45.2: the occupant section after the votes (earlier releases stop
+    // reading before it). Absent or short: no slot states its occupant.
+    std::map<uint8_t, uint256> mapOccupant;
+    try {
+        int nOccupant = 0;
+        filein >> nOccupant;
+        for (int i = 0; i < nOccupant; i++) {
+            uint8_t nSidechain = 0;
+            uint256 hashOccupant;
+            filein >> nSidechain;
+            filein >> hashOccupant;
+            mapOccupant[nSidechain] = hashOccupant;
+        }
+    }
+    catch (const std::exception&) {
+        mapOccupant.clear();
+    }
+
+    if (fHold && !vVote.empty()) {
+        // 0.45.2: blocks are still to be connected and each sidechain
+        // activation among them resets that slot's vote, so the votes are
+        // installed afterwards (InstallReplayedCustomVotes).
+        LOCK(cs_vote_replay);
+        g_vVoteAfterReplay = vVote;
+        g_mapVoteOccupant = mapOccupant;
+        LogPrintf("%s: Holding the custom withdrawal votes until the blocks still to connect are connected.\n", __func__);
+        return true;
+    }
+
     // Add to SCDB
     if (!vVote.empty()) {
         scdb.CacheCustomVotes(vVote);
@@ -5632,9 +7511,100 @@ bool LoadCustomVoteCache()
     return true;
 }
 
+void InstallReplayedCustomVotes()
+{
+    LOCK2(cs_main, cs_vote_replay);
+    if (g_vVoteAfterReplay.empty())
+        return;
+
+    // Slot by slot, the held vote replaces the live one only where the live
+    // one is still abstain (a vote set while the blocks were being connected
+    // is newer) and:
+    //  - the slot is active;
+    //  - where the file names the slot's occupant, it is still the same
+    //    sidechain (the previous-occupant guard's rule, applied once, to the
+    //    occupant at the end);
+    //  - where it does not (a file written before 0.45.2): an upvote names a
+    //    bundle the chain tracks or this node has cached for that slot; a
+    //    downvote is kept.
+    std::vector<std::string> vVote = scdb.GetVotes();
+    // What stays held: the votes of slots this chain does not show active
+    // (see InstallReplayedWithdrawalCache) - written back as read.
+    std::vector<std::string> vStillHeld(g_vVoteAfterReplay.size(), std::string(1, SCDB_ABSTAIN));
+    bool fStillHeld = false;
+    unsigned int nKept = 0, nHeld = 0;
+    for (size_t i = 0; i < g_vVoteAfterReplay.size() && i < vVote.size(); i++) {
+        const std::string& strHeld = g_vVoteAfterReplay[i];
+        if (IsAbstainVote(strHeld))
+            continue;
+        nHeld++;
+        const uint8_t nSidechain = (uint8_t)i;
+        std::string strDrop;
+        Sidechain sidechain;
+        if (!IsAbstainVote(vVote[i])) {
+            strDrop = "a newer vote was set while the blocks were being connected";
+        } else if (!scdb.GetSidechain(nSidechain, sidechain)) {
+            vStillHeld[i] = strHeld;
+            fStillHeld = true;
+            continue;
+        } else {
+            const auto it = g_mapVoteOccupant.find(nSidechain);
+            if (it != g_mapVoteOccupant.end() && !it->second.IsNull()) {
+                if (sidechain.GetSerHash() != it->second)
+                    strDrop = "the slot holds a different sidechain now";
+            } else if (strHeld.size() == 64) {
+                const uint256 hash = uint256S(strHeld);
+                if (!scdb.HaveWorkScore(hash, nSidechain) && !scdb.HaveWithdrawalTxCachedForSlot(nSidechain, hash))
+                    strDrop = "the file names no occupant and the upvoted bundle is neither tracked nor cached";
+            }
+        }
+        if (!strDrop.empty()) {
+            LogPrintf("%s: Not restoring the custom withdrawal vote %s for slot %u: %s.\n",
+                      __func__, strHeld, (unsigned)nSidechain, strDrop);
+            continue;
+        }
+        vVote[i] = strHeld;
+        nKept++;
+    }
+    if (nKept && !scdb.CacheCustomVotes(vVote))
+        LogPrintf("%s: The restored custom withdrawal votes were refused.\n", __func__);
+    LogPrintf("%s: Blocks connected: restored %u of %u custom withdrawal vote(s)%s.\n", __func__, nKept, nHeld,
+              fStillHeld ? "; votes for slots not active here stay held" : "");
+    if (fStillHeld) {
+        g_vVoteAfterReplay.swap(vStillHeld);
+    } else {
+        g_vVoteAfterReplay.clear();
+        g_mapVoteOccupant.clear();
+    }
+}
+
 void DumpCustomVoteCache()
 {
     std::vector<std::string> vVote = scdb.GetVotes();
+
+    // 0.45.2: votes still held back (the node stopped before the blocks
+    // were connected) are written as they were read, where the live vote is
+    // abstain, with the occupant they were read with. Every other non-abstain
+    // vote is written with its slot's current occupant.
+    std::vector<std::pair<uint8_t, uint256>> vOccupant;
+    {
+        LOCK(cs_vote_replay);
+        for (size_t i = 0; i < vVote.size(); i++) {
+            const uint8_t nSidechain = (uint8_t)i;
+            if (i < g_vVoteAfterReplay.size() && IsAbstainVote(vVote[i]) && !IsAbstainVote(g_vVoteAfterReplay[i])) {
+                vVote[i] = g_vVoteAfterReplay[i];
+                const auto it = g_mapVoteOccupant.find(nSidechain);
+                if (it != g_mapVoteOccupant.end())
+                    vOccupant.push_back(std::make_pair(nSidechain, it->second));
+                continue;
+            }
+            if (IsAbstainVote(vVote[i]))
+                continue;
+            Sidechain sidechain;
+            if (scdb.GetSidechain(nSidechain, sidechain))
+                vOccupant.push_back(std::make_pair(nSidechain, sidechain.GetSerHash()));
+        }
+    }
 
     int count = vVote.size();
 
@@ -5652,17 +7622,48 @@ void DumpCustomVoteCache()
         for (const std::string& vote : vVote) {
             fileout << vote;
         }
+
+        // 0.45.2: (slot, occupant) for the slots with a vote, after
+        // everything earlier releases read.
+        fileout << (int)vOccupant.size();
+        for (const std::pair<uint8_t, uint256>& o : vOccupant) {
+            fileout << o.first;
+            fileout << o.second;
+        }
     }
     catch (const std::exception& e) {
         LogPrintf("%s: Exception: %s\n", __func__, e.what());
         return;
     }
 
-    FileCommit(fileout.Get());
+    if (!FileCommit(fileout.Get())) {
+        // The replacement never reached the disk. Renaming it over the previous
+        // file would trade a good copy for a truncated one, so keep what is
+        // there; the .new file is overwritten on the next attempt.
+        LogPrintf("%s: Failed to write the cache file; keeping the previous copy.\n", __func__);
+        return;
+    }
     fileout.fclose();
-    RenameOver(GetDataDir() / "skydoge" / "customvotes.dat.new", GetDataDir() /  "skydoge" / "customvotes.dat");
+    if (!RenameOver(GetDataDir() / "skydoge" / "customvotes.dat.new",
+                    GetDataDir() /  "skydoge" / "customvotes.dat")) {
+        LogPrintf("%s: Failed to replace the previous file; the cache was not saved.\n", __func__);
+        return;
+    }
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
+}
+
+//! Whether startup completed far enough for the in-memory caches read from disk
+//! to be authoritative. Shutdown runs on the failure paths too, so every writer
+//! of a file that only startup can populate has to consult this first or it will
+//! put default-constructed state over the user's copy. Covers the sidechain
+//! caches and the address book, which are read just before this is set; see
+//! SetSCDBStateLoaded(), DumpSCDBCache() and DumpAddressBook().
+static bool fSCDBStateLoaded = false;
+
+void SetSCDBStateLoaded()
+{
+    fSCDBStateLoaded = true;
 }
 
 bool LoadDepositCache()
@@ -5670,15 +7671,50 @@ bool LoadDepositCache()
     fs::path path = GetDataDir() / "skydoge" / "deposit.dat";
     CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
+        // No file at all is the normal state for a new data directory, and an
+        // empty cache is the right answer there.
+        //
+        // A file that exists but will not open is a different matter, and must
+        // not be treated as success where this file is the only copy of the
+        // treasury. Carrying on would leave the node validating withdrawals
+        // against an empty CTIP map, rejecting blocks the rest of the network
+        // accepts, and would then let shutdown write that empty cache back over
+        // the file. Fail instead, so the caller can offer the reindex that
+        // rebuilds the cache from blocks.
+        //
+        // Where the block record carried a treasury log, ResyncSCDB has already
+        // installed the pointer and an unreadable file costs only the deposit
+        // history, so refusing to start would be a worse answer than starting
+        // without it. Say so and carry on.
+        if (fs::exists(path) && scdb.HasTreasuryFromRecord()) {
+            LogPrintf("%s: %s exists but could not be opened. The treasury was restored from the "
+                      "block record, so the node starts without its cached deposit history.\n",
+                    __func__, path.string());
+            return true;
+        }
+
+        if (fs::exists(path)) {
+            LogPrintf("%s: %s exists but could not be opened; refusing to start with an empty deposit cache.\n",
+                    __func__, path.string());
+            return false;
+        }
         return true;
     }
 
     std::vector<SidechainDeposit> vDeposit;
+    uint256 hashCacheBlock;
+    bool fHaveCacheBlock = false;
     try {
         uint64_t nVersion;
         filein >> nVersion;
-        if (nVersion != SCDB_DUMP_VERSION) {
+        if (nVersion != SCDB_DEPOSIT_DUMP_VERSION &&
+                nVersion != SCDB_DEPOSIT_DUMP_VERSION_LEGACY) {
             return false;
+        }
+
+        if (nVersion == SCDB_DEPOSIT_DUMP_VERSION) {
+            filein >> hashCacheBlock;
+            fHaveCacheBlock = true;
         }
 
         int count = 0;
@@ -5694,11 +7730,497 @@ bool LoadDepositCache()
         return false;
     }
 
+    // Refuse a cache that does not describe the chain we are about to run on.
+    //
+    // This file is written once, during shutdown, and is the only record of the
+    // deposits and of the CTIPs derived from them - the sidechain index restores
+    // the withdrawal, activation and sidechain lists but not these. So a node
+    // that stopped uncleanly comes back with the treasury as of its last clean
+    // shutdown while the chain has moved on, and nothing about that is visible:
+    // it starts normally and serves a treasury the chain does not support. The
+    // damage surfaces later, when a withdrawal is paid out and SpendWithdrawal
+    // compares the payout's input against the CTIP this node believes in; the
+    // mismatch rejects a block the rest of the network accepted, at DoS(0), so
+    // the node quietly stops following the chain.
+    //
+    // Comparing the live hashBlockLastSeen would not catch this. ResyncSCDB runs
+    // before this function and sets it to the tip, so by now it always agrees.
+    // The stamp recorded in the file at dump time is the only thing that can be
+    // checked against the chain.
+    //
+    // A null stamp is a special case that must not be refused. The sidechain
+    // database only records a block once it has connected one past genesis, so
+    // a cache written while the tip was still genesis is stamped null - and it
+    // is necessarily empty, because a deposit cannot be cached without the block
+    // that carried it. An empty cache installs nothing and cannot be stale, so a
+    // node shut down cleanly at the genesis tip must be allowed to start. Only a
+    // non-null stamp that names a different block is the dangerous case.
+    //
+    // All of that describes a node whose treasury can only come from this file.
+    // Where the block record carried a treasury log, ResyncSCDB has already
+    // installed the pointer from the block it belongs to, and a stale file is
+    // no longer dangerous - only useless for the part it used to be trusted
+    // for. It is still worth reading for its deposits, which are this node's
+    // own history and are shown by the GUI and the RPCs, so the file is loaded
+    // and told not to move the pointer.
+    const bool fTreasuryFromRecord = scdb.HasTreasuryFromRecord();
+
+    if (fHaveCacheBlock && !hashCacheBlock.IsNull()) {
+        const uint256 hashTip = chainActive.Tip() ? chainActive.Tip()->GetBlockHash() : uint256();
+        if (hashCacheBlock != hashTip) {
+            if (!fTreasuryFromRecord) {
+                LogPrintf("%s: Deposit cache describes block %s but the chain is at %s. "
+                          "Refusing to load a stale deposit cache; the caller rebuilds it "
+                          "from blocks, and offers a reindex only if that cannot run.\n",
+                        __func__, hashCacheBlock.ToString(), hashTip.ToString());
+                return false;
+            }
+
+            LogPrintf("%s: Deposit cache describes block %s but the chain is at %s. "
+                      "The treasury was restored from the block record, so the cache is loaded "
+                      "for its deposit history only and does not set the treasury.\n",
+                    __func__, hashCacheBlock.ToString(), hashTip.ToString());
+        }
+    } else if (!fHaveCacheBlock) {
+        // Written by a build that did not record the block. Nothing can be
+        // verified, so say so rather than implying it was checked. The next
+        // clean shutdown writes a stamped file and this stops appearing.
+        LogPrintf("%s: Deposit cache predates block stamping and cannot be checked against "
+                  "the chain. It will be verifiable after the next clean shutdown.\n", __func__);
+    }
+
     // Add to SCDB
     if (!vDeposit.empty()) {
-        scdb.AddDeposits(vDeposit);
+        // Tolerant, matching the ConnectBlock consensus path: AddDeposits logs and
+        // continues on an unsortable (e.g. forked) deposit chain. Do NOT fail the
+        // load / force a reindex on it — the condition is on-chain data a reindex
+        // cannot fix, and the legacy build started fine in exactly this state.
+        //
+        // The pointer is left alone when it was restored from the block record:
+        // that value belongs to the tip, and this file may not.
+        scdb.AddDeposits(vDeposit, !fTreasuryFromRecord /* fUpdateCTIP */);
+
+        // Publish the treasury the node is actually going to use, whichever of
+        // the two set it.
         mempool.UpdateCTIPFromBlock(scdb.GetCTIP(), false /* fDisconnect */);
     }
+
+    return true;
+}
+
+//! Rebuild the sidechain deposit cache by re-scanning local block files.
+//!
+//! The repair half of the sidechain database. Every durability measure in this
+//! tree faithfully preserves whatever the node currently believes; this is the
+//! only path that makes a node's sidechain state agree with its own chain
+//! again, and it replaces the full reindex that a stale or missing deposit
+//! cache used to force. Without it a node could have to re-verify the
+//! whole chain.
+//!
+//! It is cheap because a deposit is a function of a block's own outputs: no
+//! re-download, no script verification, no coins view, no undo data. The work
+//! is one pass of ReadBlockFromDisk over the blocks that could carry a deposit.
+//!
+//! Two things make this a replay rather than a re-derivation, and both matter:
+//!
+//! - The per-block records drive it. AddDeposits drops deposits for a slot that
+//!   is not active, so which sidechains were active AT EACH BLOCK changes the
+//!   answer. Seeding that from the tip would accept deposits sitting in blocks
+//!   from before their sidechain existed, which ConnectBlock skipped - a
+//!   divergence invented by the repair itself. Applying each block's record as
+//!   we reach it advances the activation state exactly as it stood.
+//!
+//! - The deposits come from GetBlockDeposits and the withdrawal change returns
+//!   from GetWithdrawalChangeDeposit, which are the same functions the connect
+//!   path uses. A second implementation of connect-time semantics is the one
+//!   way this pass could manufacture the divergence it exists to repair.
+//!
+//! Cross-check every carried treasury pointer against the unspent output set.
+//!
+//! The pointer is maintained state; the coins view is the one store every node
+//! shares. A pointer naming a coin that is not there, or that carries a
+//! different amount or another slot's script, is this node disagreeing with
+//! the chain about where a sidechain's money is - the condition that surfaces
+//! years later as a refused withdrawal payout, and the one CTIPAnchorHeight
+//! makes a block-level rule once it is set.
+//!
+//! Reports and never repairs, deliberately. A rebuild fixes a deposit cache
+//! that has fallen behind its own chain; it cannot fix a pointer the chain
+//! genuinely does not support, and running one here would hide the finding
+//! behind a repair that did not repair it. It also runs before any height is
+//! set, so it must not be able to change what the node validates.
+//!
+//! Returns the number of pointers that failed.
+int AuditTreasuryAnchors()
+{
+    AssertLockHeld(cs_main);
+
+    if (!pcoinsTip)
+        return 0;
+
+    const std::map<uint8_t, SidechainCTIP> mapCTIP = scdb.GetCTIP();
+    std::vector<std::string> vFail;
+
+    for (const std::pair<const uint8_t, SidechainCTIP>& p : mapCTIP) {
+        const Coin& coin = pcoinsTip->AccessCoin(p.second.out);
+        uint8_t nSidechainCoin;
+        if (coin.IsSpent()) {
+            vFail.push_back(strprintf("sidechain %u: %s is not unspent",
+                                      p.first, p.second.out.ToString()));
+        } else if (!coin.out.scriptPubKey.IsDrivechain(nSidechainCoin) ||
+                   nSidechainCoin != p.first) {
+            vFail.push_back(strprintf("sidechain %u: %s is not a treasury output of that slot",
+                                      p.first, p.second.out.ToString()));
+        } else if (coin.out.nValue != p.second.amount) {
+            vFail.push_back(strprintf("sidechain %u: %s holds %d, recorded as %d",
+                                      p.first, p.second.out.ToString(),
+                                      coin.out.nValue, p.second.amount));
+        }
+    }
+
+    // "Anchored" here means only that the pointer names an unspent output with
+    // the right script and amount. It is necessary, not sufficient: a stale
+    // pointer that happens to name a still-live output of the right shape
+    // passes too, so "all anchored" is not "state is correct". The lineage
+    // half - that the pointer is the one this chain implies - is
+    // CheckDepositContinuity's, and only a reindex settles it end to end.
+    // Said in the log so nobody reads a clean count as a clean bill of health.
+    LogPrintf("%s: %u treasury pointer(s), %u anchored, %u not anchored. "
+              "(Anchored = unspent with matching script and amount; it does not "
+              "confirm the pointer is the one the chain implies - only a reindex "
+              "does.)\n",
+              __func__, (unsigned)mapCTIP.size(),
+              (unsigned)(mapCTIP.size() - vFail.size()), (unsigned)vFail.size());
+
+    if (vFail.empty())
+        return 0;
+
+    std::string strMessage =
+        "Warning: SCDB DIVERGENCE POSSIBLE: this node carries sidechain treasury "
+        "pointers that the unspent output set does not support. The money a "
+        "sidechain can withdraw is not where this node believes it is, and a "
+        "withdrawal payout the rest of the network accepts will be rejected here. "
+        "Nothing has been changed automatically. Details:";
+    for (const std::string& str : vFail) {
+        strMessage += "\n  " + str;
+        LogPrintf("%s: NOT ANCHORED - %s\n", __func__, str);
+    }
+
+    LogPrintf("%s\n", strMessage);
+    AlertNotify(strMessage);
+
+    return (int)vFail.size();
+}
+
+//! Builds into a local database and installs it only on success, so a failure
+//! part-way leaves the node exactly as it was.
+//!
+//! Only the state the chain describes is rebuilt. The state that is this
+//! node's own - how its operator votes, what it is proposing, which bundles it
+//! is carrying - is carried across unchanged in the block just before the
+//! install; see the comment there for why reloading it from the cache files
+//! would not do.
+bool RebuildSidechainDeposits(std::string& strError)
+{
+    AssertLockHeld(cs_main);
+
+    const CBlockIndex* pindexTip = chainActive.Tip();
+    if (!pindexTip) {
+        strError = "no active chain to rebuild from";
+        return false;
+    }
+
+    if (!psidechaintree) {
+        strError = "sidechain index is not open";
+        return false;
+    }
+
+    const int64_t nTimeStart = GetTimeMillis();
+    const Consensus::Params& consensus = Params().GetConsensus();
+
+    SidechainDB dbRebuild;
+
+    int nBlocksRead = 0;
+    int nDepositsFound = 0;
+    int nChangeReturns = 0;
+
+    uiInterface.InitMessage(_("Rebuilding sidechain database from blocks..."));
+
+    for (int nHeight = 1; nHeight <= pindexTip->nHeight; nHeight++) {
+        const CBlockIndex* pindex = chainActive[nHeight];
+        if (!pindex) {
+            strError = strprintf("chain is missing height %d", nHeight);
+            return false;
+        }
+
+        // The record first. It carries the sidechain table, the activation
+        // state and - where the block is new enough - the treasury and the
+        // spent bundles, all as of this block.
+        SidechainBlockData data;
+        if (!psidechaintree->GetBlockData(pindex->GetBlockHash(), data)) {
+            strError = strprintf("no sidechain record for block %s at height %d; "
+                                 "a reindex is the only recovery from missing records",
+                                 pindex->GetBlockHash().ToString(), nHeight);
+            return false;
+        }
+
+        // A slot changing occupant drops the previous sidechain's deposits on
+        // the connect path (UpdateActivationStatus). Applying records skips
+        // that code, so the handover has to be spotted here instead: it shows
+        // up as the slot holding a different sidechain than it did one block
+        // ago. Captured before the record overwrites the table.
+        //
+        // Compared on the serialised form rather than with Sidechain::operator==,
+        // which does not look at fActive and would miss a slot activating with
+        // the same parameters it was proposed under.
+        //
+        // A limit the records cannot remove: a proposal identical in
+        // every field to the sidechain already occupying the slot, activating
+        // into it, changes nothing observable here while the connect path still
+        // resets the slot. This pass would then keep deposits that node had
+        // dropped - a longer history, not a wrong one, and the treasury pointer
+        // still comes from the record either way. Distinguishing it needs the
+        // block's activation commitments, which is the re-derivation this pass
+        // is built to avoid. From the fork height such a proposal is not
+        // tracked at all.
+        const std::vector<Sidechain> vBefore = dbRebuild.GetSidechains();
+
+        dbRebuild.ApplyLDBData(pindex->GetBlockHash(), data);
+
+        const std::vector<Sidechain> vAfter = dbRebuild.GetSidechains();
+        for (size_t n = 0; n < vAfter.size() && n < vBefore.size(); n++) {
+            if (vAfter[n].fActive && vAfter[n].GetSerHash() != vBefore[n].GetSerHash())
+                dbRebuild.ResetSlotDeposits((uint8_t)n);
+        }
+
+        // Nothing can be cached for a block with no active sidechain, so the
+        // block itself does not need reading. This is what keeps the pass off
+        // the long pre-activation span of a mature chain.
+        if (dbRebuild.GetActiveSidechains().empty())
+            continue;
+
+        CBlock block;
+        if (!ReadBlockFromDisk(block, pindex, consensus)) {
+            strError = strprintf("could not read block %s at height %d from disk",
+                                 pindex->GetBlockHash().ToString(), nHeight);
+            return false;
+        }
+        nBlocksRead++;
+
+        std::vector<SidechainDeposit> vDeposit;
+        if (!GetBlockDeposits(block, dbRebuild, vDeposit)) {
+            strError = strprintf("block %s at height %d carries a malformed deposit",
+                                 pindex->GetBlockHash().ToString(), nHeight);
+            return false;
+        }
+
+        // The change a paid-out bundle returns to the sidechain is cached as a
+        // deposit too, so a pass that collected only deposit transactions would
+        // rebuild a cache the connect path never held. The record names which
+        // bundles this block spent; the transactions themselves are in the
+        // block just read.
+        //
+        // Records written before the spent key carry nothing here, so on that
+        // span this finds nothing and the rebuilt cache is short by exactly the
+        // change returns of those blocks. Reported by the caller rather than
+        // hidden, because it is the one way this pass knowingly falls short of
+        // a reindex.
+        for (const SidechainSpentWithdrawal& spent : data.vSpent) {
+            if (spent.hashBlock != pindex->GetBlockHash())
+                continue;
+
+            for (size_t i = 0; i < block.vtx.size(); i++) {
+                const CTransaction& tx = *(block.vtx[i]);
+
+                uint256 hashBlind;
+                if (!tx.GetBlindHash(hashBlind) || hashBlind != spent.hash)
+                    continue;
+
+                SidechainDeposit depositChange;
+                if (!GetWithdrawalChangeDeposit(tx, (int)i, pindex->GetBlockHash(),
+                                                spent.nSidechain, depositChange)) {
+                    strError = strprintf("block %s at height %d spent bundle %s but its change "
+                                         "return could not be rebuilt",
+                                         pindex->GetBlockHash().ToString(), nHeight,
+                                         spent.hash.ToString());
+                    return false;
+                }
+
+                vDeposit.push_back(depositChange);
+                nChangeReturns++;
+                break;
+            }
+        }
+
+        if (vDeposit.empty())
+            continue;
+
+        // The pointer is left to the record wherever the record carries one,
+        // exactly as LoadDepositCache leaves it. Only on the older span, where
+        // no record holds a treasury, is it derived from the cache being built.
+        dbRebuild.AddDeposits(vDeposit, !dbRebuild.HasTreasuryFromRecord() /* fUpdateCTIP */);
+        nDepositsFound += vDeposit.size();
+
+        if (nHeight % 50000 == 0) {
+            LogPrintf("%s: rebuilt to height %d, %d deposits so far.\n",
+                    __func__, nHeight, nDepositsFound);
+            uiInterface.InitMessage(strprintf(_("Rebuilding sidechain database... block %d of %d"),
+                    nHeight, pindexTip->nHeight));
+        }
+    }
+
+    // Everything above was rebuilt from the records and the blocks, which is
+    // everything the chain describes. What the chain does not describe is the
+    // state that belongs to this node alone: how its operator has told it to
+    // vote, which proposals and activation acks it is carrying, the raw bundle
+    // transactions it has been handed, the BMM requests its miner pulled from
+    // the mempool. A fresh SidechainDB is constructed with none of that, so the
+    // move below would silently delete every bit of it.
+    //
+    // That is not a cosmetic loss. The vote cache is what the miner writes into
+    // the coinbase of every block it builds, and a fresh one reads abstain on
+    // every slot: an upvote stops being cast the moment this function returns,
+    // and a downvote - which is an instruction to kill a bundle, not silence
+    // about it - becomes silence, with whatever default the node was
+    // configured with governing from there. A bundle whose only copy of the
+    // payout transaction is the withdrawal cache can no longer be paid out at
+    // all. And none of this needs an operator to trigger it:
+    // RepairSidechainDepositsIfNeeded calls this function from the disconnect
+    // path, so an ordinary reorg deep enough to orphan a change return can
+    // destroy the state mid-vote with no RPC involved.
+    //
+    // So the node-local members are carried into dbRebuild here, before the
+    // move. Doing it on this side of the move is what keeps the "installs only
+    // on success" invariant intact: every line below writes dbRebuild, and a
+    // failure anywhere above has already returned without touching scdb.
+    //
+    // Re-running the startup loaders after the move - the obvious alternative -
+    // would NOT do. The cache files are written at shutdown and at no other
+    // time, so anything the operator has done since this process started
+    // (setwithdrawalvote, receivewithdrawalbundle, createsidechainproposal)
+    // exists only in memory, and reloading from disk would lose precisely the
+    // changes that were worth keeping. One of these members is not persisted
+    // anywhere at all.
+    //
+    // None of what is carried here is hashed by GetConsensusSections, so this
+    // cannot change which blocks the node accepts. What it does change is what
+    // the node PROPOSES, and that is the repair: the instruction it was acting
+    // on one block ago is still the operator's instruction, and a rebuild of
+    // the deposit cache was never asked to revoke it.
+    const std::vector<std::string> vVote = scdb.GetVotes();
+    const std::vector<Sidechain> vProposal = scdb.GetSidechainProposals();
+    const std::vector<uint256> vHashAck = scdb.GetSidechainsToActivate();
+    const std::vector<std::pair<uint8_t, CMutableTransaction>> vWithdrawalTx = scdb.GetWithdrawalTxCache();
+    const std::vector<std::pair<uint256, SidechainFailedWithdrawal>> vFailedBlock = scdb.GetFailedWithdrawalBlocks();
+    const std::set<uint256> setRemovedBMM = scdb.GetRemovedBMM();
+    const std::vector<uint256> vRemovedDeposit = scdb.GetRemovedDeposits();
+
+    // Reset() fills the vote cache with one abstain per slot, so the empty
+    // vector CacheCustomVotes rejects is not a state this can be in; the guard
+    // matches LoadCustomVoteCache's, which is the other caller. A rejection is
+    // logged rather than failed, because a rebuild that has already succeeded
+    // is worth keeping even at the price of an abstaining miner - and the
+    // operator needs to be told, since nothing else would say so.
+    if (!vVote.empty() && !dbRebuild.CacheCustomVotes(vVote)) {
+        LogPrintf("%s: WARNING: could not carry this node's custom withdrawal votes "
+                  "across the rebuild; they have reverted to the default vote.\n",
+                __func__);
+    }
+
+    dbRebuild.CacheSidechainProposals(vProposal);
+
+    for (const uint256& u : vHashAck)
+        dbRebuild.CacheSidechainHashToAck(u);
+
+    int nWithdrawalTxCarried = 0;
+    for (const std::pair<uint8_t, CMutableTransaction>& p : vWithdrawalTx) {
+        if (dbRebuild.CacheWithdrawalTx(CTransaction(p.second), p.first))
+            nWithdrawalTxCarried++;
+    }
+
+    // The failure-to-block index, filtered exactly the way LoadWithdrawalCache
+    // filters it and for exactly its reason: this index must never INTRODUCE a
+    // failure. What has failed was re-established from the records above and
+    // that is the authority; an entry here naming a failure those records did
+    // not restore describes a state this chain no longer holds, and replaying
+    // it would bar a bundle the network still allows. Matched on the slot as
+    // well as the hash, because HaveFailedWithdrawal matches on both and the
+    // same hash failing on two slots would otherwise attach the wrong one.
+    int nFailedBlockCarried = 0;
+    for (const std::pair<uint256, SidechainFailedWithdrawal>& p : vFailedBlock) {
+        if (!dbRebuild.HaveFailedWithdrawal(p.second.hash, p.second.nSidechain))
+            continue;
+
+        dbRebuild.AddFailedWithdrawalBlocks(p.first, std::vector<SidechainFailedWithdrawal>{ p.second });
+        nFailedBlockCarried++;
+    }
+
+    for (const uint256& txid : setRemovedBMM)
+        dbRebuild.AddRemovedBMM(txid);
+
+    for (const uint256& txid : vRemovedDeposit)
+        dbRebuild.AddRemovedDeposit(txid);
+
+    // Verify the rebuilt cache BEFORE it becomes the live database, not after.
+    // The move below is irreversible in the ways that matter: it overwrites the
+    // process-global scdb, and a clean shutdown then persists whatever scdb
+    // holds via DumpSCDBCache (init.cpp) - so installing a rebuild that does
+    // not support its own treasury and only noticing afterwards leaves the node
+    // running the broken state AND writes it to disk on the next normal stop,
+    // clobbering what a -reindex would otherwise rebuild from. Checking
+    // dbRebuild here means a rebuild that cannot support the treasury is never
+    // installed: scdb is untouched, "installed only on success" stays true, and
+    // both callers (the rebuildscdb RPC and RepairSidechainDepositsIfNeeded)
+    // see a plain false return and keep the state they had.
+    //
+    // This only refuses a genuinely unsupported pointer. A cache that is merely
+    // short of some change returns but whose pointer still matches its newest
+    // deposit passes DepositCacheSupportsTreasury, so the pre-spent-key record
+    // span that rebuilds a correct-but-short cache still installs.
+    uint8_t nSlotUnsupported = 0;
+    if (!dbRebuild.DepositCacheSupportsTreasury(nSlotUnsupported)) {
+        strError = strprintf(
+            "rebuild completed but the treasury of sidechain %u is not supported "
+            "by the rebuilt cache - its pointer may name a spent output. The node "
+            "has NOT been changed. Recover with -reindex, which rebuilds every "
+            "pointer from blocks, and verify getscdbhash against a known-good node.",
+            nSlotUnsupported);
+        LogPrintf("%s: %s\n", __func__, strError);
+        return false;
+    }
+
+    // Only now, with every block behind us and the rebuild verified, does the
+    // global database move.
+    scdb = std::move(dbRebuild);
+    mempool.UpdateCTIPFromBlock(scdb.GetCTIP(), false /* fDisconnect */);
+
+    LogPrintf("%s: rebuilt the sidechain deposit cache to block %s (height %d) in %.2fs: "
+              "%d blocks read, %d deposits, %d withdrawal change returns.\n",
+            __func__, pindexTip->GetBlockHash().ToString(), pindexTip->nHeight,
+            (GetTimeMillis() - nTimeStart) * 0.001,
+            nBlocksRead, nDepositsFound, nChangeReturns);
+
+    // Reported separately, and always, because it is the half of this function
+    // that a reader of the log has no other way to check: the counts above come
+    // from the chain and can be re-derived from it, these came from memory and
+    // cannot. A line of zeroes on a node that was mid-vote is the symptom to
+    // look for.
+    //
+    // The votes are counted rather than listed, and only the ones that say
+    // something: the cache always holds one entry per slot, so its size would
+    // report the same number on a node that has never voted in its life.
+    int nVoteCarried = 0;
+    for (const std::string& strVote : vVote) {
+        if (strVote.size() != 1 || strVote.front() != SCDB_ABSTAIN)
+            nVoteCarried++;
+    }
+
+    LogPrintf("%s: carried this node's own state across the rebuild: %d non-abstain vote(s), "
+              "%d proposal(s), %d activation ack(s), %d cached withdrawal transaction(s), "
+              "%d failure-to-block entries, %d removed BMM request(s), %d removed deposit(s).\n",
+            __func__, nVoteCarried, (int)vProposal.size(), (int)vHashAck.size(),
+            nWithdrawalTxCarried, nFailedBlockCarried, (int)setRemovedBMM.size(),
+            (int)vRemovedDeposit.size());
 
     return true;
 }
@@ -5712,6 +8234,19 @@ void DumpDepositCache()
         vDeposit.insert(std::end(vDeposit), std::begin(vSidechainDeposit), std::end(vSidechainDeposit));
     }
 
+    // Only persist the cache once startup has established that the in-memory
+    // sidechain state is authoritative. Startup can abort before the deposit
+    // cache is loaded -- a failed SCDB resync calls scdb.Reset() and breaks out
+    // before LoadDepositCache() -- and writing the still-empty cache on the way
+    // out would destroy a good deposit.dat, turning a recoverable restart into a
+    // mandatory reindex. Gating on load completion rather than on emptiness is
+    // what lets a cache that has legitimately become empty (a sidechain slot
+    // being replaced, or a deep reorg) still be written out correctly.
+    if (!fSCDBStateLoaded) {
+        LogPrintf("%s: Sidechain state was not fully loaded; not overwriting deposit.dat.\n", __func__);
+        return;
+    }
+
 
     // Write the deposits
     fs::path path = GetDataDir() / "skydoge" / "deposit.dat.new";
@@ -5722,7 +8257,15 @@ void DumpDepositCache()
 
     int count = vDeposit.size();
     try {
-        fileout << SCDB_DUMP_VERSION; // version required to read
+        fileout << SCDB_DEPOSIT_DUMP_VERSION; // version required to read
+
+        // Stamp the block this cache corresponds to, so the next startup can
+        // tell whether it still describes the chain. The sidechain database's
+        // own last-seen block is the right stamp rather than the chain tip:
+        // the deposits are added by ConnectBlock, which advances both together,
+        // so it is the height these deposits actually reflect.
+        fileout << scdb.GetHashBlockLastSeen();
+
         fileout << count; // Number of deposits in file
 
         for (const SidechainDeposit& d : vDeposit) {
@@ -5734,24 +8277,57 @@ void DumpDepositCache()
         return;
     }
 
-    FileCommit(fileout.Get());
+    if (!FileCommit(fileout.Get())) {
+        // The replacement never reached the disk. Renaming it over the previous
+        // file would trade a good copy for a truncated one, so keep what is
+        // there; the .new file is overwritten on the next attempt.
+        LogPrintf("%s: Failed to write the cache file; keeping the previous copy.\n", __func__);
+        return;
+    }
     fileout.fclose();
-    RenameOver(GetDataDir() / "skydoge" / "deposit.dat.new", GetDataDir() /  "skydoge" / "deposit.dat");
+    if (!RenameOver(GetDataDir() / "skydoge" / "deposit.dat.new",
+                    GetDataDir() /  "skydoge" / "deposit.dat")) {
+        LogPrintf("%s: Failed to replace the previous file; the cache was not saved.\n", __func__);
+        return;
+    }
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }
 
-bool LoadWithdrawalCache(bool fReindex)
+namespace {
+/** 0.45.2: a raw withdrawal bundle read from withdrawal.dat ahead of a chain
+ *  replay, held back until the replay has finished. */
+struct ReplayedWithdrawalBundle {
+    uint8_t nSidechain;
+    CTransactionRef tx;
+    //! The slot's occupant (Sidechain::GetSerHash) when the file was written;
+    //! null when the file does not say (written before 0.45.2).
+    uint256 hashOccupant;
+};
+CCriticalSection cs_withdrawal_replay;
+std::vector<ReplayedWithdrawalBundle> g_vWithdrawalAfterReplay GUARDED_BY(cs_withdrawal_replay);
+} // namespace
+
+bool LoadWithdrawalCache(bool fReindex, bool fHoldBundles)
 {
     fs::path path = GetDataDir() / "skydoge" / "withdrawal.dat";
     CAutoFile filein(fsbridge::fopen(path, "rb"), SER_DISK, CLIENT_VERSION);
     if (filein.IsNull()) {
+        // A file that is there but will not open is not the same as no file
+        // at all. Reporting "nothing to load" would let startup finish with an
+        // empty cache and shutdown write that emptiness over data nothing can
+        // rebuild, so say the load failed and leave the file alone.
+        if (fs::exists(path))
+            return error("%s: %s exists but could not be opened", __func__, path.string());
         return true;
     }
 
     std::vector<std::pair<uint8_t, CTransactionRef>> vWithdrawal;
     std::vector<SidechainSpentWithdrawal> vSpent;
     std::vector<SidechainFailedWithdrawal> vFailed;
+    std::vector<std::pair<uint256, SidechainFailedWithdrawal>> vFailedBlock;
+    // (slot, bundle hash) -> the slot's occupant when the file was written.
+    std::map<std::pair<uint8_t, uint256>, uint256> mapOccupant;
     try {
         uint64_t nVersion;
         filein >> nVersion;
@@ -5785,6 +8361,95 @@ bool LoadWithdrawalCache(bool fReindex)
                 filein >> failed;
                 vFailed.push_back(failed);
             }
+
+            // Which block recorded each failure. This section was added after
+            // the format was first written and the version is shared with every
+            // other cache file, so a file that ends here is not an error - it
+            // was written by an older build. Read it separately and treat a
+            // short file as "no block is known for these failures", which is
+            // what the node assumed before the section existed.
+            bool fFailedBlockRead = false;
+            try {
+                int nFailedBlock = 0;
+                filein >> nFailedBlock;
+                for (int i = 0; i < nFailedBlock; i++) {
+                    uint256 hashBlock;
+                    SidechainFailedWithdrawal failed;
+                    filein >> hashBlock;
+                    filein >> failed;
+                    vFailedBlock.push_back(std::make_pair(hashBlock, failed));
+                }
+                fFailedBlockRead = true;
+            }
+            catch (const std::exception&) {
+                vFailedBlock.clear();
+                LogPrintf("%s: No failure-to-block index in the file; a reorg "
+                          "across a failure recorded before this start cannot "
+                          "be undone.\n", __func__);
+            }
+            // 0.45.2: the bundle-occupant section, read only when the bundles
+            // are held back (blocks still to connect, see init.cpp).
+            if (fHoldBundles && fFailedBlockRead) {
+                try {
+                    int nOccupant = 0;
+                    filein >> nOccupant;
+                    for (int i = 0; i < nOccupant; i++) {
+                        uint8_t nSidechain = 0;
+                        uint256 hashBundle, hashOccupant;
+                        filein >> nSidechain;
+                        filein >> hashBundle;
+                        filein >> hashOccupant;
+                        mapOccupant[std::make_pair(nSidechain, hashBundle)] = hashOccupant;
+                    }
+                }
+                catch (const std::exception&) {
+                    mapOccupant.clear();
+                }
+            }
+        } else {
+            // 0.45.2: ahead of a replay only the bundles and, at the end of
+            // the file, the occupant each slot had when it was written are
+            // used. The sections in between are read past, not installed (see
+            // the comment on the install below). A file that ends early was
+            // written before 0.45.2 and states no occupant; nothing else
+            // depends on these reads, so a short or odd tail only means that.
+            try {
+                int nSpent = 0;
+                filein >> nSpent;
+                for (int i = 0; i < nSpent; i++) {
+                    SidechainSpentWithdrawal spent;
+                    filein >> spent;
+                }
+                int nFailed = 0;
+                filein >> nFailed;
+                for (int i = 0; i < nFailed; i++) {
+                    SidechainFailedWithdrawal failed;
+                    filein >> failed;
+                }
+                int nFailedBlock = 0;
+                filein >> nFailedBlock;
+                for (int i = 0; i < nFailedBlock; i++) {
+                    uint256 hashBlock;
+                    SidechainFailedWithdrawal failed;
+                    filein >> hashBlock;
+                    filein >> failed;
+                }
+                int nOccupant = 0;
+                filein >> nOccupant;
+                for (int i = 0; i < nOccupant; i++) {
+                    uint8_t nSidechain = 0;
+                    uint256 hashBundle, hashOccupant;
+                    filein >> nSidechain;
+                    filein >> hashBundle;
+                    filein >> hashOccupant;
+                    mapOccupant[std::make_pair(nSidechain, hashBundle)] = hashOccupant;
+                }
+            }
+            catch (const std::exception&) {
+                mapOccupant.clear();
+                LogPrintf("%s: The file states no sidechain occupant for its bundles "
+                          "(written before 0.45.2).\n", __func__);
+            }
         }
     }
     catch (const std::exception& e) {
@@ -5794,17 +8459,188 @@ bool LoadWithdrawalCache(bool fReindex)
 
     // Add to SCDB
 
+    if (fHoldBundles) {
+        // Blocks are about to be
+        // connected (a replay from genesis, or the rest of one that was
+        // interrupted), and every sidechain activation the replay
+        // connects drops the cached bundles of that slot - the previous-
+        // occupant guard in UpdateActivationStatus, which is right for a live
+        // activation and wrong here, where the slot is being handed back to
+        // the very sidechain the bundles were cached for. Installed now, a
+        // full -reindex lost every cached bundle (measured in testing).
+        // So they are held back and installed once the
+        // replay has finished (InstallReplayedWithdrawalCache), against the
+        // replayed chain's own state. The guard itself is unchanged.
+        LOCK(cs_withdrawal_replay);
+        for (const std::pair<uint8_t, CTransactionRef>& pair : vWithdrawal) {
+            const uint256 hash = pair.second->GetHash();
+            bool fHeld = false;
+            for (const ReplayedWithdrawalBundle& b : g_vWithdrawalAfterReplay) {
+                if (b.nSidechain == pair.first && b.tx->GetHash() == hash) {
+                    fHeld = true;
+                    break;
+                }
+            }
+            if (fHeld)
+                continue;
+            ReplayedWithdrawalBundle b;
+            b.nSidechain = pair.first;
+            b.tx = pair.second;
+            const auto it = mapOccupant.find(std::make_pair(pair.first, hash));
+            if (it != mapOccupant.end())
+                b.hashOccupant = it->second;
+            g_vWithdrawalAfterReplay.push_back(b);
+        }
+        if (!vWithdrawal.empty()) {
+            LogPrintf("%s: Holding %u cached withdrawal bundle(s) until the chain replay has finished.\n",
+                      __func__, (unsigned)vWithdrawal.size());
+        }
+        return true;
+    }
+
     for (const std::pair<uint8_t, CTransactionRef>& pair : vWithdrawal) {
         if (!scdb.CacheWithdrawalTx(*pair.second.get(), pair.first))
             return false;
     }
 
     if (!fReindex) {
-        scdb.AddSpentWithdrawals(vSpent);
-        scdb.AddFailedWithdrawals(vFailed);
+        // The spent and failed sets are installed only where this file is still
+        // the node's best copy of them.
+        //
+        // ApplyLDBData does not merge those two maps, it clears them and
+        // reinstalls them from the per-block record, and the record states the
+        // whole set as of its own block rather than that block's additions -
+        // ConnectBlock writes vSpent and vFailed from the entire cache. So once
+        // ResyncSCDB has brought the database to the tip, the record is the
+        // complete and authoritative answer, and this file - written once at
+        // shutdown, with no block stamp and no staleness check of its own - can
+        // only disagree with it, never improve on it.
+        //
+        // Disagreement is not hypothetical. A node that recorded a spend or a
+        // failure on a branch it has since abandoned still holds that entry in
+        // the file, while the surviving tip's record correctly does not state
+        // it. The de-dup inside AddSpentWithdrawals makes an entry held by both
+        // a no-op, but an entry held only by the file is precisely what it
+        // cannot see, and re-adding one is not untidy: GetConsensusSections
+        // hashes both maps, so the node reports a state no correctly-built node
+        // can report, and HaveSpentWithdrawal / HaveFailedWithdrawal gate
+        // AddWithdrawal, so a re-injected failure bars a bundle from ever being
+        // proposed again on the chain the node is actually on. Nothing corrects
+        // it later either: the file is re-read at every startup, and the maps
+        // are hashed, not derived, so no amount of further syncing removes what
+        // was put in.
+        //
+        // This is the reasoning that gave LoadDepositCache its fUpdateCTIP=false
+        // path, applied to the other half of the same shutdown snapshot.
+        //
+        // The two keys are asked separately because they promise different
+        // things. A record written under the treasury key reinstalls the failed
+        // map, and serialises vSpent as the empty vector that nothing ever
+        // filled; only the spent key says that field was written. A node whose
+        // tip record predates either key still gets that map from this file, as
+        // it always did - which is what stops an upgrade from an older build
+        // coming back able to re-admit a bundle it has already paid out.
+        //
+        // Both counts are logged where the file is skipped, because a node that
+        // has drifted is otherwise invisible: nothing about a stale file is
+        // reported today, and the two numbers disagreeing is the cheapest
+        // evidence an operator can be given that this node was carrying entries
+        // its own chain does not state. Comparing the sets entry by entry would
+        // be a better signal, but it is quadratic in containers that nothing
+        // bounds from above, and this runs at startup.
+        if (!scdb.HasSpentFromRecord()) {
+            scdb.AddSpentWithdrawals(vSpent);
+        } else if (!vSpent.empty()) {
+            LogPrintf("%s: The block record states %u spent withdrawal(s); the %u in the file "
+                      "were not installed.\n", __func__,
+                    (unsigned)scdb.GetSpentWithdrawalCache().size(), (unsigned)vSpent.size());
+        }
+
+        if (!scdb.HasTreasuryFromRecord()) {
+            scdb.AddFailedWithdrawals(vFailed);
+        } else if (!vFailed.empty()) {
+            LogPrintf("%s: The block record states %u failed withdrawal(s); the %u in the file "
+                      "were not installed.\n", __func__,
+                    (unsigned)scdb.GetFailedWithdrawalCache().size(), (unsigned)vFailed.size());
+        }
+
+        // Re-attach each failure to the block that recorded it. Failures with
+        // no block in the index stay as plain records: they cannot be undone by
+        // a disconnect, which is how every build before this one behaved.
+        //
+        // Reading this file must never introduce a failure, nor move one to a
+        // different sidechain. The failed map holds one record per hash; this
+        // section is written from an index that holds every failure per block,
+        // and it arrives sorted by block hash, which is not chain order.
+        // Replaying it into mapFailedWithdrawal could therefore install a slot
+        // that was not the one in force, and since HaveFailedWithdrawal matches
+        // on the slot, that would make this node reject a block the network
+        // accepts. So the block is attached only to a failure the map already
+        // holds, and only for the same slot. That guard is also what keeps this
+        // section honest now that the section above may have installed nothing:
+        // where the record supplied the failures, only the record's failures can
+        // be given a block, and a file entry the record does not state is
+        // skipped here as well.
+        for (const std::pair<uint256, SidechainFailedWithdrawal>& p : vFailedBlock) {
+            if (!scdb.HaveFailedWithdrawal(p.second.hash, p.second.nSidechain))
+                continue;
+            scdb.AddFailedWithdrawalBlocks(p.first, std::vector<SidechainFailedWithdrawal>{ p.second });
+        }
     }
 
     return true;
+}
+
+void InstallReplayedWithdrawalCache()
+{
+    LOCK2(cs_main, cs_withdrawal_replay);
+    if (g_vWithdrawalAfterReplay.empty())
+        return;
+
+    // Which held-back bundles the connected chain can still use:
+    //  - one whose slot is not active is kept HELD, not installed and not
+    //    dropped: the chain this start reached does not show that slot (a
+    //    node restarted after a reindex was killed can come back at a low
+    //    height), so nothing here can judge it; it is written back to
+    //    withdrawal.dat as it was read and judged on a later start;
+    //  - a bundle paid out or failed on this chain is dropped (the live paths
+    //    drop a bundle's raw bytes at both);
+    //  - where the file names the slot's occupant, it must still be the same
+    //    sidechain - the previous-occupant guard's rule, applied to the
+    //    occupant at the end instead of to every activation on the way;
+    //  - where it does not (a file written before 0.45.2), only a bundle the
+    //    chain still tracks for that slot is kept. A bundle it does not track
+    //    cannot be paid out without being proposed again.
+    std::vector<ReplayedWithdrawalBundle> vStillHeld;
+    unsigned int nKept = 0, nDropped = 0;
+    for (const ReplayedWithdrawalBundle& b : g_vWithdrawalAfterReplay) {
+        const uint256 hash = b.tx->GetHash();
+        Sidechain sidechain;
+        std::string strDrop;
+        if (!scdb.GetSidechain(b.nSidechain, sidechain)) {
+            vStillHeld.push_back(b);
+            continue;
+        } else if (scdb.HaveSpentWithdrawal(hash, b.nSidechain) || scdb.HaveFailedWithdrawal(hash, b.nSidechain)) {
+            strDrop = "it was paid out or failed on this chain";
+        } else if (!b.hashOccupant.IsNull()) {
+            if (sidechain.GetSerHash() != b.hashOccupant)
+                strDrop = "the slot holds a different sidechain now";
+        } else if (!scdb.HaveWorkScore(hash, b.nSidechain)) {
+            strDrop = "the file names no occupant and the chain does not track the bundle";
+        }
+        if (!strDrop.empty()) {
+            LogPrintf("%s: Dropping cached withdrawal bundle %s (slot %u): %s.\n",
+                      __func__, hash.ToString(), (unsigned)b.nSidechain, strDrop);
+            nDropped++;
+            continue;
+        }
+        if (!scdb.HaveWithdrawalTxCachedForSlot(b.nSidechain, hash))
+            scdb.CacheWithdrawalTx(*b.tx, b.nSidechain);
+        nKept++;
+    }
+    LogPrintf("%s: Chain replay finished: kept %u, dropped %u, still held for an inactive slot %u of %u cached withdrawal bundle(s).\n",
+              __func__, nKept, nDropped, (unsigned)vStillHeld.size(), (unsigned)g_vWithdrawalAfterReplay.size());
+    g_vWithdrawalAfterReplay.swap(vStillHeld);
 }
 
 void DumpWithdrawalCache()
@@ -5812,6 +8648,37 @@ void DumpWithdrawalCache()
     std::vector<std::pair<uint8_t, CMutableTransaction>> vWithdrawal = scdb.GetWithdrawalTxCache();
     std::vector<SidechainSpentWithdrawal> vSpent = scdb.GetSpentWithdrawalCache();
     std::vector<SidechainFailedWithdrawal> vFailed = scdb.GetFailedWithdrawalCache();
+    std::vector<std::pair<uint256, SidechainFailedWithdrawal>> vFailedBlock = scdb.GetFailedWithdrawalBlocks();
+
+    // 0.45.2: the occupant of each bundle's slot (Sidechain::GetSerHash),
+    // read back only ahead of a chain replay (LoadWithdrawalCache). A bundle
+    // still held back from an unfinished replay is written as it was read, so
+    // stopping the node mid-replay loses nothing.
+    std::vector<std::pair<std::pair<uint8_t, uint256>, uint256>> vOccupant;
+    for (const std::pair<uint8_t, CMutableTransaction>& pair : vWithdrawal) {
+        Sidechain sidechain;
+        uint256 hashOccupant;
+        if (scdb.GetSidechain(pair.first, sidechain))
+            hashOccupant = sidechain.GetSerHash();
+        vOccupant.push_back(std::make_pair(std::make_pair(pair.first, pair.second.GetHash()), hashOccupant));
+    }
+    {
+        LOCK(cs_withdrawal_replay);
+        for (const ReplayedWithdrawalBundle& b : g_vWithdrawalAfterReplay) {
+            const std::pair<uint8_t, uint256> key = std::make_pair(b.nSidechain, b.tx->GetHash());
+            bool fListed = false;
+            for (const auto& o : vOccupant) {
+                if (o.first == key) {
+                    fListed = true;
+                    break;
+                }
+            }
+            if (fListed)
+                continue;
+            vWithdrawal.push_back(std::make_pair(b.nSidechain, CMutableTransaction(*b.tx)));
+            vOccupant.push_back(std::make_pair(key, b.hashOccupant));
+        }
+    }
 
     int nWithdrawal = vWithdrawal.size();
     int nSpent = vSpent.size();
@@ -5842,15 +8709,48 @@ void DumpWithdrawalCache()
         for (const SidechainFailedWithdrawal& f : vFailed) {
             fileout << f;
         }
+
+        // Which block recorded each failure, so that a reorg after a restart
+        // can still take the failure back out. Appended after everything the
+        // previous format wrote, and read back inside its own try block, so
+        // that SCDB_DUMP_VERSION does not have to change: that constant is
+        // shared by every cache file, and bumping it would make this release
+        // reject the operator's proposals, votes and acknowledgements on first
+        // start. An older build simply stops reading before this point.
+        fileout << (int)vFailedBlock.size();
+        for (const std::pair<uint256, SidechainFailedWithdrawal>& p : vFailedBlock) {
+            fileout << p.first;
+            fileout << p.second;
+        }
+
+        // 0.45.2: (slot, bundle hash, slot occupant) per cached bundle,
+        // appended after everything earlier builds write, for the same reason
+        // as the section above; an earlier build stops reading before it.
+        fileout << (int)vOccupant.size();
+        for (const auto& o : vOccupant) {
+            fileout << o.first.first;
+            fileout << o.first.second;
+            fileout << o.second;
+        }
     }
     catch (const std::exception& e) {
         LogPrintf("%s: Exception: %s\n", __func__, e.what());
         return;
     }
 
-    FileCommit(fileout.Get());
+    if (!FileCommit(fileout.Get())) {
+        // The replacement never reached the disk. Renaming it over the previous
+        // file would trade a good copy for a truncated one, so keep what is
+        // there; the .new file is overwritten on the next attempt.
+        LogPrintf("%s: Failed to write the cache file; keeping the previous copy.\n", __func__);
+        return;
+    }
     fileout.fclose();
-    RenameOver(GetDataDir() / "skydoge" / "withdrawal.dat.new", GetDataDir() /  "skydoge" / "withdrawal.dat");
+    if (!RenameOver(GetDataDir() / "skydoge" / "withdrawal.dat.new",
+                    GetDataDir() /  "skydoge" / "withdrawal.dat")) {
+        LogPrintf("%s: Failed to replace the previous file; the cache was not saved.\n", __func__);
+        return;
+    }
 
     LogPrintf("%s: Wrote %u Withdrawal, %u spent, %u failed\n", __func__, nWithdrawal, nSpent, nFailed);
 }
@@ -5858,31 +8758,57 @@ void DumpWithdrawalCache()
 bool LoadBMMCache()
 {
     fs::path path = GetDataDir() / "skydoge" / "bmm.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
-    if (filein.IsNull()) {
+    std::vector<CDataStream> vCandidate;
+    // A file that is there but will not open is not the same as no file at all.
+    // Reporting "nothing to load" would let startup finish with an empty cache
+    // and shutdown write that emptiness over data nothing can rebuild, so say
+    // the load failed and leave the file alone.
+    const CacheRead read = ReadCacheFileCandidates(path, vCandidate);
+    if (read == CacheRead::MISSING)
         return true;
-    }
+    if (read == CacheRead::UNOPENABLE)
+        return error("%s: %s exists but could not be opened", __func__, path.string());
 
     std::set<uint256> setRemovedBMM;
-    try {
-        uint64_t nVersion;
-        filein >> nVersion;
-        if (nVersion != SCDB_DUMP_VERSION) {
-            return false;
-        }
+    bool fParsed = false;
+    bool fRecovered = false;
+    for (size_t c = 0; c < vCandidate.size(); c++) {
+        setRemovedBMM.clear();
+        CDataStream& filein = vCandidate[c];
+        try {
+            uint64_t nVersion;
+            filein >> nVersion;
+            if (nVersion != SCDB_DUMP_VERSION)
+                continue;
 
-        int count = 0;
-        filein >> count;
-        for (int i = 0; i < count; i++) {
-            uint256 txid;
-            filein >> txid;
-            setRemovedBMM.insert(txid);
+            int count = 0;
+            filein >> count;
+            for (int i = 0; i < count; i++) {
+                uint256 txid;
+                filein >> txid;
+                setRemovedBMM.insert(txid);
+            }
         }
+        catch (const std::exception& e) {
+            LogPrintf("%s: Exception: %s\n", __func__, e.what());
+            continue;
+        }
+        // A parse that "succeeds" while leaving bytes behind is the
+        // signature of the text-mode corruption: the extra 0x0D bytes shift
+        // everything along, the reads still find enough data, and the loader
+        // returns garbage without ever throwing. Insist the whole stream was
+        // consumed before believing a candidate.
+        if (!filein.empty())
+            continue;
+        fParsed = true;
+        fRecovered = (c > 0);
+        break;
     }
-    catch (const std::exception& e) {
-        LogPrintf("%s: Exception: %s\n", __func__, e.what());
+    if (!fParsed)
         return false;
-    }
+    if (fRecovered)
+        LogPrintf("%s: %s was written in text mode by an older build; recovered it. "
+                  "It is rewritten in binary at the next clean shutdown.\n", __func__, path.string());
 
     // TODO add a function to take in the whole set
     for (const uint256& u : setRemovedBMM)
@@ -5899,7 +8825,7 @@ void DumpBMMCache()
 
     // Write the sidechain activation status cache
     fs::path path = GetDataDir() / "skydoge" / "bmm.dat.new";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
     }
@@ -5913,12 +8839,24 @@ void DumpBMMCache()
         }
     }
     catch (const std::exception& e) {
+        // Serialisation stopped part way, so the replacement is incomplete.
         LogPrintf("%s: Exception: %s\n", __func__, e.what());
+        return;
     }
 
-    FileCommit(fileout.Get());
+    if (!FileCommit(fileout.Get())) {
+        // The replacement never reached the disk. Renaming it over the previous
+        // file would trade a good copy for a truncated one, so keep what is
+        // there; the .new file is overwritten on the next attempt.
+        LogPrintf("%s: Failed to write the cache file; keeping the previous copy.\n", __func__);
+        return;
+    }
     fileout.fclose();
-    RenameOver(GetDataDir() / "skydoge" / "bmm.dat.new", GetDataDir() /  "skydoge" / "bmm.dat");
+    if (!RenameOver(GetDataDir() / "skydoge" / "bmm.dat.new",
+                    GetDataDir() /  "skydoge" / "bmm.dat")) {
+        LogPrintf("%s: Failed to replace the previous file; the cache was not saved.\n", __func__);
+        return;
+    }
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }
@@ -5926,31 +8864,57 @@ void DumpBMMCache()
 bool LoadSidechainProposalCache()
 {
     fs::path path = GetDataDir() / "skydoge" / "sidechainproposals.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
-    if (filein.IsNull()) {
+    std::vector<CDataStream> vCandidate;
+    // A file that is there but will not open is not the same as no file at all.
+    // Reporting "nothing to load" would let startup finish with an empty cache
+    // and shutdown write that emptiness over data nothing can rebuild, so say
+    // the load failed and leave the file alone.
+    const CacheRead read = ReadCacheFileCandidates(path, vCandidate);
+    if (read == CacheRead::MISSING)
         return true;
-    }
+    if (read == CacheRead::UNOPENABLE)
+        return error("%s: %s exists but could not be opened", __func__, path.string());
 
     std::vector<Sidechain> vProposal;
-    try {
-        uint64_t nVersion;
-        filein >> nVersion;
-        if (nVersion != SCDB_DUMP_VERSION) {
-            return false;
-        }
+    bool fParsed = false;
+    bool fRecovered = false;
+    for (size_t c = 0; c < vCandidate.size(); c++) {
+        vProposal.clear();
+        CDataStream& filein = vCandidate[c];
+        try {
+            uint64_t nVersion;
+            filein >> nVersion;
+            if (nVersion != SCDB_DUMP_VERSION)
+                continue;
 
-        int count = 0;
-        filein >> count;
-        for (int i = 0; i < count; i++) {
-            Sidechain proposal;
-            filein >> proposal;
-            vProposal.push_back(proposal);
+            int count = 0;
+            filein >> count;
+            for (int i = 0; i < count; i++) {
+                Sidechain proposal;
+                filein >> proposal;
+                vProposal.push_back(proposal);
+            }
         }
+        catch (const std::exception& e) {
+            LogPrintf("%s: Exception: %s\n", __func__, e.what());
+            continue;
+        }
+        // A parse that "succeeds" while leaving bytes behind is the
+        // signature of the text-mode corruption: the extra 0x0D bytes shift
+        // everything along, the reads still find enough data, and the loader
+        // returns garbage without ever throwing. Insist the whole stream was
+        // consumed before believing a candidate.
+        if (!filein.empty())
+            continue;
+        fParsed = true;
+        fRecovered = (c > 0);
+        break;
     }
-    catch (const std::exception& e) {
-        LogPrintf("%s: Exception: %s\n", __func__, e.what());
+    if (!fParsed)
         return false;
-    }
+    if (fRecovered)
+        LogPrintf("%s: %s was written in text mode by an older build; recovered it. "
+                  "It is rewritten in binary at the next clean shutdown.\n", __func__, path.string());
 
     // Add to SCDB
     scdb.CacheSidechainProposals(vProposal);
@@ -5966,7 +8930,7 @@ void DumpSidechainProposalCache()
 
     // Write the sidechain proposal cache
     fs::path path = GetDataDir() / "skydoge" / "sidechainproposals.dat.new";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
     }
@@ -5980,12 +8944,24 @@ void DumpSidechainProposalCache()
         }
     }
     catch (const std::exception& e) {
+        // Serialisation stopped part way, so the replacement is incomplete.
         LogPrintf("%s: Exception: %s\n", __func__, e.what());
+        return;
     }
 
-    FileCommit(fileout.Get());
+    if (!FileCommit(fileout.Get())) {
+        // The replacement never reached the disk. Renaming it over the previous
+        // file would trade a good copy for a truncated one, so keep what is
+        // there; the .new file is overwritten on the next attempt.
+        LogPrintf("%s: Failed to write the cache file; keeping the previous copy.\n", __func__);
+        return;
+    }
     fileout.fclose();
-    RenameOver(GetDataDir() / "skydoge" / "sidechainproposals.dat.new", GetDataDir() /  "skydoge" / "sidechainproposals.dat");
+    if (!RenameOver(GetDataDir() / "skydoge" / "sidechainproposals.dat.new",
+                    GetDataDir() /  "skydoge" / "sidechainproposals.dat")) {
+        LogPrintf("%s: Failed to replace the previous file; the cache was not saved.\n", __func__);
+        return;
+    }
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }
@@ -5993,31 +8969,57 @@ void DumpSidechainProposalCache()
 bool LoadSidechainActivationHashCache()
 {
     fs::path path = GetDataDir() / "skydoge" / "sidechainhashactivate.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
-    if (filein.IsNull()) {
+    std::vector<CDataStream> vCandidate;
+    // A file that is there but will not open is not the same as no file at all.
+    // Reporting "nothing to load" would let startup finish with an empty cache
+    // and shutdown write that emptiness over data nothing can rebuild, so say
+    // the load failed and leave the file alone.
+    const CacheRead read = ReadCacheFileCandidates(path, vCandidate);
+    if (read == CacheRead::MISSING)
         return true;
-    }
+    if (read == CacheRead::UNOPENABLE)
+        return error("%s: %s exists but could not be opened", __func__, path.string());
 
     std::vector<uint256> vHash;
-    try {
-        uint64_t nVersion;
-        filein >> nVersion;
-        if (nVersion != SCDB_DUMP_VERSION) {
-            return false;
-        }
+    bool fParsed = false;
+    bool fRecovered = false;
+    for (size_t c = 0; c < vCandidate.size(); c++) {
+        vHash.clear();
+        CDataStream& filein = vCandidate[c];
+        try {
+            uint64_t nVersion;
+            filein >> nVersion;
+            if (nVersion != SCDB_DUMP_VERSION)
+                continue;
 
-        int count = 0;
-        filein >> count;
-        for (int i = 0; i < count; i++) {
-            uint256 hash;
-            filein >> hash;
-            vHash.push_back(hash);
+            int count = 0;
+            filein >> count;
+            for (int i = 0; i < count; i++) {
+                uint256 hash;
+                filein >> hash;
+                vHash.push_back(hash);
+            }
         }
+        catch (const std::exception& e) {
+            LogPrintf("%s: Exception: %s\n", __func__, e.what());
+            continue;
+        }
+        // A parse that "succeeds" while leaving bytes behind is the
+        // signature of the text-mode corruption: the extra 0x0D bytes shift
+        // everything along, the reads still find enough data, and the loader
+        // returns garbage without ever throwing. Insist the whole stream was
+        // consumed before believing a candidate.
+        if (!filein.empty())
+            continue;
+        fParsed = true;
+        fRecovered = (c > 0);
+        break;
     }
-    catch (const std::exception& e) {
-        LogPrintf("%s: Exception: %s\n", __func__, e.what());
+    if (!fParsed)
         return false;
-    }
+    if (fRecovered)
+        LogPrintf("%s: %s was written in text mode by an older build; recovered it. "
+                  "It is rewritten in binary at the next clean shutdown.\n", __func__, path.string());
 
     // Add to SCDB
     for (const uint256& u : vHash)
@@ -6034,7 +9036,7 @@ void DumpSidechainActivationHashCache()
 
     // Write the sidechain activation hash cache
     fs::path path = GetDataDir() / "skydoge" / "sidechainhashactivate.dat.new";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
     }
@@ -6048,12 +9050,24 @@ void DumpSidechainActivationHashCache()
         }
     }
     catch (const std::exception& e) {
+        // Serialisation stopped part way, so the replacement is incomplete.
         LogPrintf("%s: Exception: %s\n", __func__, e.what());
+        return;
     }
 
-    FileCommit(fileout.Get());
+    if (!FileCommit(fileout.Get())) {
+        // The replacement never reached the disk. Renaming it over the previous
+        // file would trade a good copy for a truncated one, so keep what is
+        // there; the .new file is overwritten on the next attempt.
+        LogPrintf("%s: Failed to write the cache file; keeping the previous copy.\n", __func__);
+        return;
+    }
     fileout.fclose();
-    RenameOver(GetDataDir() / "skydoge" / "sidechainhashactivate.dat.new", GetDataDir() /  "skydoge" / "sidechainhashactivate.dat");
+    if (!RenameOver(GetDataDir() / "skydoge" / "sidechainhashactivate.dat.new",
+                    GetDataDir() /  "skydoge" / "sidechainhashactivate.dat")) {
+        LogPrintf("%s: Failed to replace the previous file; the cache was not saved.\n", __func__);
+        return;
+    }
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }
@@ -6073,7 +9087,21 @@ double GuessVerificationProgress(const ChainTxData& data, const CBlockIndex *pin
         fTxTotal = pindex->nChainTx + (nNow - pindex->GetBlockTime()) * data.dTxRate;
     }
 
-    return pindex->nChainTx / fTxTotal;
+    // The estimate extrapolates from a snapshot taken at build time, so a local
+    // clock behind that snapshot makes the projected total shrink -- far enough
+    // behind and it reaches zero or goes negative, which would otherwise be
+    // reported as an infinite, NaN or negative progress. Keep the result a
+    // sane fraction whatever the clock says; the chain data itself is fine.
+    if (!(fTxTotal > 0))
+        return 0.0;
+
+    const double fProgress = pindex->nChainTx / fTxTotal;
+    if (fProgress < 0.0)
+        return 0.0;
+    if (fProgress > 1.0)
+        return 1.0;
+
+    return fProgress;
 }
 
 bool GetTxOutProof(const uint256& txid, const uint256& hashBlock, std::string& strProof)
@@ -6132,6 +9160,17 @@ void DumpSCDBCache()
 {
     // TODO make configurable
 
+    // Every one of these files describes state the caches only hold once startup
+    // has loaded them. Shutdown runs on the failure paths too - a startup that
+    // stops at a load error, or at a prompt the user declines, still reaches
+    // here - and writing then would put default-constructed caches over the
+    // user's votes, proposals, acknowledgements and withdrawal bundles, none of
+    // which exist in any block. Write nothing rather than write emptiness.
+    if (!fSCDBStateLoaded) {
+        LogPrintf("%s: Sidechain state was not fully loaded; leaving the cache files alone.\n", __func__);
+        return;
+    }
+
     // Create ~/.skydoge/skydoge
     TryCreateDirectories(GetDataDir() / "skydoge");
 
@@ -6144,10 +9183,97 @@ void DumpSCDBCache()
     DumpBMMCache();
 }
 
-bool ResyncSCDB(const CBlockIndex* pindex)
+//! Load the per-block sidechain record for pindex into the given database.
+//!
+//! Rebuild the failed and spent sets for pindex from the record chain.
+//!
+//! Only needed when pindex's own record is a DELTA: a cumulative record states
+//! both sets in full and ApplyLDBData installs them directly, exactly as before
+//! this existed.
+//!
+//! Walks back to the nearest ANCHOR (any cumulative-key record) collecting
+//! records, then applies them ASCENDING BY HEIGHT - anchor first, deltas
+//! oldest to newest.
+//!
+//! THE ORDER IS LOAD-BEARING AND THIS IS NOT A SET UNION. mapFailedWithdrawal
+//! is keyed by withdrawal hash ALONE and installing is last-write-wins, while
+//! HaveFailedWithdrawal matches on (hash, nSidechain). Apply the deltas
+//! newest-first and a blind hash that failed on two slots ends up recorded
+//! against the wrong one - after which AddWithdrawal, which is consensus and
+//! sits behind NO flag-day height, accepts or rejects differently from a node
+//! that connected the same blocks in order. The union is NOT commutative
+//! here, which is why the order matters.
+//!
+//! A missing record mid-walk is fatal and says so: continuing would silently
+//! produce a short set, which is indistinguishable from a legitimately short
+//! one and re-admits bundles the chain has already failed.
+static bool RestoreFailedSpentFromRecords(SidechainDB& db, const CBlockIndex* pindex)
 {
-    uiInterface.InitMessage(_("Resyncing sidechain database..."));
+    AssertLockHeld(cs_main);
 
+    if (!psidechaintree)
+        return false;
+
+    const uint256 hashGenesis = Params().GetConsensus().hashGenesisBlock;
+
+    // Newest first while walking; reversed before applying.
+    std::vector<SidechainBlockData> vChain;
+    bool fFoundAnchor = false;
+    for (const CBlockIndex* p = pindex; p; p = p->pprev) {
+        if (p->GetBlockHash() == hashGenesis)
+            break;
+
+        SidechainBlockData rec;
+        if (!psidechaintree->GetBlockData(p->GetBlockHash(), rec)) {
+            LogPrintf("%s: cannot rebuild failed/spent sets - record missing for %s "
+                      "at height %d. Reindex required.\n",
+                    __func__, p->GetBlockHash().ToString(), p->nHeight);
+            return false;
+        }
+
+        vChain.push_back(rec);
+
+        // Stop at the first record that is not a delta - but only a record that
+        // states BOTH sets in full may serve as the base.
+        //
+        // !HasFailedSpentDelta() is true for FIVE keys, and three of those
+        // state nothing: 'S' and 'V' carry no vTreasury/vFailed section at
+        // all, and 'W' carries vFailed with a vSpent nothing ever wrote.
+        // Stopping on one and clearing would EMPTY mapFailedWithdrawal and
+        // mapSpentWithdrawal, which gate AddWithdrawal (consensus), so a node
+        // upgraded in place could disagree with the rest of the network.
+        if (!rec.HasFailedSpentDelta()) {
+            fFoundAnchor = rec.IsFailedSpentAnchor();
+            break;
+        }
+    }
+
+    // NO ANCHOR, NO REBUILD, AND ABOVE ALL NO CLEAR. Leaving the sets as the
+    // caller found them is the pre-delta behaviour and is safe; emptying them is
+    // not. The write side should make this unreachable by forcing an anchor when
+    // the parent cannot serve as a base - this is the second line of defence.
+    if (!fFoundAnchor) {
+        LogPrintf("%s: no usable anchor behind %s at height %d - the failed and "
+                  "spent sets are LEFT UNCHANGED rather than emptied. A datadir "
+                  "written by a build older than the spent key needs -reindex.\n",
+                __func__, pindex->GetBlockHash().ToString(), pindex->nHeight);
+        return false;
+    }
+
+    db.ClearFailedAndSpentWithdrawals();
+    for (std::vector<SidechainBlockData>::const_reverse_iterator it = vChain.rbegin();
+            it != vChain.rend(); ++it) {
+        db.MergeFailedAndSpentWithdrawals(*it);
+    }
+
+    return true;
+}
+
+//! Takes the database to write to rather than always using the global one, so a
+//! caller that must not leave partial state behind can work on a copy and commit
+//! only once every step has succeeded.
+static bool ResyncSCDBInto(SidechainDB& db, const CBlockIndex* pindex)
+{
     // No sidechain data in the genesis block
     if (pindex->GetBlockHash() == Params().GetConsensus().hashGenesisBlock)
         return true;
@@ -6158,12 +9284,67 @@ bool ResyncSCDB(const CBlockIndex* pindex)
         return false;
     }
 
-    scdb.ApplyLDBData(pindex->GetBlockHash(), data);
+    db.ApplyLDBData(pindex->GetBlockHash(), data);
+
+    // ApplyLDBData deliberately leaves the failed/spent sets alone for a delta
+    // record, because a delta cannot state them. Rebuild them from the chain.
+    if (data.HasFailedSpentDelta() && !RestoreFailedSpentFromRecords(db, pindex)) {
+        LogPrintf("%s: Failed to resync SCDB, cannot rebuild failed/spent sets!\n", __func__);
+        return false;
+    }
 
     LogPrintf("%s: SCDB resync to block %s complete.\n",
             __func__, pindex->GetBlockHash().ToString());
 
     return true;
+}
+
+bool CheckSCDBRecordFormat(std::string& strError)
+{
+    LOCK(cs_main);
+    if (!psidechaintree)
+        return true;
+
+    // A 0.44.08 node does not split at the fork: its gates are dormant, so it
+    // keeps following the chain and writes legacy (narrow) records past
+    // SidechainParamsHeight. A newer release never overwrites an existing
+    // record and would seed its sidechain state from them - built under the
+    // old rules - and stall. -reindex-chainstate keeps the sidechain tree,
+    // so only a full -reindex repairs it. Cheap: three record reads.
+    const int nParamsHeight = Params().GetConsensus().SidechainParamsHeight;
+    std::vector<const CBlockIndex*> vCheck;
+    if (chainActive.Tip() && chainActive.Height() >= nParamsHeight) {
+        vCheck.push_back(chainActive.Tip());
+        vCheck.push_back(chainActive[nParamsHeight]);
+    }
+    // Under -reindex-chainstate the chain state restarts from genesis while
+    // the sidechain tree is kept, so look along the best header chain too.
+    if (pindexBestHeader && pindexBestHeader->nHeight >= nParamsHeight)
+        vCheck.push_back(pindexBestHeader->GetAncestor(nParamsHeight));
+
+    for (const CBlockIndex* pindex : vCheck) {
+        if (!pindex)
+            continue;
+        SidechainBlockData data;
+        if (!psidechaintree->GetBlockData(pindex->GetBlockHash(), data))
+            continue;   // a missing record already fails loudly elsewhere
+        if (!data.HasWideWithdrawalState()) {
+            strError = strprintf(_("The sidechain record for block %s (height %d) is in the pre-fork format: "
+                                   "this data directory was run past the fork height %d by Skydoge 0.44.08 or older. "
+                                   "Restart with -reindex (a FULL -reindex: -reindex-chainstate does not rebuild "
+                                   "the sidechain database)."),
+                                 pindex->GetBlockHash().ToString(), pindex->nHeight, nParamsHeight);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ResyncSCDB(const CBlockIndex* pindex)
+{
+    uiInterface.InitMessage(_("Resyncing sidechain database..."));
+
+    return ResyncSCDBInto(scdb, pindex);
 }
 
 double GetNetworkHashPerSecond(int nLookup, int nHeight)
@@ -6207,32 +9388,57 @@ double GetNetworkHashPerSecond(int nLookup, int nHeight)
 bool LoadAddressBook()
 {
     fs::path path = GetDataDir() / "addressbook" / "addressbook.dat";
-    CAutoFile filein(fsbridge::fopen(path, "r"), SER_DISK, CLIENT_VERSION);
-    if (filein.IsNull()) {
+    std::vector<CDataStream> vCandidate;
+    // A file that is there but will not open is not the same as no file at all.
+    // Reporting "nothing to load" would let startup finish with an empty cache
+    // and shutdown write that emptiness over data nothing can rebuild, so say
+    // the load failed and leave the file alone.
+    const CacheRead read = ReadCacheFileCandidates(path, vCandidate);
+    if (read == CacheRead::MISSING)
         return true;
-    }
+    if (read == CacheRead::UNOPENABLE)
+        return error("%s: %s exists but could not be opened", __func__, path.string());
 
     std::vector<MultisigPartner> vPartner;
-    try {
-        uint64_t nVersion;
-        filein >> nVersion;
-        // TODO ADDRESS_BOOK_DUMP_VERSION
-        if (nVersion != SCDB_DUMP_VERSION) {
-            return false;
-        }
+    bool fParsed = false;
+    bool fRecovered = false;
+    for (size_t c = 0; c < vCandidate.size(); c++) {
+        vPartner.clear();
+        CDataStream& filein = vCandidate[c];
+        try {
+            uint64_t nVersion;
+            filein >> nVersion;
+            if (nVersion != SCDB_DUMP_VERSION)
+                continue;
 
-        int count = 0;
-        filein >> count;
-        for (int i = 0; i < count; i++) {
-            MultisigPartner partner;
-            filein >> partner;
-            vPartner.push_back(partner);
+            int count = 0;
+            filein >> count;
+            for (int i = 0; i < count; i++) {
+                MultisigPartner partner;
+                filein >> partner;
+                vPartner.push_back(partner);
+            }
         }
+        catch (const std::exception& e) {
+            LogPrintf("%s: Exception: %s\n", __func__, e.what());
+            continue;
+        }
+        // A parse that "succeeds" while leaving bytes behind is the
+        // signature of the text-mode corruption: the extra 0x0D bytes shift
+        // everything along, the reads still find enough data, and the loader
+        // returns garbage without ever throwing. Insist the whole stream was
+        // consumed before believing a candidate.
+        if (!filein.empty())
+            continue;
+        fParsed = true;
+        fRecovered = (c > 0);
+        break;
     }
-    catch (const std::exception& e) {
-        LogPrintf("%s: Exception: %s\n", __func__, e.what());
+    if (!fParsed)
         return false;
-    }
+    if (fRecovered)
+        LogPrintf("%s: %s was written in text mode by an older build; recovered it. "
+                  "It is rewritten in binary at the next clean shutdown.\n", __func__, path.string());
 
     // Add to address book
     for (const MultisigPartner& p : vPartner)
@@ -6243,6 +9449,14 @@ bool LoadAddressBook()
 
 void DumpAddressBook()
 {
+    // The address book is read near the end of startup, so a start that stopped
+    // before that point holds an empty one. Writing it then would erase the
+    // user's partners, and nothing can rebuild them.
+    if (!fSCDBStateLoaded) {
+        LogPrintf("%s: Startup did not reach the address book; leaving the file alone.\n", __func__);
+        return;
+    }
+
     // Create ~/.drivechain/addressbook
     TryCreateDirectories(GetDataDir() / "addressbook");
 
@@ -6252,7 +9466,7 @@ void DumpAddressBook()
 
     // Write the address book
     fs::path path = GetDataDir() / "addressbook" / "addressbook.dat.new";
-    CAutoFile fileout(fsbridge::fopen(path, "w"), SER_DISK, CLIENT_VERSION);
+    CAutoFile fileout(fsbridge::fopen(path, "wb"), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) {
         return;
     }
@@ -6266,12 +9480,24 @@ void DumpAddressBook()
         }
     }
     catch (const std::exception& e) {
+        // Serialisation stopped part way, so the replacement is incomplete.
         LogPrintf("%s: Exception: %s\n", __func__, e.what());
+        return;
     }
 
-    FileCommit(fileout.Get());
+    if (!FileCommit(fileout.Get())) {
+        // The replacement never reached the disk. Renaming it over the previous
+        // file would trade a good copy for a truncated one, so keep what is
+        // there; the .new file is overwritten on the next attempt.
+        LogPrintf("%s: Failed to write the cache file; keeping the previous copy.\n", __func__);
+        return;
+    }
     fileout.fclose();
-    RenameOver(GetDataDir() / "addressbook" / "addressbook.dat.new", GetDataDir() /  "addressbook" / "addressbook.dat");
+    if (!RenameOver(GetDataDir() / "addressbook" / "addressbook.dat.new",
+                    GetDataDir() /  "addressbook" / "addressbook.dat")) {
+        LogPrintf("%s: Failed to replace the previous file; the cache was not saved.\n", __func__);
+        return;
+    }
 
     LogPrintf("%s: Wrote %u\n", __func__, count);
 }

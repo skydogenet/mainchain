@@ -79,14 +79,14 @@ QVariant SidechainActivationTableModel::data(const QModelIndex &index, int role)
         if (col == 5) {
             QString str = QString("%1 / %2")
                     .arg(object.nAge)
-                    .arg(object.fReplacement ? SIDECHAIN_REPLACEMENT_PERIOD : SIDECHAIN_ACTIVATION_PERIOD);
+                    .arg(object.nMaxAge);
             return str;
         }
         // Fails
         if (col == 6) {
             QString str = QString("%1 / %2")
                     .arg(object.nFail)
-                    .arg(SIDECHAIN_ACTIVATION_MAX_FAILURES);
+                    .arg(object.nMaxFail);
             return str;
         }
         if (col == 7) {
@@ -126,6 +126,14 @@ QVariant SidechainActivationTableModel::headerData(int section, Qt::Orientation 
 
 void SidechainActivationTableModel::updateModel()
 {
+    // Skip this refresh if the node is busy (e.g. validating a block during
+    // sync) rather than blocking the GUI thread waiting on cs_main. This is the
+    // same non-blocking guard the wallet balance poll uses, and it also makes
+    // the scdb reads below safe (they run under cs_main now).
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     // TODO there are many ways to improve the efficiency of this
 
     std::vector<SidechainActivationStatus> vActivationStatus;
@@ -156,6 +164,11 @@ void SidechainActivationTableModel::updateModel()
                 object.fAck = scdb.GetAckSidechain(s.proposal.GetSerHash());
                 // Update replacement status
                 object.fReplacement = scdb.IsSidechainActive(s.proposal.nSidechain);
+                const int nHeight = chainActive.Height();
+                object.nMaxAge = object.fReplacement
+                        ? GetSidechainReplacementPeriod(nHeight)
+                        : GetSidechainActivationPeriod(nHeight);
+                object.nMaxFail = GetSidechainActivationMaxFailures(nHeight);
 
                 // Emit signal that model data has changed
                 QModelIndex topLeft = index(i, 0);
@@ -215,6 +228,7 @@ void SidechainActivationTableModel::updateModel()
         return;
 
     // Add new sidechains if we need to
+    const int nNewHeight = chainActive.Height();
     beginInsertRows(QModelIndex(), model.size(), model.size() + nSidechains - 1);
     for (const SidechainActivationStatus& s : vNew) {
         SidechainActivationTableObject object;
@@ -226,6 +240,13 @@ void SidechainActivationTableModel::updateModel()
         object.description = QString::fromStdString(s.proposal.description);
         object.nAge = s.nAge;
         object.nFail = s.nFail;
+        // The SECOND construction site. Both must set these or the row renders
+        // "n / 0" - which is exactly the failure the default initialisers turn
+        // from garbage into an obvious zero.
+        object.nMaxAge = object.fReplacement
+                ? GetSidechainReplacementPeriod(nNewHeight)
+                : GetSidechainActivationPeriod(nNewHeight);
+        object.nMaxFail = GetSidechainActivationMaxFailures(nNewHeight);
         object.hash = QString::fromStdString(s.proposal.GetSerHash().ToString());
 
         model.append(QVariant::fromValue(object));

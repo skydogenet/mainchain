@@ -96,7 +96,12 @@ void ScheduledTransactionTableModel::UpdateModel()
 
     std::vector<ScheduledTransaction> vScheduled;
     {
-        LOCK(vpwallets[0]->cs_wallet);
+        // Skip this refresh if the wallet is busy (e.g. processing a block
+        // during sync) rather than blocking the GUI thread waiting on
+        // cs_wallet; the next numBlocksChanged signal will retry.
+        TRY_LOCK(vpwallets[0]->cs_wallet, lockWallet);
+        if (!lockWallet)
+            return;
         vScheduled = vpwallets[0]->GetScheduled();
     }
 

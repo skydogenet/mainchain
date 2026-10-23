@@ -16,6 +16,7 @@
 #include <qt/platformstyle.h>
 
 #include <chain.h>
+#include <validation.h>
 
 BlockExplorer::BlockExplorer(const PlatformStyle *_platformStyle, QWidget *parent) :
     QDialog(parent),
@@ -73,6 +74,13 @@ void BlockExplorer::on_pushButtonSearch_clicked()
 
 void BlockExplorer::numBlocksChanged(int nHeight, const QDateTime& time)
 {
+    // Skip this refresh if the node is busy connecting blocks rather than
+    // blocking the GUI thread on cs_main; the next block signal will retry
+    // when cs_main is free, and the chainActive walk it triggers runs safely.
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     ui->labelNumBlocks->setText(QString::number(nHeight));
     ui->labelBlockTime->setText(time.toString("dd MMMM yyyy hh:mm"));
 

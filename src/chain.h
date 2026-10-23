@@ -19,16 +19,42 @@
 /**
  * Maximum amount of time that a block timestamp is allowed to exceed the
  * current network-adjusted time before the block will be accepted.
+ *
+ * NOT rescaled for this fork's block spacing. Upstream's 2 hours is 12
+ * target spacings at 600s. Here spacing is 60s on mainnet and regtest and
+ * 10s on testnet, so the same 7200s spans 120 blocks on mainnet and 720 on
+ * testnet. Backward timestamp drift at a retarget boundary is limited from
+ * TimewarpGuardHeight (MAX_TIMEWARP below).
+ *
+ * Changing this value is a consensus change, so it would ride a future fork
+ * height, and it is a trade against real clock skew (mitigated but not
+ * removed by nAdjustedTime). TIMESTAMP_WINDOW below used to be derived from
+ * it; the two are now separate, since TIMESTAMP_WINDOW has nothing to do
+ * with consensus.
  */
 static const int64_t MAX_FUTURE_BLOCK_TIME = 2 * 60 * 60;
+
+/** Security fix (timewarp): maximum number of seconds the first block of a
+ *  difficulty adjustment period may date backward relative to its parent.
+ *  600s = 10 target spacings on the 60-block / 1-hour retarget window.
+ *  Enforced from Consensus::Params::TimewarpGuardHeight (BIP94-style). */
+static const int64_t MAX_TIMEWARP = 600;
 
 /**
  * Timestamp window used as a grace period by code that compares external
  * timestamps (such as timestamps passed to RPCs, or wallet key creation times)
  * to block timestamps. This should be set at least as high as
  * MAX_FUTURE_BLOCK_TIME.
+ *
+ * Spelled out rather than defined as MAX_FUTURE_BLOCK_TIME, which is what it
+ * used to be. This is wallet and RPC ergonomics - how far back a rescan looks
+ * from a key's birthday, seven call sites in the wallet - and it has no
+ * consensus meaning at all. Tying it to the consensus constant meant that
+ * tightening block-timestamp validity would silently narrow every rescan
+ * window with it, which is how a wallet quietly fails to find its own coins.
+ * The two numbers happen to be equal today and must be free to diverge.
  */
-static const int64_t TIMESTAMP_WINDOW = MAX_FUTURE_BLOCK_TIME;
+static const int64_t TIMESTAMP_WINDOW = 2 * 60 * 60;
 
 class CBlockFileInfo
 {

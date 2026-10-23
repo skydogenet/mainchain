@@ -446,7 +446,12 @@ public:
     {
         size_t size = ReadCompactSize(s);
         if (size > Limit) {
-            throw std::ios_base::failure("String length limit exceeded");
+            // Same class as CheckDeclaredElementCount below and
+            // CCriticalData::Unserialize. ProcessMessages classifies
+            // ios_base::failure by SUBSTRING; a message in none of its three buckets falls to
+            // PrintExceptionContinue, which writes debug.log AND stderr,
+            // unthrottled, once per malformed message from any peer.
+            throw std::ios_base::failure("ReadCompactSize(): size too large (string length limit exceeded)");
         }
         string.resize(size);
         if (size != 0)
@@ -495,6 +500,61 @@ template<typename Stream, typename T, typename A, typename V> void Serialize_imp
 template<typename Stream, typename T, typename A> inline void Serialize(Stream& os, const std::vector<T, A>& v);
 template<typename Stream, typename T, typename A> void Unserialize_impl(Stream& is, std::vector<T, A>& v, const unsigned char&);
 template<typename Stream, typename T, typename A, typename V> void Unserialize_impl(Stream& is, std::vector<T, A>& v, const V&);
+
+/**
+ * An upper bound on how many more elements a stream could possibly supply, or
+ * "no idea" for streams that cannot say.
+ *
+ * Security fix (resource exhaustion), and a NARROW one. The vector and
+ * prevector readers below size the container from a DECLARED count before
+ * reading any element, in chunks of ~5 MB. Nine bytes on the wire declaring
+ * 2,000,000 inputs made ProcessMessage construct 52,083 CTxIn - 4,999,968
+ * bytes - before the read hit end-of-data and threw.
+ *
+ * EVERY element of every type occupies AT LEAST ONE BYTE on the wire (a
+ * zero-length compact size is one byte), so a declared count larger than the
+ * bytes remaining is unsatisfiable. Refusing it up front CANNOT CHANGE WHICH
+ * BYTE SEQUENCES DESERIALIZE: the read that follows would have thrown
+ * end-of-data anyway, and it throws the same std::ios_base::failure. Only the
+ * allocation and the timing change.
+ *
+ * CDataStream - which is what every p2p message is - can answer. CAutoFile,
+ * CBufferedFile, CHashVerifier and OverrideStream cannot, and are deliberately
+ * left alone: they get the unknown sentinel and behave exactly as before, so
+ * nothing about reading blocks from disk changes. CSizeComputer has size() but
+ * no read(), so the read path is never instantiated for it.
+ */
+template<typename Stream>
+inline auto StreamBytesRemaining(const Stream& s, int) -> decltype(s.size(), (uint64_t)0)
+{
+    return (uint64_t)s.size();
+}
+
+template<typename Stream>
+inline uint64_t StreamBytesRemaining(const Stream&, long)
+{
+    return std::numeric_limits<uint64_t>::max();
+}
+
+template<typename Stream>
+inline void CheckDeclaredElementCount(const Stream& is, uint64_t nSize)
+{
+    if (nSize > StreamBytesRemaining(is, 0))
+        // "size too large" IS LOAD-BEARING, not description. ProcessMessages
+        // classifies ios_base::failure by SUBSTRING (net_processing.cpp): "end
+        // of data", "size too large" and "non-canonical ReadCompactSize()" log
+        // quietly under BCLog::NET; anything else falls to
+        // PrintExceptionContinue, which writes to debug.log AND stderr
+        // unconditionally, uncategorised and unthrottled. A message that missed
+        // all three buckets turned a silent ~30-byte malformed tx into ~180
+        // bytes of log plus ~180 of stderr per message, from any peer - trading
+        // an allocation amplification for a log amplification. This is the same
+        // class ReadCompactSize() already reports as "size too large", so it
+        // belongs in that bucket.
+        throw std::ios_base::failure("ReadCompactSize(): size too large (declared element count exceeds remaining stream size)");
+}
+
+
 template<typename Stream, typename T, typename A> inline void Unserialize(Stream& is, std::vector<T, A>& v);
 
 /**
@@ -563,6 +623,7 @@ template<typename Stream, typename C>
 void Unserialize(Stream& is, std::basic_string<C>& str)
 {
     unsigned int nSize = ReadCompactSize(is);
+    CheckDeclaredElementCount(is, nSize);
     str.resize(nSize);
     if (nSize != 0)
         is.read((char*)str.data(), nSize * sizeof(C));
@@ -602,6 +663,7 @@ void Unserialize_impl(Stream& is, prevector<N, T>& v, const unsigned char&)
     // Limit size per read so bogus size value won't cause out of memory
     v.clear();
     unsigned int nSize = ReadCompactSize(is);
+    CheckDeclaredElementCount(is, nSize);
     unsigned int i = 0;
     while (i < nSize)
     {
@@ -617,6 +679,7 @@ void Unserialize_impl(Stream& is, prevector<N, T>& v, const V&)
 {
     v.clear();
     unsigned int nSize = ReadCompactSize(is);
+    CheckDeclaredElementCount(is, nSize);
     unsigned int i = 0;
     unsigned int nMid = 0;
     while (nMid < nSize)
@@ -670,6 +733,7 @@ void Unserialize_impl(Stream& is, std::vector<T, A>& v, const unsigned char&)
     // Limit size per read so bogus size value won't cause out of memory
     v.clear();
     unsigned int nSize = ReadCompactSize(is);
+    CheckDeclaredElementCount(is, nSize);
     unsigned int i = 0;
     while (i < nSize)
     {
@@ -685,6 +749,7 @@ void Unserialize_impl(Stream& is, std::vector<T, A>& v, const V&)
 {
     v.clear();
     unsigned int nSize = ReadCompactSize(is);
+    CheckDeclaredElementCount(is, nSize);
     unsigned int i = 0;
     unsigned int nMid = 0;
     while (nMid < nSize)
@@ -741,6 +806,7 @@ void Unserialize(Stream& is, std::map<K, T, Pred, A>& m)
 {
     m.clear();
     unsigned int nSize = ReadCompactSize(is);
+    CheckDeclaredElementCount(is, nSize);
     typename std::map<K, T, Pred, A>::iterator mi = m.begin();
     for (unsigned int i = 0; i < nSize; i++)
     {
@@ -768,6 +834,7 @@ void Unserialize(Stream& is, std::set<K, Pred, A>& m)
 {
     m.clear();
     unsigned int nSize = ReadCompactSize(is);
+    CheckDeclaredElementCount(is, nSize);
     typename std::set<K, Pred, A>::iterator it = m.begin();
     for (unsigned int i = 0; i < nSize; i++)
     {

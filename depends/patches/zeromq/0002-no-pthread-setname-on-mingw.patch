@@ -1,0 +1,23 @@
+Do not name threads on mingw
+
+zeromq calls pthread_setname_np() unconditionally in its __MINGW32__ branch,
+without consulting the ZMQ_HAVE_PTHREAD_SETNAME_* results its own configure
+script computes. The winpthreads shipped with the mingw-w64 in this toolchain
+does not declare that function, so the cross-build fails to compile.
+
+Thread names are diagnostic only - nothing reads them back - so leave the
+branch empty rather than carrying a probe for it.
+
+--- a/src/thread.cpp
++++ b/src/thread.cpp
+@@ -129,9 +129,7 @@
+
+ #elif defined(__MINGW32__)
+
+-    int rc = pthread_setname_np (pthread_self (), _name);
+-    if (rc)
+-        return;
++    // not declared by the winpthreads in this toolchain; names are diagnostic
+
+ #else
+

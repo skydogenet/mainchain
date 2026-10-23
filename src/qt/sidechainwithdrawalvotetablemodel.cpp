@@ -97,16 +97,37 @@ QVariant SidechainWithdrawalVoteTableModel::headerData(int section, Qt::Orientat
 
 void SidechainWithdrawalVoteTableModel::UpdateModel()
 {
-    // Get all of the current Withdrawal(s) into one vector
-    std::vector<Sidechain> vSidechain = scdb.GetActiveSidechains();
     std::vector<SidechainWithdrawalState> vWithdrawal;
-    for (const Sidechain& s : vSidechain) {
-        std::vector<SidechainWithdrawalState> vState = scdb.GetState(s.nSidechain);
-        vWithdrawal.insert(vWithdrawal.end(), vState.begin(), vState.end());
-    }
+    std::vector<SidechainCustomVote> vCustomVote;
 
-    // Get users votes
-    std::vector<SidechainCustomVote> vCustomVote = scdb.GetCustomVoteCache();
+    // Read the global sidechain database under cs_main. Block connection
+    // move-assigns that object wholesale and disconnection assigns over it, and
+    // it has no custom assignment operator, so the memberwise vector move frees
+    // buffers an unlocked read here may still be walking. This slot is driven
+    // by a timer rather than by a block signal, so nothing else was keeping it
+    // away from a block being connected.
+    //
+    // Non-blocking, like SidechainPage::numBlocksChanged: the validation thread
+    // holds cs_main for long stretches during sync, and a blocking lock in a
+    // GUI slot would freeze the interface for as long as that lasts. Skipping
+    // one refresh costs nothing - the timer fires again.
+    //
+    // Scoped so the lock is released before the model rebuild below, which
+    // needs none of it: everything it reads has been copied out by then.
+    {
+        TRY_LOCK(cs_main, lockMain);
+        if (!lockMain)
+            return;
+
+        // Get all of the current Withdrawal(s) into one vector
+        for (const Sidechain& s : scdb.GetActiveSidechains()) {
+            std::vector<SidechainWithdrawalState> vState = scdb.GetState(s.nSidechain);
+            vWithdrawal.insert(vWithdrawal.end(), vState.begin(), vState.end());
+        }
+
+        // Get users votes
+        vCustomVote = scdb.GetCustomVoteCache();
+    }
 
     bool fCustomVotes = vCustomVote.size();
     std::string strDefaultVote = gArgs.GetArg("-defaultwithdrawalvote", "abstain");

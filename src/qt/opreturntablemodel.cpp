@@ -129,6 +129,14 @@ void OPReturnTableModel::setDays(int nDaysIn)
 // TODO append new data to the model instead of loading all every time
 void OPReturnTableModel::UpdateModel()
 {
+    // Skip this refresh if the node is busy (e.g. validating blocks during
+    // catch-up) rather than blocking the GUI thread waiting on cs_main. This
+    // also makes the chainActive and per-block leveldb reads below safe (they
+    // run under cs_main now); the next block signal will retry once it is free.
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     // Clear old data
     beginResetModel();
     model.clear();

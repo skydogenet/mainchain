@@ -20,8 +20,6 @@
 #include <QObject>
 #include <QTest>
 
-#include <openssl/ssl.h>
-
 #if defined(QT_STATICPLUGIN)
 #include <QtPlugin>
 #if QT_VERSION < 0x050000
@@ -72,8 +70,6 @@ int main(int argc, char *argv[])
     // QApplication:: and QCoreApplication:: in the tests
     QApplication app(argc, argv);
     app.setApplicationName("SkydogeTESTFLIGHT-test");
-
-    SSL_library_init();
 
     URITests test1;
     if (QTest::qExec(&test1) != 0) {

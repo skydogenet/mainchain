@@ -224,8 +224,11 @@ static void http_request_cb(struct evhttp_request* req, void* arg)
     }
     std::unique_ptr<HTTPRequest> hreq(new HTTPRequest(req));
 
+    // The URI comes straight off the wire from an unauthenticated client, so
+    // strip anything that could forge or hide entries once it reaches the log.
     LogPrint(BCLog::HTTP, "Received a %s request for %s from %s\n",
-             RequestMethodString(hreq->GetRequestMethod()), hreq->GetURI(), hreq->GetPeer().ToString());
+             RequestMethodString(hreq->GetRequestMethod()),
+             SanitizeString(hreq->GetURI(), SAFE_CHARS_URI), hreq->GetPeer().ToString());
 
     // Early address-based allow check
     if (!ClientAllowed(hreq->GetPeer())) {

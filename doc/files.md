@@ -16,6 +16,9 @@
 * wallets/database/*: BDB database environment; used for wallets since 0.16.0
 * wallets/db.log: wallet database log file; since 0.16.0
 * wallets/wallet.dat: personal wallet (BDB) with keys and transactions; since 0.16.0
+* skydoge/deposit.dat: cache of sidechain deposits and the treasury tips derived from them. **Never delete this file to clear a bad state** — the node starts happily without it but with an empty view of where each sidechain's funds sit, and sidechain coins can be stranded that way. If it is suspect, run a full `-reindex` instead
+* skydoge/withdrawal.dat: cached sidechain withdrawal bundles and their status
+* skydoge/bmm.dat, skydoge/customvotes.dat, skydoge/scheduledtx.dat, skydoge/sidechainproposals.dat, skydoge/sidechainhashactivate.dat: the node's own BMM requests, standing withdrawal votes, scheduled transactions and sidechain proposals/activation votes
 * .cookie: session RPC authentication cookie (written at start when cookie authentication is used, deleted on shutdown): since 0.12.0
 * onion_private_key: cached Tor hidden service private key for `-listenonion`: since 0.12.0
 * guisettings.ini.bak: backup of former GUI settings after `-resetguisettings` is used

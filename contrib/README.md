@@ -29,7 +29,7 @@ for Debian-based Linux systems. If you compile bitcoind/bitcoin-qt yourself, the
 Files used during the gitian build process. For more information about gitian, see the [the Bitcoin Core documentation repository](https://github.com/bitcoin-core/docs).
 
 ### [Gitian-keys](/contrib/gitian-keys)
-PGP keys used for signing Bitcoin Core [Gitian release](/doc/release-process.md) results.
+PGP key fingerprints used for signing Skydoge [Gitian release](/doc/release-process.md) results, and the Skydoge Release Signing Key; see [contrib/gitian-keys/README.md](/contrib/gitian-keys/README.md).
 
 ### [MacDeploy](/contrib/macdeploy) ###
 Scripts and notes for Mac builds. 

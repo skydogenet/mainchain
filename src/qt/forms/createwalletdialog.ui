@@ -11,9 +11,22 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Create / Restore Wallet</string>
+   <string>BIP39 Mnemonic Calculator</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="labelNotAWalletNotice">
+     <property name="text">
+      <string>&lt;b&gt;This page is a BIP39 calculator. It cannot read or change your wallet.&lt;/b&gt; The twelve words it shows are not a backup of the wallet you are using: a phrase saved from here restores a different, empty wallet. To back up the wallet you are using, close this window and choose File &gt; Backup Wallet...</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+     <property name="textInteractionFlags">
+      <set>Qt::TextSelectableByMouse</set>
+     </property>
+    </widget>
+   </item>
    <item>
     <layout class="QHBoxLayout" name="horizontalLayout">
      <property name="bottomMargin">

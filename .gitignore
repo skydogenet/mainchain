@@ -23,6 +23,10 @@ src/drivechain
 src/drivechaind
 src/drivechain-cli
 src/drivechain-tx
+src/test/test_skydoge
+src/test/test_skydoge_fuzzy
+src/qt/test/test_skydoge-qt
+# Kept: a datadir built before the rename can still hold these.
 src/test/test_drivechain
 src/test/test_drivechain_fuzzy
 src/qt/test/test_drivechain-qt
@@ -48,8 +52,8 @@ config.log
 config.status
 configure
 libtool
-src/config/drivechain-config.h
-src/config/drivechain-config.h.in
+src/config/skydoge-config.h
+src/config/skydoge-config.h.in
 src/config/stamp-h1
 share/setup.nsi
 share/qt/Info.plist
@@ -119,6 +123,7 @@ build
 *.gcno
 *.gcda
 /*.info
+test_skydoge.coverage/
 test_drivechain.coverage/
 total.coverage/
 coverage_percent.txt
@@ -134,5 +139,22 @@ test/cache/*
 
 /doc/doxygen/
 
-libdrivechainconsensus.pc
+libskydogeconsensus.pc
 contrib/devtools/split-debug.sh
+
+# Autotools scratch the autoreconf section above misses
+*~
+configure.lineno
+
+# Gitian release workflow: third-party clones and build output
+contrib/gitian-builder/
+contrib/gitian.sigs/
+contrib/bitcoin-detached-sigs/
+contrib/skydoge-binaries/
+
+# Built binaries under their skydoge names (drivechain names are covered above)
+src/skydoged
+src/skydoge-cli
+src/skydoge-tx
+src/qt/skydoge-qt
+

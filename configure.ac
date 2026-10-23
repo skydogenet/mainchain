@@ -1,14 +1,23 @@
 dnl require autoconf 2.60 (AS_ECHO/AS_ECHO_N)
 AC_PREREQ([2.60])
 define(_CLIENT_VERSION_MAJOR, 0)
-define(_CLIENT_VERSION_MINOR, 44)
-define(_CLIENT_VERSION_REVISION, 00)
+define(_CLIENT_VERSION_MINOR, 45)
+dnl The revision is written zero-padded to match the release notes and the
+dnl package version. Pasted into C that padding makes it an *octal* literal:
+dnl 06 is 6, but 08 and 09 are not valid octal and refuse to compile. Derive an
+dnl unpadded form here rather than keeping a second number in step by hand.
+dnl EVERY numeric use must take _NUM; only stringized and substituted uses may
+dnl take the padded one. The numeric users are the CLIENT_VERSION arithmetic in
+dnl clientversion.h, the nav-brand label in qt/skydogegui.cpp, and the windres
+dnl FILEVERSION/PRODUCTVERSION tuples in the *-res.rc files.
+define(_CLIENT_VERSION_REVISION, 3)
+define(_CLIENT_VERSION_REVISION_NUM, m4_bpatsubst(_CLIENT_VERSION_REVISION, [^0*\(.\)], [\1]))
 define(_CLIENT_VERSION_BUILD, 0)
 define(_CLIENT_VERSION_IS_RELEASE, true)
-define(_COPYRIGHT_YEAR, 2022)
+define(_COPYRIGHT_YEAR, 2026)
 define(_COPYRIGHT_HOLDERS,[The %s developers])
 define(_COPYRIGHT_HOLDERS_SUBSTITUTION,[[Skydoge]])
-AC_INIT([skydoge],[_CLIENT_VERSION_MAJOR._CLIENT_VERSION_MINOR._CLIENT_VERSION_REVISION],[https://github.com/skydogenet/mainchain/issues],[mainchain],[http://skydoge.net/])
+AC_INIT([Skydoge],[_CLIENT_VERSION_MAJOR._CLIENT_VERSION_MINOR._CLIENT_VERSION_REVISION],[https://github.com/skydogenet/mainchain/issues],[mainchain],[http://skydoge.net/])
 AC_CONFIG_SRCDIR([src/validation.cpp])
 AC_CONFIG_HEADERS([src/config/skydoge-config.h])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -198,8 +207,6 @@ AC_ARG_ENABLE([zmq],
   [use_zmq=$enableval],
   [use_zmq=yes])
 
-AC_ARG_WITH([protoc-bindir],[AS_HELP_STRING([--with-protoc-bindir=BIN_DIR],[specify protoc bin path])], [protoc_bin_path=$withval], [])
-
 AC_ARG_ENABLE(man,
     [AS_HELP_STRING([--disable-man],
                     [do not install man pages (default is to install)])],,
@@ -242,6 +249,13 @@ if test "x$enable_werror" = "xyes"; then
   AX_CHECK_COMPILE_FLAG([-Werror=vla],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=vla"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Werror=thread-safety-analysis],[ERROR_CXXFLAGS="$ERROR_CXXFLAGS -Werror=thread-safety-analysis"],,[[$CXXFLAG_WERROR]])
 fi
+
+# Make signed integer overflow well-defined (two's-complement wrap) rather than
+# undefined behavior. Defense in depth for the raised MAX_MONEY (210B supply),
+# where a few wallet/policy CAmount accumulators can exceed INT64_MAX; this keeps
+# any such overflow deterministic (and caught by downstream range checks) instead
+# of UB. Semantics-preserving for all in-range values, so consensus-neutral.
+AX_CHECK_COMPILE_FLAG([-fwrapv],[CXXFLAGS="$CXXFLAGS -fwrapv"; CFLAGS="$CFLAGS -fwrapv"],,[[$CXXFLAG_WERROR]])
 
 if test "x$CXXFLAGS_overridden" = "xno"; then
   AX_CHECK_COMPILE_FLAG([-Wall],[CXXFLAGS="$CXXFLAGS -Wall"],,[[$CXXFLAG_WERROR]])
@@ -935,7 +949,6 @@ if test x$use_pkgconfig = xyes; then
     [
       PKG_CHECK_MODULES([SSL], [libssl],, [AC_MSG_ERROR(openssl not found.)])
       PKG_CHECK_MODULES([CRYPTO], [libcrypto],,[AC_MSG_ERROR(libcrypto not found.)])
-      DRIVECHAIN_QT_CHECK([PKG_CHECK_MODULES([PROTOBUF], [protobuf], [have_protobuf=yes], [DRIVECHAIN_QT_FAIL(libprotobuf not found)])])
       if test x$use_qr != xno; then
         DRIVECHAIN_QT_CHECK([PKG_CHECK_MODULES([QR], [libqrencode], [have_qrencode=yes], [have_qrencode=no])])
       fi
@@ -995,7 +1008,6 @@ else
     esac
   fi
 
-  DRIVECHAIN_QT_CHECK(AC_CHECK_LIB([protobuf] ,[main],[PROTOBUF_LIBS=-lprotobuf], DRIVECHAIN_QT_FAIL(libprotobuf not found)))
   if test x$use_qr != xno; then
     DRIVECHAIN_QT_CHECK([AC_CHECK_LIB([qrencode], [main],[QR_LIBS=-lqrencode], [have_qrencode=no])])
     DRIVECHAIN_QT_CHECK([AC_CHECK_HEADER([qrencode.h],, have_qrencode=no)])
@@ -1056,8 +1068,6 @@ fi
 AM_CONDITIONAL([EMBEDDED_UNIVALUE],[test x$need_bundled_univalue = xyes])
 AC_SUBST(UNIVALUE_CFLAGS)
 AC_SUBST(UNIVALUE_LIBS)
-
-DRIVECHAIN_QT_PATH_PROGS([PROTOC], [protoc],$protoc_bin_path)
 
 AC_MSG_CHECKING([whether to build skydoged])
 AM_CONDITIONAL([BUILD_DRIVECHAIND], [test x$build_skydoged = xyes])
@@ -1204,6 +1214,7 @@ AM_CONDITIONAL([ENABLE_TESTS],[test x$BUILD_TEST = xyes])
 AM_CONDITIONAL([ENABLE_QT],[test x$skydoge_enable_qt = xyes])
 AM_CONDITIONAL([ENABLE_QT_TESTS],[test x$BUILD_TEST_QT = xyes])
 AM_CONDITIONAL([ENABLE_BENCH],[test x$use_bench = xyes])
+
 AM_CONDITIONAL([USE_QRCODE], [test x$use_qr = xyes])
 AM_CONDITIONAL([USE_LCOV],[test x$use_lcov = xyes])
 AM_CONDITIONAL([GLIBC_BACK_COMPAT],[test x$use_glibc_compat = xyes])
@@ -1214,6 +1225,7 @@ AM_CONDITIONAL([USE_ASM],[test x$use_asm = xyes])
 AC_DEFINE(CLIENT_VERSION_MAJOR, _CLIENT_VERSION_MAJOR, [Major version])
 AC_DEFINE(CLIENT_VERSION_MINOR, _CLIENT_VERSION_MINOR, [Minor version])
 AC_DEFINE(CLIENT_VERSION_REVISION, _CLIENT_VERSION_REVISION, [Build revision])
+AC_DEFINE(CLIENT_VERSION_REVISION_NUM, _CLIENT_VERSION_REVISION_NUM, [Build revision, without zero padding, for arithmetic])
 AC_DEFINE(CLIENT_VERSION_BUILD, _CLIENT_VERSION_BUILD, [Version Build])
 AC_DEFINE(CLIENT_VERSION_IS_RELEASE, _CLIENT_VERSION_IS_RELEASE, [Version is release])
 AC_DEFINE(COPYRIGHT_YEAR, _COPYRIGHT_YEAR, [Copyright year])
@@ -1256,7 +1268,6 @@ AC_SUBST(SSL_LIBS)
 AC_SUBST(EVENT_LIBS)
 AC_SUBST(EVENT_PTHREADS_LIBS)
 AC_SUBST(ZMQ_LIBS)
-AC_SUBST(PROTOBUF_LIBS)
 AC_SUBST(QR_LIBS)
 AC_CONFIG_FILES([Makefile src/Makefile doc/man/Makefile share/setup.nsi share/qt/Info.plist test/config.ini])
 AC_CONFIG_FILES([contrib/devtools/split-debug.sh],[chmod +x contrib/devtools/split-debug.sh])

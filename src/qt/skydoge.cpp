@@ -18,6 +18,7 @@
 #include <qt/networkstyle.h>
 #include <qt/optionsmodel.h>
 #include <qt/platformstyle.h>
+#include <qt/skydogetheme.h>
 #include <qt/splashscreen.h>
 #include <qt/sidechainwithdrawaltablemodel.h>
 #include <qt/utilitydialog.h>
@@ -44,6 +45,7 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QFile>
 #include <QLibraryInfo>
 #include <QLocale>
 #include <QMessageBox>
@@ -385,6 +387,10 @@ void BitcoinApplication::createPaymentServer()
 void BitcoinApplication::createOptionsModel(bool resetSettings)
 {
     optionsModel = new OptionsModel(nullptr, resetSettings);
+
+    // Apply the theme setting right away so that everything created later
+    // (including the splash screen) will be styled
+    SkydogeTheme::Apply(optionsModel->getTheme());
 }
 
 void BitcoinApplication::createWindow(const NetworkStyle *networkStyle)
@@ -479,10 +485,6 @@ void BitcoinApplication::initializeResult(bool success)
     {
         // Log this only after AppInitMain finishes, as then logging setup is guaranteed complete
         qWarning() << "Platform customization:" << platformStyle->getName();
-#ifdef ENABLE_WALLET
-        PaymentServer::LoadRootCAs();
-        paymentServer->setOptionsModel(optionsModel);
-#endif
 
         clientModel = new ClientModel(optionsModel);
         window->setClientModel(clientModel);
@@ -506,9 +508,6 @@ void BitcoinApplication::initializeResult(bool success)
 
             window->addWallet(BitcoinGUI::DEFAULT_WALLET, walletModel);
             window->setCurrentWallet(BitcoinGUI::DEFAULT_WALLET);
-
-            connect(walletModel, SIGNAL(coinsSent(CWallet*,SendCoinsRecipient,QByteArray)),
-                             paymentServer, SLOT(fetchPaymentACK(CWallet*,const SendCoinsRecipient&,QByteArray)));
         }
 #endif
 
@@ -522,10 +521,6 @@ void BitcoinApplication::initializeResult(bool success)
             window->show();
         }
         Q_EMIT splashFinished(window);
-
-        // The signal that would normally update the theme will not be received
-        // during init as the signal/slot connection has yet to be formed.
-        window->initTheme();
 
 #ifdef ENABLE_WALLET
         // Now that initialization/startup is done, process any command-line
@@ -568,6 +563,33 @@ WId BitcoinApplication::getMainWinId() const
 int main(int argc, char *argv[])
 {
     SetupEnvironment();
+
+    // Our Qt is built with -qt-xkbcommon, whose bundled keyboard-layout
+    // database path does not resolve on some Linux hosts, causing "Failed to
+    // create XKB context!" and a dead GUI. Point it at the standard X11
+    // location if the user hasn't set it and that location exists (a no-op on
+    // Windows/macOS, where the path is absent), so the wallet starts without
+    // the operator having to export QT_XKB_CONFIG_ROOT by hand.
+    if (qEnvironmentVariableIsEmpty("QT_XKB_CONFIG_ROOT") &&
+            QFile::exists("/usr/share/X11/xkb")) {
+        qputenv("QT_XKB_CONFIG_ROOT", "/usr/share/X11/xkb");
+    }
+
+#ifdef Q_OS_MAC
+    // Ask the cocoa plugin for layer-backed views. This build uses Qt 5.7,
+    // which predates macOS making layer backing effectively mandatory, and
+    // without it windows repaint incorrectly: popup menus leave the content
+    // underneath them on screen, and resizing the window smears the old
+    // contents rather than redrawing. Setting it here rather than expecting the
+    // operator to export it means an ordinary double-click gets a correct
+    // window.
+    //
+    // This must run before the QApplication is constructed, since the platform
+    // plugin reads it during initialisation. An explicit setting is left alone
+    // so the variable can still be used to turn it off while diagnosing.
+    if (qEnvironmentVariableIsEmpty("QT_MAC_WANTS_LAYER"))
+        qputenv("QT_MAC_WANTS_LAYER", "1");
+#endif
 
     /// 1. Parse command-line options. These take precedence over anything else.
     // Command-line options take precedence:

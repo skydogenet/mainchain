@@ -2233,9 +2233,11 @@ UniValue abandonbmm(const JSONRPCRequest& request)
     if (request.fHelp || request.params.size()) {
         throw std::runtime_error(
             "abandonbmm\n"
-            "\nRemove expired BMM requests and BMM requests not selected by "
-            "our SelectBMMRequests settings. Then try to abandon the BMM "
-            "requests from our wallet if we created them.\n"
+            "\nRemove expired BMM requests and BMM requests no block on the "
+            "current tip can carry (stale, or for an inactive sidechain). "
+            "Valid competing requests are kept until they expire. Then try to "
+            "abandon the removed BMM requests from our wallet if we created "
+            "them.\n"
             "This will mark the transaction and all in-wallet descendants "
             "as abandoned which will allow for their inputs to be respent.\n"
             "It only works on transactions which are not included in a block.\n"
@@ -2254,15 +2256,29 @@ UniValue abandonbmm(const JSONRPCRequest& request)
 
     ObserveSafeMode();
 
+    // Everything in this scope touches the global scdb or chainActive, which
+    // ConnectBlock move-assigns / advances wholesale under cs_main: the two
+    // mempool helpers read them (the Qt mining dialog already calls the same
+    // pair under cs_main), and AddRemovedBMM is a write, which without the lock
+    // can be discarded while still reporting success. The lock cannot cover
+    // the rest of the function: BlockUntilSyncedToCurrentChain() below opens
+    // with AssertLockNotHeld(cs_main). Short scope here, LOCK2 further down
+    // for the remainder. Lock order is cs_main, then mempool.cs inside the
+    // helpers, the same order as everywhere else.
     std::vector<uint256> vHashRemoved;
-    mempool.SelectBMMRequests(vHashRemoved);
-    mempool.RemoveExpiredCriticalRequests(vHashRemoved);
+    std::set<uint256> setRemoved;
+    {
+        LOCK(cs_main);
 
-    for (const uint256& u : vHashRemoved)
-        scdb.AddRemovedBMM(u);
+        mempool.RemoveInvalidBMMRequests(vHashRemoved);
+        mempool.RemoveExpiredCriticalRequests(vHashRemoved);
 
-    // Also try to abandon cached BMM txid previously removed from our mempool
-    std::set<uint256> setRemoved = scdb.GetRemovedBMM();
+        for (const uint256& u : vHashRemoved)
+            scdb.AddRemovedBMM(u);
+
+        // Also try to abandon cached BMM txid previously removed from our mempool
+        setRemoved = scdb.GetRemovedBMM();
+    }
 
     // Make sure the results are valid at least up to the most recent block
     // the user could have gotten from another RPC command prior to now
@@ -2324,7 +2340,14 @@ UniValue abandondeposits(const JSONRPCRequest& request)
 
     ObserveSafeMode();
 
-    std::vector<uint256> vHashRemoved = scdb.GetRemovedDeposits();
+    // Same as abandonbmm: read the global scdb under cs_main, in a scope that
+    // closes before BlockUntilSyncedToCurrentChain(), which asserts it is not
+    // held.
+    std::vector<uint256> vHashRemoved;
+    {
+        LOCK(cs_main);
+        vHashRemoved = scdb.GetRemovedDeposits();
+    }
 
     // Make sure the results are valid at least up to the most recent block
     // the user could have gotten from another RPC command prior to now
@@ -3569,16 +3592,23 @@ UniValue createsidechaindeposit(const JSONRPCRequest& request)
         return NullUniValue;
     }
 
-    if (request.fHelp || request.params.size() != 4)
+    if (request.fHelp || request.params.size() < 4 || request.params.size() > 6)
         throw std::runtime_error(
-            "createsidechaindeposit \"nsidechain\" \"depositaddress\" \"amount\"\n"
+            "createsidechaindeposit \"nsidechain\" \"depositaddress\" \"amount\" \"fee\" ( allowhighfee allowunknownformat )\n"
             "\nCreate a sidechain deposit of an amount to a given address.\n"
+            "\nThe fee is paid to a miner and is not recoverable, so a fee of\n"
+            + FormatMoney(OP_RETURN_HIGH_FEE_THRESHOLD) + " or more must be confirmed with the allowhighfee argument.\n"
             + HelpRequiringPassphrase(pwallet) +
             "\nArguments:\n"
             "1. \"nsidechain\"         (numeric, required) The sidechain to send to.\n"
             "2. \"depositaddress\"     (string, required) The sidechain deposit address to send to.\n"
             "3. \"amount\"             (numeric or string, required) The amount in " + CURRENCY_UNIT + " to send. eg 0.1\n"
             "4. \"fee\"                (numeric or string, required) The fee in " + CURRENCY_UNIT + "\n"
+            "5. allowhighfee         (boolean, optional, default=false) Permit a fee of " + FormatMoney(OP_RETURN_HIGH_FEE_THRESHOLD) + " or more\n"
+            "6. allowunknownformat   (boolean, optional, default=false) Send to a sidechain address that is not\n"
+            "                        Base58Check, bech32 or 0x-hex (a sidechain format this wallet does not know)\n"
+            "\nA deposit of " + FormatMoney(SIDECHAIN_DEPOSIT_FEE) + " or less is refused: the sidechain deposit fee\n"
+            "would leave the depositor nothing, and the sidechain records it without paying it.\n"
             "\nResult:\n"
             "\"txid\"                  (string) The transaction id.\n"
             "\nExamples:\n"
@@ -3589,8 +3619,30 @@ UniValue createsidechaindeposit(const JSONRPCRequest& request)
     ObserveSafeMode();
 
     // Check sidechain number we are depositing to
-    unsigned int nSidechain = request.params[0].get_int();
-    if (!scdb.IsSidechainActive(nSidechain)) {
+    const int nSidechainArg = request.params[0].get_int();
+    // Range-check before the uint8_t narrowing, as in createbmmcriticaldatatx:
+    // out of range the value aliases an active slot rather than being
+    // rejected. The address cross-check below would usually catch it, but this
+    // is a funds path and should not depend on that to reject bad input.
+    if (nSidechainArg < 0 || nSidechainArg >= SIDECHAIN_ACTIVATION_MAX_ACTIVE) {
+        std::string strError = "Invalid sidechain number";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+    unsigned int nSidechain = nSidechainArg;
+
+    // Read the global scdb under cs_main: ConnectBlock move-assigns it
+    // wholesale, so an unlocked read can walk a container being replaced. The
+    // lock cannot simply be hoisted over the rest of the function -
+    // BlockUntilSyncedToCurrentChain() below opens with AssertLockNotHeld
+    // (cs_main) and drains a queue whose callbacks take it - so the read gets
+    // its own short scope here, and the LOCK2 further down covers the rest.
+    bool fActive;
+    {
+        LOCK(cs_main);
+        fActive = scdb.IsSidechainActive(nSidechain);
+    }
+    if (!fActive) {
         std::string strError = "Invalid sidechain number";
         LogPrintf("%s: %s\n", __func__, strError);
         throw JSONRPCError(RPC_MISC_ERROR, strError);
@@ -3641,12 +3693,39 @@ UniValue createsidechaindeposit(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_MISC_ERROR, strError);
     }
 
+    // Wallet policy: refuse a deposit the sidechain can
+    // certainly not pay - amount <= the sidechain deposit fee, or a
+    // destination that is no known address format. Not consensus: a
+    // hand-built transaction can still make one, and the sidechain then
+    // records it without a payout (as Hivemind does).
+    const bool fAllowUnknownFormat = request.params.size() > 5 && !request.params[5].isNull() && request.params[5].get_bool();
+    const std::string strPolicyError = DepositPolicyError(nAmount, strDest, fAllowUnknownFormat);
+    if (!strPolicyError.empty()) {
+        LogPrintf("%s: %s\n", __func__, strPolicyError);
+        throw JSONRPCError(nAmount <= SIDECHAIN_DEPOSIT_FEE ? RPC_INVALID_PARAMETER : RPC_INVALID_ADDRESS_OR_KEY,
+                           strPolicyError);
+    }
+
     // Fee
     CAmount nFee = AmountFromValue(request.params[3]);
     if (nFee <= 0) {
         std::string strError = "Invalid fee amount";
         LogPrintf("%s: %s\n", __func__, strError);
         throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+    // The GUI confirms this amount in a dialog; an RPC caller gets no such
+    // chance, and the fee goes to a miner and cannot be recovered. Requiring a
+    // deliberate extra argument past a threshold turns a mistyped "1000" that
+    // meant "0.001" into an error instead of a loss. The same guard the two
+    // OP_RETURN posting commands already carry, and it belongs here more than
+    // there: this one is the funds path, and the fee sits next to an amount
+    // argument in the same units, which is the shape that invites a fee and an
+    // amount being typed the wrong way round.
+    const bool fAllowHighFee = request.params.size() > 4 && !request.params[4].isNull() && request.params[4].get_bool();
+    if (nFee >= OP_RETURN_HIGH_FEE_THRESHOLD && !fAllowHighFee) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+            strprintf("Fee of %s is at or above %s. Pass allowhighfee=true if that is intended.",
+                      FormatMoney(nFee), FormatMoney(OP_RETURN_HIGH_FEE_THRESHOLD)));
     }
 
     // Get sidechain script
@@ -3678,14 +3757,17 @@ UniValue createopreturntransaction(const JSONRPCRequest& request)
         return NullUniValue;
     }
 
-    if (request.fHelp || request.params.size() != 2)
+    if (request.fHelp || request.params.size() < 2 || request.params.size() > 3)
         throw std::runtime_error(
-            "createopreturntransaction \"text\" \"fee\"\n"
+            "createopreturntransaction \"text\" \"fee\" ( allowhighfee )\n"
             "\nCreate a transaction with OP_RETURN data.\n"
+            "\nThe fee is paid to a miner and is not recoverable, so a fee of\n"
+            + FormatMoney(OP_RETURN_HIGH_FEE_THRESHOLD) + " or more must be confirmed with the allowhighfee argument.\n"
             + HelpRequiringPassphrase(pwallet) +
             "\nArguments:\n"
             "1. \"text\"        (string, required) Data to be encoded in the Tx\n"
             "2. \"fee\"         (numeric or string, required) The fee in " + CURRENCY_UNIT + "\n"
+            "3. allowhighfee  (boolean, optional, default=false) Permit a fee of " + FormatMoney(OP_RETURN_HIGH_FEE_THRESHOLD) + " or more\n"
             "\nResult:\n"
             "\"txid\"           (string) The transaction id.\n"
             "\nExamples:\n"
@@ -3711,6 +3793,17 @@ UniValue createopreturntransaction(const JSONRPCRequest& request)
         LogPrintf("%s: %s\n", __func__, strError);
         throw JSONRPCError(RPC_MISC_ERROR, strError);
     }
+    // The GUI confirms this amount in a dialog; an RPC caller gets no such
+    // chance, and the fee goes to a miner and cannot be recovered. Requiring a
+    // deliberate extra argument past a threshold turns a mistyped "1000" that
+    // meant "0.001" into an error instead of a loss.
+    const bool fAllowHighFee = request.params.size() > 2 && request.params[2].get_bool();
+    if (nFee >= OP_RETURN_HIGH_FEE_THRESHOLD && !fAllowHighFee) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+            strprintf("Fee of %s is at or above %s. Pass allowhighfee=true if that is intended.",
+                      FormatMoney(nFee), FormatMoney(OP_RETURN_HIGH_FEE_THRESHOLD)));
+    }
+
 
     // Make sure the results are valid at least up to the most recent block
     // the user could have gotten from another RPC command prior to now
@@ -3743,15 +3836,19 @@ UniValue broadcastnews(const JSONRPCRequest& request)
         return NullUniValue;
     }
 
-    if (request.fHelp || request.params.size() != 3)
+    if (request.fHelp || request.params.size() < 3 || request.params.size() > 4)
         throw std::runtime_error(
-            "broadcastnews \"header\" \"text\" \"fee\"\n"
+            "broadcastnews \"header\" \"text\" \"fee\" ( allowhighfee )\n"
             "\nCreate a transaction with Coin News OP_RETURN data.\n"
+            "\nThe fee is the post's bid and is paid to a miner. It is not\n"
+            "recoverable, so a fee of " + FormatMoney(OP_RETURN_HIGH_FEE_THRESHOLD) + " or more must be confirmed with\n"
+            "the allowhighfee argument.\n"
             + HelpRequiringPassphrase(pwallet) +
             "\nArguments:\n"
             "1. \"header bytes\"    (string, required) The header bytes for the news type (ex: a1a1a1a1)\n"
             "2. \"text\"            (string, required) The news to broadcast\n"
             "3. \"fee\"             (numeric or string, required) The fee in " + CURRENCY_UNIT + "\n"
+            "4. allowhighfee      (boolean, optional, default=false) Permit a fee of " + FormatMoney(OP_RETURN_HIGH_FEE_THRESHOLD) + " or more\n"
             "\nResult:\n"
             "\"txid\"           (string) The transaction id.\n"
             "\nExamples:\n"
@@ -3784,6 +3881,17 @@ UniValue broadcastnews(const JSONRPCRequest& request)
         LogPrintf("%s: %s\n", __func__, strError);
         throw JSONRPCError(RPC_MISC_ERROR, strError);
     }
+    // The GUI confirms this amount in a dialog; an RPC caller gets no such
+    // chance, and the fee goes to a miner and cannot be recovered. Requiring a
+    // deliberate extra argument past a threshold turns a mistyped "1000" that
+    // meant "0.001" into an error instead of a loss.
+    const bool fAllowHighFee = request.params.size() > 3 && request.params[3].get_bool();
+    if (nFee >= OP_RETURN_HIGH_FEE_THRESHOLD && !fAllowHighFee) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+            strprintf("Fee of %s is at or above %s. Pass allowhighfee=true if that is intended.",
+                      FormatMoney(nFee), FormatMoney(OP_RETURN_HIGH_FEE_THRESHOLD)));
+    }
+
 
     // Make sure the results are valid at least up to the most recent block
     // the user could have gotten from another RPC command prior to now
@@ -3828,9 +3936,13 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
             "1. \"amount\"         (numeric or string, required) The amount in " + CURRENCY_UNIT + " to be spent.\n"
             "2. \"height\"         (numeric, required) The block height this transaction must be included in.\n"
             "Note: If 0 is passed in for height, current block height will be used\n"
+            "Any other height than the current block height is refused: the request could not be mined\n"
             "3. \"criticalhash\"   (string, required) h* you want added to a coinbase\n"
             "4. \"nsidechain\"     (numeric, required) Sidechain requesting BMM\n"
             "5. \"prevbytes\"      (string, required) a portion of the previous block hash\n"
+            "\nThe request also carries OP_RETURN <0xD1 'bid' + h*> among its signed outputs, so a\n"
+            "relayed copy with a different h* in its (unsigned) critical data is rejected by\n"
+            "policy as bmm-critical-data-mismatch instead of stealing the bid.\n"
             "\nExamples:\n"
             + HelpExampleCli("createbmmcriticaldatatx", "\"amount\", \"height\", \"criticalhash\", \"nsidechain\", \"prevbytes\"")
             + HelpExampleRpc("createbmmcriticaldatatx", "\"amount\", \"height\", \"criticalhash\", \"nsidechain\", \"prevbytes\"")
@@ -3846,11 +3958,35 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_TYPE_ERROR, strError);
     }
 
+    // Hold cs_main across every chain-state read below. scdb.IsSidechainActive
+    // and chainActive.Tip() both race ConnectBlock otherwise, and the tip is
+    // transiently null on each block connection (SetTip publishes a null tip),
+    // so an unlocked deref here can crash. cs_main is recursive, so the wallet
+    // block's LOCK2(cs_main, cs_wallet) below still works and the
+    // cs_main-before-cs_wallet order is preserved.
+    LOCK(cs_main);
+
     // Height
     int nHeight = request.params[1].get_int();
     if (nHeight == 0) {
-        LOCK(cs_main);
         nHeight = chainActive.Height();
+    }
+    // The height becomes the request's nLockTime, and a BMM request can only
+    // be mined in the block straight after the one its nLockTime names: the
+    // assembler takes it when the height of the block being built is
+    // nLockTime + 1 (TestPackageTransactions), and before every template the
+    // memory pool drops each request whose nLockTime is not the tip height
+    // (CTxMemPool::RemoveExpiredCriticalRequests). So the tip height is the
+    // only one that makes a live request. Any other used to be passed
+    // through: a lower one built and broadcast a request that was already
+    // expired, and a higher one - or a negative one, which wraps to a huge
+    // nLockTime - aborted the node on CWallet::CreateTransaction's assert
+    // that a lock time is never above the tip.
+    if (nHeight != chainActive.Height()) {
+        std::string strError = strprintf("Invalid height %d: a BMM request can only name the current tip height, which is %d (0 selects it)",
+                                         nHeight, chainActive.Height());
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_INVALID_PARAMETER, strError);
     }
 
     // Critical hash
@@ -3863,6 +3999,17 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
 
     // nSidechain
     int nSidechain = request.params[3].get_int();
+    // Range-check before IsSidechainActive() narrows this to uint8_t. Out of
+    // range it truncates and silently aliases an active slot - 258 would be
+    // accepted as sidechain 2 - so the caller would get BMM critical data for
+    // a sidechain it never named, and vBytes[3] below would encode that same
+    // aliased number. The sidechain RPCs in rpc/misc.cpp check the same way.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+    {
+        std::string strError = "Invalid Sidechain number";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_TYPE_ERROR, strError);
+    }
     if (!scdb.IsSidechainActive(nSidechain))
     {
         std::string strError = "Invalid Sidechain number";
@@ -3925,6 +4072,13 @@ UniValue createbmmcriticaldatatx(const JSONRPCRequest& request)
     std::vector<CRecipient> vecSend;
     CRecipient recipient = {CScript() << OP_TRUE, nAmount, false};
     vecSend.push_back(recipient);
+    // Commit to h* inside the signed outputs. criticalData is signed by
+    // nothing and excluded from the txid, so without this a relayed copy of
+    // the bid with a different h* is indistinguishable from the bid itself;
+    // relay policy rejects a copy whose criticalData disagrees with this
+    // output (bmm-critical-data-mismatch). Zero value, unspendable, standard.
+    CRecipient commit = {BMMBidCommitScript(hashCritical), 0, false};
+    vecSend.push_back(commit);
 
     CWalletTx wtx;
     wtx.fFromMe = true;
@@ -4116,7 +4270,7 @@ static const CRPCCommand commands[] =
 
     { "generating",         "generate",                   &generate,                   {"nblocks","maxtries"} },
 
-    { "Drivechain",         "createsidechaindeposit",     &createsidechaindeposit,     {"nSidechain", "depositaddress", "amount", "fee"} },
+    { "Drivechain",         "createsidechaindeposit",     &createsidechaindeposit,     {"nSidechain", "depositaddress", "amount", "fee", "allowhighfee", "allowunknownformat"} },
     { "Drivechain",         "createbmmcriticaldatatx",    &createbmmcriticaldatatx,    {"amount", "height", "criticalhash", "nsidechain"}},
 
     { "CoinNews",           "createopreturntransaction",  &createopreturntransaction,  {"text", "fee"} },

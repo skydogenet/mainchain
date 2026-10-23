@@ -10,6 +10,7 @@
 #include <chain.h>
 #include <dbwrapper.h>
 #include <sidechain.h>
+#include <sync.h>
 
 #include <map>
 #include <string>
@@ -132,6 +133,19 @@ public:
 /** Access to the sidechain database (blocks/sidechain/) */
 class CSidechainTreeDB : public CDBWrapper
 {
+private:
+    //! Per-block snapshots that are not on disk yet. Buffering them means the
+    //! block-connect path performs no LevelDB write at all, so nothing can be
+    //! left sitting un-fsynced in the write-ahead log between flushes;
+    //! FlushBuffer() then persists the whole set in one synchronous batch.
+    //! Reads consult this buffer first, so a buffered snapshot is visible to
+    //! ResyncSCDB (including the reorg path) exactly as a written one would be.
+    mutable CCriticalSection cs_buffer;
+    std::map<uint256, SidechainBlockData> mapBuffer;
+    //! Serialized size of everything in mapBuffer, so the memory held between
+    //! flushes is bounded by bytes and not just by record count.
+    size_t nBufferBytes = 0;
+
 public:
     CSidechainTreeDB(size_t nCacheSize, bool fMemory = false, bool fWipe = false);
     bool WriteSidechainIndex(const std::vector<std::pair<uint256, const SidechainObj *> > &list);
@@ -139,6 +153,13 @@ public:
 
     bool GetBlockData(const uint256& /* hashBlock */, SidechainBlockData& data) const;
     bool HaveBlockData(const uint256& hashBlock) const;
+
+    //! Write every buffered snapshot to disk in a single synchronous batch. This
+    //! is the durability point for the sidechain index and must run before the
+    //! chainstate is flushed (see FlushStateToDisk).
+    bool FlushBuffer();
+    //! Number of snapshots currently held in memory.
+    size_t BufferedCount() const;
 };
 
 struct OPReturnData
@@ -191,12 +212,26 @@ struct NewsType
 /** Access to the OP_RETURN cache database (blocks/opreturn/) */
 class OPReturnDB : public CDBWrapper
 {
+private:
+    //! Same buffering scheme as CSidechainTreeDB: no LevelDB write on the
+    //! block-connect path, one synchronous batch at flush time.
+    mutable CCriticalSection cs_buffer;
+    std::map<uint256, std::vector<OPReturnData>> mapBuffer;
+    //! Serialized size of everything in mapBuffer. OP_RETURN payloads are
+    //! attacker-influenced and unbounded per block, so the byte cap -- not the
+    //! record count -- is what actually limits memory here.
+    size_t nBufferBytes = 0;
+
 public:
     OPReturnDB(size_t nCacheSize, bool fMemory = false, bool fWipe = false);
     bool WriteBlockData(const std::pair<uint256, const std::vector<OPReturnData>>& data);
 
     bool GetBlockData(const uint256& /* hashBlock */, std::vector<OPReturnData>& vData) const;
     bool HaveBlockData(const uint256& hashBlock) const;
+
+    //! Write every buffered record to disk in a single synchronous batch.
+    bool FlushBuffer();
+    size_t BufferedCount() const;
 
     void GetNewsTypes(std::vector<NewsType>& vType);
     void WriteNewsType(NewsType type);

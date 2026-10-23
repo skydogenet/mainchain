@@ -44,7 +44,7 @@
 
 #include <sstream>
 
-const CAmount SIDECHAIN_DEPOSIT_FEE = 0.00001 * COIN;
+// SIDECHAIN_DEPOSIT_FEE now comes from sidechain.h (shared with the RPC)
 
 SidechainPage::SidechainPage(const PlatformStyle *_platformStyle, QWidget *parent) :
     QWidget(parent),
@@ -53,9 +53,18 @@ SidechainPage::SidechainPage(const PlatformStyle *_platformStyle, QWidget *paren
 {
     ui->setupUi(this);
 
-    // Setup sidechain list widget & combo box
-    std::vector<Sidechain> vSidechain = scdb.GetSidechains();
-    SetupSidechainList(vSidechain);
+    // Setup sidechain list widget & combo box. Read scdb under cs_main (it is
+    // move-assigned wholesale by ConnectBlock), but non-blocking: if a block is
+    // connecting while the window is built, skip the initial fill and let
+    // numBlocksChanged (fired when the client model is set) populate it. A
+    // blocking lock here would stall window creation during IBD.
+    {
+        TRY_LOCK(cs_main, lockMain);
+        if (lockMain) {
+            std::vector<Sidechain> vSidechain = scdb.GetSidechains();
+            SetupSidechainList(vSidechain);
+        }
+    }
 
     depositConfirmationDialog = new SidechainDepositConfirmationDialog(this);
 
@@ -182,6 +191,17 @@ void SidechainPage::setBalance(const CAmount& balance, const CAmount& unconfirme
 
 void SidechainPage::SetupSidechainList(const std::vector<Sidechain>& vSidechain)
 {
+    // Caller must hold cs_main: this reads the global scdb (IsSidechainActive /
+    // GetSidechainName / GetCTIP / GetActiveSidechains), which ConnectBlock
+    // move-assigns under cs_main. Both callers (the constructor and
+    // numBlocksChanged) hold it non-blocking before calling.
+    //
+    // Asserted rather than left to the comment: a future call site that forgets
+    // the lock reintroduces the use-after-free silently, and the read races
+    // only when a block happens to connect mid-refresh, so testing would not
+    // reliably show it.
+    AssertLockHeld(cs_main);
+
     // Setup Sidechains list widget
 
     // If there are no active sidechains, display message on deposit section
@@ -244,7 +264,16 @@ void SidechainPage::on_pushButtonDeposit_clicked()
 
     unsigned int nSidechain = nSelectedSidechain;
 
-    if (!scdb.IsSidechainActive(nSidechain)) {
+    // Read the global scdb only under cs_main (ConnectBlock move-assigns it),
+    // and never hold the lock across a modal dialog's exec() below - that would
+    // stall the validation thread for as long as the dialog is open. Each scdb
+    // read in this handler therefore takes cs_main in its own short scope.
+    bool fActive;
+    {
+        LOCK(cs_main);
+        fActive = scdb.IsSidechainActive(nSidechain);
+    }
+    if (!fActive) {
         // Should never be displayed
         messageBox.setWindowTitle("Invalid sidechain selected");
         messageBox.exec();
@@ -302,12 +331,29 @@ void SidechainPage::on_pushButtonDeposit_clicked()
         return;
     }
 
+    // Wallet policy: a destination that is no known address
+    // format (Base58Check, bech32, 0x-hex) can never be paid by the sidechain.
+    if (!IsPlausibleSidechainDestination(strDest)) {
+        messageBox.setWindowTitle("Invalid sidechain deposit address!");
+        QString error = "The sidechain address inside this deposit address is not a valid address.\n\n";
+        error += "The sidechain could not pay it: your coins would stay locked in the sidechain escrow.\n";
+        error += "Copy the deposit address from the sidechain wallet again.";
+        messageBox.setText(error);
+        messageBox.exec();
+        return;
+    }
+
     // Get fee and deposit amount
     const CAmount& nValue = ui->payAmount->value();
     const CAmount& nFee = ui->feeAmount->value();
 
     // Format strings for confirmation dialog
-    QString strSidechain = QString::fromStdString(scdb.GetSidechainName(nSidechain));
+    std::string strSidechainName;
+    {
+        LOCK(cs_main);
+        strSidechainName = scdb.GetSidechainName(nSidechain);
+    }
+    QString strSidechain = QString::fromStdString(strSidechainName);
     QString strValue = BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, nValue, false, BitcoinUnits::separatorAlways);
     QString strFee = BitcoinUnits::formatWithUnit(BitcoinUnit::SKYDOGE, nFee, false, BitcoinUnits::separatorAlways);
 
@@ -342,13 +388,23 @@ void SidechainPage::on_pushButtonDeposit_clicked()
     CTransactionRef tx;
     std::string strFail = "";
     CScript sidechainScriptPubKey;
-    if (!scdb.GetSidechainScript(nSidechain, sidechainScriptPubKey)) {
+    bool fHaveScript;
+    {
+        LOCK(cs_main);
+        fHaveScript = scdb.GetSidechainScript(nSidechain, sidechainScriptPubKey);
+    }
+    if (!fHaveScript) {
         // Invalid sidechain message box
         messageBox.setWindowTitle("Invalid Sidechain!");
         messageBox.setText("The sidechain you're trying to deposit to does not appear to be active!");
         messageBox.exec();
         return;
     }
+    // Catch the wallet up before building the deposit. Done here, holding no
+    // locks, rather than inside the wallet - from inside it deadlocks any
+    // caller that already holds cs_main and cs_wallet.
+    vpwallets[0]->BlockUntilSyncedToCurrentChain();
+
     if (!vpwallets[0]->CreateSidechainDeposit(tx, strFail, sidechainScriptPubKey, nSidechain, nValue, nFee, strDest)) {
         // Create transaction error message box
         messageBox.setWindowTitle("Creating deposit transaction failed!");
@@ -415,8 +471,13 @@ void SidechainPage::on_listWidgetSidechains_doubleClicked(const QModelIndex& i)
         return;
 
     Sidechain sidechain;
-    if (!scdb.GetSidechain(i.row(), sidechain))
-        return;
+    {
+        // scdb is move-assigned by ConnectBlock under cs_main; read it under the
+        // lock, then release before showing the (blocking) details dialog.
+        LOCK(cs_main);
+        if (!scdb.GetSidechain(i.row(), sidechain))
+            return;
+    }
 
     SidechainDetailsDialog dialog(sidechain);
     dialog.exec();
@@ -438,7 +499,14 @@ void SidechainPage::on_tableViewWT_doubleClicked(const QModelIndex& index)
     }
 
     CMutableTransaction mtx;
-    if (!scdb.GetCachedWithdrawalTx(hash, mtx)) {
+    bool fHaveWithdrawal;
+    {
+        // scdb is move-assigned by ConnectBlock under cs_main; read it under the
+        // lock, then release before the (blocking) message/details dialogs.
+        LOCK(cs_main);
+        fHaveWithdrawal = scdb.GetCachedWithdrawalTx(hash, mtx);
+    }
+    if (!fHaveWithdrawal) {
         QString error;
         error += "Withdrawal not in cache!\n\n";
         error += "Try using the 'rebroadcastwithdrawaltx' RPC command on the sidechain.\n";
@@ -472,8 +540,9 @@ bool SidechainPage::validateDepositAmount()
         return false;
     }
 
-    // Reject deposits which cannot cover sidechain fee
-    if (ui->payAmount->value() < SIDECHAIN_DEPOSIT_FEE) {
+    // Reject deposits which cannot cover sidechain fee. A deposit of
+    // exactly the fee pays nothing either, so <= (the message says "> fee").
+    if (ui->payAmount->value() <= SIDECHAIN_DEPOSIT_FEE) {
         ui->payAmount->setValid(false);
         return false;
     }
@@ -563,6 +632,14 @@ void SidechainPage::gotoWTPage()
 
 void SidechainPage::numBlocksChanged()
 {
+    // This refresh runs on every numBlocksChanged signal. During sync the
+    // validation thread holds cs_main for long stretches while connecting
+    // blocks, so take it non-blocking and skip this refresh if the node is
+    // busy; the next block signal retries once cs_main is free.
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     // TODO only update sidechain list when a sidechain is activated or
     // deactivated
     //
@@ -570,8 +647,16 @@ void SidechainPage::numBlocksChanged()
     std::vector<Sidechain> vSidechain = scdb.GetSidechains();
     SetupSidechainList(vSidechain);
 
-    // Update recent deposits table
-    UpdateRecentDeposits();
+    // Update recent deposits table. Take cs_wallet non-blocking too so the GUI
+    // never stalls waiting on the wallet during catch-up; UpdateRecentDeposits
+    // (and its LOCK2) then run safely under the already-held locks.
+    if (!vpwallets.empty()) {
+        TRY_LOCK(vpwallets[0]->cs_wallet, lockWallet);
+        if (!lockWallet)
+            return;
+
+        UpdateRecentDeposits();
+    }
 }
 
 void SidechainPage::ShowActivationDialog()

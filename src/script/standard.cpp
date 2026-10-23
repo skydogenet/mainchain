@@ -95,7 +95,6 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
         return false;
     }
 
-if (nHeight < DrivechainHeight) {
 
 
     // Provably prunable, data-carrying output
@@ -109,7 +108,6 @@ if (nHeight < DrivechainHeight) {
     }
 
     // Doge News data output
-}
     // Coin News data output
     if (scriptPubKey.IsNewsUSDay() || scriptPubKey.IsNewsTokyoDay()) {
         typeRet = TX_NULL_DATA;

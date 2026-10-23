@@ -127,6 +127,13 @@ void LatestBlockTableModel::UpdateModel()
     if (clientModel->inInitialBlockDownload())
         return;
 
+    // Skip this refresh if the node is busy (e.g. validating a block during
+    // sync) rather than blocking the GUI thread waiting on cs_main; the next
+    // block signal will retry. This also makes the chainActive reads below safe.
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     // Clear old data
     beginResetModel();
     model.clear();

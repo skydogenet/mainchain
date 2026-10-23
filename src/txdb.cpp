@@ -336,17 +336,120 @@ bool CSidechainTreeDB::WriteSidechainIndex(const std::vector<std::pair<uint256, 
     return WriteBatch(batch, true);
 }
 
+//! Caps on what the index buffers hold between flushes. Flushing early is always
+//! safe -- it only ever makes an index MORE durable than the chainstate, never
+//! less -- so these simply bound memory during a long initial sync while still
+//! replacing a per-block fsync with roughly one per this many blocks. Both a
+//! record count and a byte budget are enforced: record sizes vary (OP_RETURN
+//! payloads are unbounded and attacker-influenced), so a count alone would not
+//! bound memory.
+static const size_t SIDECHAIN_BUFFER_MAX = 1000;
+//! Budget in SERIALIZED bytes. Resident memory runs several times higher (a
+//! snapshot carries 256 std::vector members even when they are all empty), so
+//! keep this well under the memory actually intended to be spent.
+static const size_t INDEX_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
+
+bool CSidechainTreeDB::FlushBuffer()
+{
+    LOCK(cs_buffer);
+
+    if (mapBuffer.empty())
+        return true;
+
+    CDBBatch batch(*this);
+    for (const std::pair<const uint256, SidechainBlockData>& item : mapBuffer)
+        batch.Write(std::make_pair(item.second.sidechainop, item.first), item.second);
+
+    // Synchronous: this single fsync is the durability point for every snapshot
+    // buffered since the last flush. WriteBatch reports database errors by
+    // throwing, so convert that into a false return: callers must be able to see
+    // the failure, and the buffer has to stay bounded rather than accumulate one
+    // record per block while writes keep failing.
+    try {
+        if (!WriteBatch(batch, true))
+            return false;
+    }
+    catch (const std::exception& e) {
+        LogPrintf("%s: Failed to write sidechain index batch: %s\n", __func__, e.what());
+        return false;
+    }
+
+    mapBuffer.clear();
+    nBufferBytes = 0;
+
+    return true;
+}
+
+size_t CSidechainTreeDB::BufferedCount() const
+{
+    LOCK(cs_buffer);
+    return mapBuffer.size();
+}
+
 bool CSidechainTreeDB::WriteSidechainBlockData(const std::pair<uint256, const SidechainBlockData>& data)
 {
-    CDBBatch batch(*this);
-    std::pair<char, uint256> key = std::make_pair(data.second.sidechainop, data.first);
-    batch.Write(key, data.second);
+    {
+        LOCK(cs_buffer);
+        // Re-writing a block already buffered (a failed flush is retried, for
+        // instance) replaces the entry, so drop its old size before adding the
+        // new one or the counter drifts upwards until the next flush.
+        std::map<uint256, SidechainBlockData>::iterator it = mapBuffer.find(data.first);
+        if (it != mapBuffer.end())
+            nBufferBytes -= GetSerializeSize(it->second, SER_DISK, CLIENT_VERSION);
+        mapBuffer[data.first] = data.second;
+        nBufferBytes += GetSerializeSize(data.second, SER_DISK, CLIENT_VERSION);
+        if (mapBuffer.size() < SIDECHAIN_BUFFER_MAX && nBufferBytes < INDEX_BUFFER_MAX_BYTES)
+            return true;
+    }
 
-    return WriteBatch(batch, true);
+    return FlushBuffer();
 }
 
 bool CSidechainTreeDB::GetBlockData(const uint256& hashBlock, SidechainBlockData& data) const
 {
+    // Snapshots still buffered in memory are as valid as written ones, and a
+    // reorg can ask for one before it has been flushed, so look there first.
+    {
+        LOCK(cs_buffer);
+        std::map<uint256, SidechainBlockData>::const_iterator it = mapBuffer.find(hashBlock);
+        if (it != mapBuffer.end()) {
+            data = it->second;
+            return true;
+        }
+    }
+
+    // Newest form first, then spent, treasury, compact (sparse), then legacy
+    // full-table records,
+    // so a database written by any version -- including one holding more than
+    // one form -- is read correctly. SidechainDB::ApplyLDBData re-expands the
+    // sparse form and installs the treasury log when the record carries one.
+    // The WIDE form first: it is the newest key, and a record written under it
+    // is invisible to every lookup below. Omitting it here is not a partial
+    // read but a TOTAL one - GetBlockData returns false, ApplyLDBData is never
+    // reached, and the treasury the record exists to restore is silently lost
+    // at exactly the height the widening turns on.
+    // The DELTA keys are newest of all and must be tried before the cumulative
+    // ones. Same reasoning as the WIDE note above. This table is the
+    // canonical list of record keys: a key added to the writer must be added
+    // here too.
+    if (ReadSidechain(std::make_pair(DB_SIDECHAIN_BLOCK_OP_DELTA_WIDE, hashBlock), data))
+        return true;
+
+    if (ReadSidechain(std::make_pair(DB_SIDECHAIN_BLOCK_OP_DELTA, hashBlock), data))
+        return true;
+
+    if (ReadSidechain(std::make_pair(DB_SIDECHAIN_BLOCK_OP_WIDE, hashBlock), data))
+        return true;
+
+    if (ReadSidechain(std::make_pair(DB_SIDECHAIN_BLOCK_OP_SPENT, hashBlock), data))
+        return true;
+
+    if (ReadSidechain(std::make_pair(DB_SIDECHAIN_BLOCK_OP_TREASURY, hashBlock), data))
+        return true;
+
+    if (ReadSidechain(std::make_pair(DB_SIDECHAIN_BLOCK_OP_SPARSE, hashBlock), data))
+        return true;
+
     if (ReadSidechain(std::make_pair(DB_SIDECHAIN_BLOCK_OP, hashBlock), data))
         return true;
 
@@ -362,17 +465,71 @@ bool CSidechainTreeDB::HaveBlockData(const uint256& hashBlock) const
 OPReturnDB::OPReturnDB(size_t nCacheSize, bool fMemory, bool fWipe)
     : CDBWrapper(GetDataDir() / "blocks" / "opreturn", nCacheSize, fMemory, fWipe) { }
 
+//! Cap on records held in memory between flushes; see SIDECHAIN_BUFFER_MAX.
+static const size_t OP_RETURN_BUFFER_MAX = 1000;
+
 bool OPReturnDB::WriteBlockData(const std::pair<uint256, const std::vector<OPReturnData>>& data)
 {
-    CDBBatch batch(*this);
-    std::pair<char, uint256> key = std::make_pair(DB_OP_RETURN, data.first);
-    batch.Write(key, data.second);
+    {
+        LOCK(cs_buffer);
+        // See CSidechainTreeDB::WriteSidechainBlockData: keep the byte counter in
+        // step when an already-buffered block is written again.
+        std::map<uint256, std::vector<OPReturnData>>::iterator it = mapBuffer.find(data.first);
+        if (it != mapBuffer.end())
+            nBufferBytes -= GetSerializeSize(it->second, SER_DISK, CLIENT_VERSION);
+        mapBuffer[data.first] = data.second;
+        nBufferBytes += GetSerializeSize(data.second, SER_DISK, CLIENT_VERSION);
+        if (mapBuffer.size() < OP_RETURN_BUFFER_MAX && nBufferBytes < INDEX_BUFFER_MAX_BYTES)
+            return true;
+    }
 
-    return WriteBatch(batch, true);
+    return FlushBuffer();
+}
+
+bool OPReturnDB::FlushBuffer()
+{
+    LOCK(cs_buffer);
+
+    if (mapBuffer.empty())
+        return true;
+
+    CDBBatch batch(*this);
+    for (const std::pair<const uint256, std::vector<OPReturnData>>& item : mapBuffer)
+        batch.Write(std::make_pair(DB_OP_RETURN, item.first), item.second);
+
+    // See CSidechainTreeDB::FlushBuffer for why the throw is converted here.
+    try {
+        if (!WriteBatch(batch, true))
+            return false;
+    }
+    catch (const std::exception& e) {
+        LogPrintf("%s: Failed to write OP_RETURN index batch: %s\n", __func__, e.what());
+        return false;
+    }
+
+    mapBuffer.clear();
+    nBufferBytes = 0;
+
+    return true;
+}
+
+size_t OPReturnDB::BufferedCount() const
+{
+    LOCK(cs_buffer);
+    return mapBuffer.size();
 }
 
 bool OPReturnDB::GetBlockData(const uint256& hashBlock, std::vector<OPReturnData>& vData) const
 {
+    {
+        LOCK(cs_buffer);
+        std::map<uint256, std::vector<OPReturnData>>::const_iterator it = mapBuffer.find(hashBlock);
+        if (it != mapBuffer.end()) {
+            vData = it->second;
+            return true;
+        }
+    }
+
     return Read(std::make_pair(DB_OP_RETURN, hashBlock), vData);
 }
 
@@ -393,10 +550,16 @@ void OPReturnDB::GetNewsTypes(std::vector<NewsType>& vType)
         boost::this_thread::interruption_point();
 
         NewsType type;
-        if (pcursor->GetKey(key) && key.first == DB_OP_RETURN_TYPES) {
-            if (pcursor->GetValue(type))
-                vType.push_back(type);
+        if (!pcursor->GetKey(key) || key.first != DB_OP_RETURN_TYPES) {
+            // Past the last topic record. Without this the loop walks every
+            // remaining key in the database - the OP_RETURN records sort after
+            // these and number in the millions on mainnet - reading the whole
+            // index to find nothing.
+            break;
         }
+
+        if (pcursor->GetValue(type))
+            vType.push_back(type);
 
         pcursor->Next();
     }

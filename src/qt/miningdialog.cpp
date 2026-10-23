@@ -73,15 +73,26 @@ void MiningDialog::AbandonFailedBMM()
     if (vpwallets[0]->IsLocked())
         return; // TODO error message
 
-    std::vector<uint256> vHashRemoved;
-    mempool.SelectBMMRequests(vHashRemoved);
-    mempool.RemoveExpiredCriticalRequests(vHashRemoved);
+    std::set<uint256> setRemoved;
+    {
+        // Block connection copies the sidechain database, mutates the copy and
+        // publishes it back in one step, so an unlocked write from this thread
+        // can be discarded; the removed request is already out of the mempool by
+        // then, so the abandon would simply never happen. This must be a scoped
+        // lock released before BlockUntilSyncedToCurrentChain() below, which
+        // requires cs_main NOT to be held.
+        LOCK(cs_main);
 
-    for (const uint256& u : vHashRemoved)
-        scdb.AddRemovedBMM(u);
+        std::vector<uint256> vHashRemoved;
+        mempool.RemoveInvalidBMMRequests(vHashRemoved);
+        mempool.RemoveExpiredCriticalRequests(vHashRemoved);
 
-    // Also try to abandon cached BMM txid previously removed from our mempool
-    std::set<uint256> setRemoved = scdb.GetRemovedBMM();
+        for (const uint256& u : vHashRemoved)
+            scdb.AddRemovedBMM(u);
+
+        // Also try to abandon cached BMM txid previously removed from our mempool
+        setRemoved = scdb.GetRemovedBMM();
+    }
 
     // Make sure the results are valid at least up to the most recent block
     // the user could have gotten from another RPC command prior to now
@@ -154,6 +165,14 @@ void MiningDialog::on_pushButtonStopMining_clicked()
 
 void MiningDialog::Update()
 {
+    // Skip this poll if the node is busy (e.g. validating a block during sync)
+    // rather than blocking the GUI thread waiting on cs_main. This is the same
+    // non-blocking guard the wallet balance poll uses, and it makes the
+    // chainActive / difficulty / hashps reads below safe.
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     // Update things that don't change quickly while mining
 
     QString height = "Current block height: ";

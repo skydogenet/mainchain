@@ -16,11 +16,6 @@ QT_END_NAMESPACE
 extern const char *DEFAULT_GUI_PROXY_HOST;
 static constexpr unsigned short DEFAULT_GUI_PROXY_PORT = 9050;
 
-enum Theme {
-    THEME_DEFAULT = 0,
-    THEME_DARK = 1
-};
-
 /** Interface from Qt to configuration data structure for Bitcoin client.
    To Qt, the options are presented as a list with the different options
    laid out vertically.
@@ -54,7 +49,7 @@ public:
         DatabaseCache,          // int
         SpendZeroConfChange,    // bool
         Listen,                 // bool
-        Theme,                  // int
+        Theme,                  // QString
         USDBTC,                 // int
         OptionIDRowCount,
     };
@@ -73,7 +68,7 @@ public:
     bool getMinimizeToTray() const { return fMinimizeToTray; }
     bool getMinimizeOnClose() const { return fMinimizeOnClose; }
     int getDisplayUnit() const { return nDisplayUnit; }
-    int getTheme() const { return nTheme; }
+    QString getTheme() const { return theme; }
     int getUSDBTC() const { return nUSDBTC; }
     QString getThirdPartyTxUrls() const { return strThirdPartyTxUrls; }
     bool getProxySettings(QNetworkProxy& proxy) const;
@@ -90,8 +85,8 @@ private:
     bool fMinimizeToTray;
     bool fMinimizeOnClose;
     QString language;
+    QString theme;
     int nDisplayUnit;
-    int nTheme;
     int nUSDBTC;
     QString strThirdPartyTxUrls;
     bool fCoinControlFeatures;
@@ -106,7 +101,7 @@ private:
 
 Q_SIGNALS:
     void displayUnitChanged(int unit);
-    void themeChanged(int nTheme);
+    void themeChanged(const QString &theme);
     void usdBTCChanged(int nUSDBTC);
     void coinControlFeaturesChanged(bool);
     void hideTrayIconChanged(bool);

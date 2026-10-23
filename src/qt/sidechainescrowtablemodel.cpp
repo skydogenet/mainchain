@@ -100,6 +100,14 @@ QVariant SidechainEscrowTableModel::headerData(int section, Qt::Orientation orie
 
 void SidechainEscrowTableModel::updateModel()
 {
+    // Skip this refresh if the node is busy (e.g. validating a block during
+    // sync) rather than blocking the GUI thread waiting on cs_main. This is the
+    // same non-blocking guard the wallet balance poll uses, and it also makes
+    // the scdb reads below safe (they run under cs_main now).
+    TRY_LOCK(cs_main, lockMain);
+    if (!lockMain)
+        return;
+
     // Clear old data
     beginResetModel();
     model.clear();

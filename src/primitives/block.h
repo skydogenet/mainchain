@@ -28,6 +28,22 @@ public:
     uint32_t nBits;
     uint32_t nNonce;
 
+    // Security fix (remote CPU-DoS): memoized GetHash(). skydoge_hash is ~44x
+    // the cost of SHA256d and was recomputed on every call, so a peer flooding
+    // cheap-PoW headers could pin a node's CPU. The cache is self-validating:
+    // GetHash() memcmp()s the live 80 serialized header bytes against the
+    // snapshot taken when it was filled, so ANY field mutation (deserializing
+    // into a reused object, nonce grinding, SetNull) transparently invalidates
+    // it - no hooks, hash values bit-identical to before. These members are
+    // NEVER serialized (absent from SerializationOp), so wire/disk formats are
+    // unchanged. Written under logical-const like the existing CBlock::fChecked;
+    // callers that share a header across threads must hold cs_main, same as for
+    // fChecked - concurrent GetHash() on a shared header off cs_main would race
+    // on these members.
+    mutable uint256 hashCache;
+    mutable unsigned char hashCacheInput[80];
+    mutable bool fHashCached = false;
+
     CBlockHeader()
     {
         SetNull();
@@ -53,6 +69,7 @@ public:
         nTime = 0;
         nBits = 0;
         nNonce = 0;
+        fHashCached = false;
     }
 
     bool IsNull() const
@@ -111,14 +128,10 @@ public:
 
     CBlockHeader GetBlockHeader() const
     {
-        CBlockHeader block;
-        block.nVersion       = nVersion;
-        block.hashPrevBlock  = hashPrevBlock;
-        block.hashMerkleRoot = hashMerkleRoot;
-        block.nTime          = nTime;
-        block.nBits          = nBits;
-        block.nNonce         = nNonce;
-        return block;
+        // Slicing copy of the base subobject; also carries the memoized hash
+        // cache (the implicit copy copies the mutable members) so the caller
+        // does not recompute skydoge_hash.
+        return *this;
     }
 
     std::string ToString() const;

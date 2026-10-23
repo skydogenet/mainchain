@@ -1,0 +1,31 @@
+Do not call secure_getenv, so the binaries keep running on old glibc.
+
+ossl_safe_getenv picks its implementation from the glibc of the machine doing
+the build. The release is built on a system new enough to take the
+secure_getenv branch, which pulls in a symbol that only exists from glibc 2.17,
+while the binaries are supposed to run against 2.12 - so the build fails its own
+check-symbols gate with "symbol secure_getenv from unsupported version
+GLIBC_2.17" for skydoge-cli, skydoge-tx and skydoge-qt.
+
+Take the branch below it instead, which openssl already provides for platforms
+without secure_getenv and which carries the same meaning: refuse the environment
+when the process is set-uid or set-gid, otherwise read it. That is stricter than
+the plain getenv 1.0.1k used here, so nothing is given up by choosing it.
+
+--- a/crypto/getenv.c
++++ b/crypto/getenv.c
+@@ -15,11 +15,9 @@
+ 
+ char *ossl_safe_getenv(const char *name)
+ {
+-#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
+-# if __GLIBC_PREREQ(2, 17)
+-#  define SECURE_GETENV
+-    return secure_getenv(name);
+-# endif
++#if 0
++/* secure_getenv needs glibc 2.17; the binaries must run on 2.12. */
++# define SECURE_GETENV
+ #endif
+ 
+ #ifndef SECURE_GETENV

@@ -6,6 +6,7 @@
 #include <rpc/blockchain.h>
 
 #include <amount.h>
+#include <arith_uint256.h>
 #include <chain.h>
 #include <chainparams.h>
 #include <checkpoints.h>
@@ -813,7 +814,10 @@ struct CCoinsStats
     uint64_t nBogoSize;
     uint256 hashSerialized;
     uint64_t nDiskSize;
-    CAmount nTotalAmount;
+    // Total satoshis across the whole UTXO set. This is a WIDE accumulator, not
+    // a CAmount: the lifetime supply is 2.1e19 satoshis, which overflows int64
+    // (max 9.22e18). Reported as a decimal-coin string by gettxoutsetinfo.
+    arith_uint256 nTotalAmount;
 
     CCoinsStats() : nHeight(0), nTransactions(0), nTransactionOutputs(0), nBogoSize(0), nDiskSize(0), nTotalAmount(0) {}
 };
@@ -829,7 +833,7 @@ static void ApplyStats(CCoinsStats &stats, CHashWriter& ss, const uint256& hash,
         ss << output.second.out.scriptPubKey;
         ss << VARINT(output.second.out.nValue);
         stats.nTransactionOutputs++;
-        stats.nTotalAmount += output.second.out.nValue;
+        stats.nTotalAmount += (uint64_t)output.second.out.nValue; // UTXO values are non-negative
         stats.nBogoSize += 32 /* txid */ + 4 /* vout index */ + 4 /* height + coinbase */ + 8 /* amount */ +
                            2 /* scriptPubKey len */ + output.second.out.scriptPubKey.size() /* scriptPubKey */;
     }
@@ -940,7 +944,7 @@ UniValue gettxoutsetinfo(const JSONRPCRequest& request)
             "  \"bogosize\": n,          (numeric) A meaningless metric for UTXO set size\n"
             "  \"hash_serialized_2\": \"hash\", (string) The serialized hash\n"
             "  \"disk_size\": n,         (numeric) The estimated size of the chainstate on disk\n"
-            "  \"total_amount\": x.xxx          (numeric) The total amount\n"
+            "  \"total_amount\": \"x.xxx\"        (string) The total amount (coins, decimal)\n"
             "}\n"
             "\nExamples:\n"
             + HelpExampleCli("gettxoutsetinfo", "")
@@ -959,7 +963,13 @@ UniValue gettxoutsetinfo(const JSONRPCRequest& request)
         ret.push_back(Pair("bogosize", (int64_t)stats.nBogoSize));
         ret.push_back(Pair("hash_serialized_2", stats.hashSerialized.GetHex()));
         ret.push_back(Pair("disk_size", stats.nDiskSize));
-        ret.push_back(Pair("total_amount", ValueFromAmount(stats.nTotalAmount)));
+        // Format the wide satoshi total as a decimal-coin string (the total,
+        // ~2.1e11 coins, is exact as a string but cannot fit a JSON number's
+        // double mantissa with 8 decimals).
+        arith_uint256 nCoinFactor(COIN);
+        arith_uint256 nCoins = stats.nTotalAmount / nCoinFactor;
+        arith_uint256 nRemSat = stats.nTotalAmount - nCoins * nCoinFactor;
+        ret.push_back(Pair("total_amount", strprintf("%d.%08d", nCoins.GetLow64(), nRemSat.GetLow64())));
     } else {
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to read UTXO set");
     }

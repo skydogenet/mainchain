@@ -30,6 +30,11 @@
 #include <utilmoneystr.h>
 #include <utilstrencodings.h>
 
+#if defined(__linux__)
+#include <fstream>
+#include <unistd.h>
+#endif
+
 #if defined(NDEBUG)
 # error "Bitcoin cannot be compiled without assertions."
 #endif
@@ -68,6 +73,32 @@ static const int STALE_RELAY_AGE_LIMIT = 30 * 24 * 60 * 60;
 /// Age after which a block is considered historical for purposes of rate
 /// limiting block relay. Set to one week, denominated in seconds.
 static const int HISTORICAL_BLOCK_AGE = 7 * 24 * 60 * 60;
+
+/** Remote CPU-DoS bound: rolling window and cap on the number of ALREADY-KNOWN
+ *  headers a single peer can make us hash (each an expensive ~44x-SHA256d
+ *  skydoge_hash under cs_main). Past the cap, the rest of that peer's headers
+ *  messages in the window are dropped unprocessed and the trip is LOGGED. The
+ *  peer is NOT banned: honest header sync asks several peers at once and
+ *  whichever answers second replays a whole range we already hold, so a ban
+ *  score here would ban honest peers (see the note at the limiter). */
+static const int64_t KNOWN_HEADERS_WINDOW_SECS = 60;
+static const int MAX_KNOWN_HEADERS_PER_WINDOW = 8000;
+
+// Telemetry for malformed/truncated p2p messages: log the process RSS so
+// memory-churn events are visible in the log without external tooling.
+// Linux-only; returns 0 elsewhere.
+static uint64_t GetProcessRSSKB()
+{
+#if defined(__linux__)
+    std::ifstream f("/proc/self/statm");
+    uint64_t nTotal = 0, nRSS = 0;
+    if (f >> nTotal >> nRSS) {
+        long nPageSize = sysconf(_SC_PAGESIZE);
+        return nRSS * (nPageSize > 0 ? nPageSize : 4096) / 1024;
+    }
+#endif
+    return 0;
+}
 
 // Internal stuff
 namespace {
@@ -174,6 +205,12 @@ struct CNodeState {
     const CBlockIndex *pindexBestHeaderSent;
     //! Length of current-streak of unconnecting headers announcements
     int nUnconnectingHeaders;
+    //! Rolling-window accounting of the number of already-known headers this
+    //! peer has made us hash, to bound the sliding-window replay CPU flood.
+    int64_t nKnownHeadersWindowStart;
+    int nKnownHeadersInWindow;
+    //! Number of times this peer has crossed MAX_KNOWN_HEADERS_PER_WINDOW.
+    int nKnownHeadersTrips;
     //! Whether we've started headers synchronization with this peer.
     bool fSyncStarted;
     //! When to potentially disconnect peer for stalling headers download
@@ -248,6 +285,9 @@ struct CNodeState {
         pindexLastCommonBlock = nullptr;
         pindexBestHeaderSent = nullptr;
         nUnconnectingHeaders = 0;
+        nKnownHeadersWindowStart = 0;
+        nKnownHeadersInWindow = 0;
+        nKnownHeadersTrips = 0;
         fSyncStarted = false;
         nHeadersSyncTimeout = 0;
         nStallingSince = 0;
@@ -407,19 +447,16 @@ void UpdateBlockAvailability(NodeId nodeid, const uint256 &hash) {
 void MaybeSetPeerAsAnnouncingHeaderAndIDs(NodeId nodeid, CConnman* connman) {
     AssertLockHeld(cs_main);
     CNodeState* nodestate = State(nodeid);
-if (nHeight < DrivechainHeight) {
 
     if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion || !nodestate->fHaveDrivechain) {
         // Never ask from peers who can't provide witnesses or skydoge support
         return;
     }
-} else {
 
     if (!nodestate || !nodestate->fSupportsDesiredCmpctVersion) {
         // Never ask from peers who can't provide witnesses
         return;
     }
-}
 
     if (nodestate->fProvidesHeaderAndIDs) {
         for (std::list<NodeId>::iterator it = lNodesAnnouncingHeaderAndIDs.begin(); it != lNodesAnnouncingHeaderAndIDs.end(); it++) {
@@ -535,7 +572,7 @@ void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vector<con
                 // We wouldn't download this block or its descendants from this peer.
                 return;
             }
-            if (!State(nodeid)->fHaveDrivechain && IsDrivechainEnabled(pindex->pprev, consensusParams)) {
+            if (!State(nodeid)->fHaveDrivechain && IsSkydogeEnabled(pindex->pprev, consensusParams)) {
                 // We would rather download this block from a Skydoge node
                 return;
             }
@@ -877,7 +914,7 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
     nHighestFastAnnounce = pindex->nHeight;
 
     bool fWitnessEnabled = IsWitnessEnabled(pindex->pprev, Params().GetConsensus());
-    bool fDrivechainEnabled = IsDrivechainEnabled(pindex->pprev, Params().GetConsensus());
+    bool fDrivechainEnabled = IsSkydogeEnabled(pindex->pprev, Params().GetConsensus());
     uint256 hashBlock(pblock->GetHash());
 
     {
@@ -1358,12 +1395,63 @@ bool static ProcessHeadersMessage(CNode *pfrom, CConnman *connman, const std::ve
         }
 
         uint256 hashLastBlock;
+        int nKnownHeaders = 0;
         for (const CBlockHeader& header : headers) {
             if (!hashLastBlock.IsNull() && header.hashPrevBlock != hashLastBlock) {
                 Misbehaving(pfrom->GetId(), 20, "non-continuous headers sequence");
                 return false;
             }
             hashLastBlock = header.GetHash();
+            // Count headers we already have (GetHash() is memoized per object,
+            // so this lookup adds no extra skydoge_hash cost).
+            if (mapBlockIndex.find(hashLastBlock) != mapBlockIndex.end())
+                nKnownHeaders++;
+        }
+
+        // Security fix (remote CPU-DoS): a peer that pads large headers messages
+        // with headers we ALREADY have forces us to recompute the ~44x-SHA256d
+        // skydoge_hash on each of them under cs_main for no progress. This is the
+        // amplification the "sliding window of 1999 known + a few freshly-mined
+        // headers" flood relies on - and it is exactly what a fresh-header /
+        // advanced-best-header heuristic fails to catch, because one cheap fresh
+        // header resets those. So bound the number of already-known headers a
+        // single peer makes us hash per rolling window, and log past it (no
+        // ban: see the score-0 note below).
+        int64_t nNow = GetTime();
+        if (nNow - nodestate->nKnownHeadersWindowStart > KNOWN_HEADERS_WINDOW_SECS) {
+            nodestate->nKnownHeadersWindowStart = nNow;
+            nodestate->nKnownHeadersInWindow = 0;
+        }
+        nodestate->nKnownHeadersInWindow += nKnownHeaders;
+        if (nodestate->nKnownHeadersInWindow > MAX_KNOWN_HEADERS_PER_WINDOW) {
+            // No ban score: an honest sync does reprocess headers it already
+            // has. Header sync asks several peers at once, each answers with
+            // overlapping ranges, and whichever peer arrives second is by
+            // definition sending headers we already hold. At 2000 headers a
+            // message this bound is four messages of ordinary overlap, so a ban
+            // would hit honest peers. Keep the accounting, drop the message, and
+            // log it so a real flood is still visible.
+            //
+            // The log is explicit because Misbehaving() returns before it logs
+            // anything when the score is 0: the Misbehaving(..., 0,
+            // "redundant-headers") call that stood here was a complete no-op,
+            // so for as long as it did a flood left no trace in debug.log even
+            // under -debug=net. The first trip in a window is logged
+            // unconditionally, so an operator without -debug=net still sees a
+            // flood, and it is at most one line per peer per window, so a peer
+            // sending tiny messages cannot amplify the log. Every further trip
+            // in the window is logged under the net category only.
+            nodestate->nKnownHeadersTrips++;
+            const bool fFirstTripInWindow = nodestate->nKnownHeadersInWindow - nKnownHeaders <= MAX_KNOWN_HEADERS_PER_WINDOW;
+            const std::string strTrip = strprintf("redundant-headers: peer=%d sent %d already-known headers (%d in the last %ds, bound %d); dropping this message, trips=%d\n",
+                    pfrom->GetId(), nKnownHeaders, nodestate->nKnownHeadersInWindow,
+                    (int)KNOWN_HEADERS_WINDOW_SECS, MAX_KNOWN_HEADERS_PER_WINDOW, nodestate->nKnownHeadersTrips);
+            if (fFirstTripInWindow) {
+                LogPrintf("%s", strTrip);
+            } else {
+                LogPrint(BCLog::NET, "%s", strTrip);
+            }
+            return false;
         }
 
         // If we don't have the last header, then they'll have given us
@@ -1433,6 +1521,7 @@ bool static ProcessHeadersMessage(CNode *pfrom, CConnman *connman, const std::ve
         assert(pindexLast);
         UpdateBlockAvailability(pfrom->GetId(), pindexLast->GetBlockHash());
 
+
         // From here, pindexBestKnownBlock should be guaranteed to be non-null,
         // because it is set in UpdateBlockAvailability. Some nullptr checks
         // are still present, however, as belt-and-suspenders.
@@ -1457,9 +1546,20 @@ bool static ProcessHeadersMessage(CNode *pfrom, CConnman *connman, const std::ve
             const CBlockIndex *pindexWalk = pindexLast;
             // Calculate all the blocks we'd need to switch to pindexLast, up to a limit.
             while (pindexWalk && !chainActive.Contains(pindexWalk) && vToFetch.size() <= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+                // Same two capability gates as FindNextBlocksToDownload: a
+                // peer that cannot serve witness data is skipped once segwit
+                // is active, and a peer without NODE_DRIVECHAIN is skipped
+                // once Skydoge is active (which is every block after genesis
+                // on every network), because the block it would hand us is
+                // stripped of criticalData and cannot be validated. Until
+                // this release only the witness gate was applied here, so a
+                // headers announcement from a non-Drivechain peer had its
+                // blocks requested from that peer anyway - the one place in
+                // block download that made that decision differently.
                 if (!(pindexWalk->nStatus & BLOCK_HAVE_DATA) &&
                         !mapBlocksInFlight.count(pindexWalk->GetBlockHash()) &&
-                        (!IsWitnessEnabled(pindexWalk->pprev, chainparams.GetConsensus()) || State(pfrom->GetId())->fHaveWitness)) {
+                        (!IsWitnessEnabled(pindexWalk->pprev, chainparams.GetConsensus()) || State(pfrom->GetId())->fHaveWitness) &&
+                        (!IsSkydogeEnabled(pindexWalk->pprev, chainparams.GetConsensus()) || State(pfrom->GetId())->fHaveDrivechain)) {
                     // We don't have this block, and it's not yet in flight.
                     vToFetch.push_back(pindexWalk);
                 }
@@ -1901,32 +2001,6 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         }
     }
 
-    else if (strCommand == NetMsgType::CMPCTWITBLOCK)
-    {
-        bool fAnnounceUsingCMPCTBLOCK = false;
-        uint64_t nCMPCTBLOCKVersion = 1;
-        if (nCMPCTBLOCKVersion == 1 || ((pfrom->GetLocalServices() & NODE_WITNESS) && nCMPCTBLOCKVersion == 2)) {
-            LOCK(cs_main);
-            // fProvidesHeaderAndIDs is used to "lock in" version of compact blocks we send (fWantsCmpctWitness)
-            if (!State(pfrom->GetId())->fProvidesHeaderAndIDs) {
-                State(pfrom->GetId())->fProvidesHeaderAndIDs = true;
-                State(pfrom->GetId())->fWantsCmpctWitness = nCMPCTBLOCKVersion == 2;
-            }
-            if (State(pfrom->GetId())->fWantsCmpctWitness == (nCMPCTBLOCKVersion == 2)) // ignore later version announces
-                State(pfrom->GetId())->fPreferHeaderAndIDs = fAnnounceUsingCMPCTBLOCK;
-            if (!State(pfrom->GetId())->fSupportsDesiredCmpctVersion) {
-                if (pfrom->GetLocalServices() & NODE_WITNESS)
-                    State(pfrom->GetId())->fSupportsDesiredCmpctVersion = (nCMPCTBLOCKVersion == 2);
-                else
-                    State(pfrom->GetId())->fSupportsDesiredCmpctVersion = (nCMPCTBLOCKVersion == 1);
-            }
-            connman->ForEachNode([&](CNode* pto) {
-                connman->PushMessage(pto, msgMaker.Make(NetMsgType::CMPCTWITBLOCK));
-            });
-            CompactWitBlockIndex();
-        }
-    }
-
     else if (strCommand == NetMsgType::INV)
     {
         std::vector<CInv> vInv;
@@ -1948,6 +2022,15 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
         uint32_t nFetchFlags = GetFetchFlags(pfrom);
 
+        // One getheaders is enough for the whole message. Each one carries a
+        // full block locator, and a peer may name up to MAX_INV_SZ hashes we do
+        // not have, so replying per hash lets a single message we accepted turn
+        // into tens of megabytes queued for sending. The reply asks for
+        // everything from our best header onwards regardless of which hash
+        // prompted it, so the second and later copies would ask the same
+        // question anyway.
+        bool fSentGetHeaders = false;
+
         for (CInv &inv : vInv)
         {
             if (interruptMsgProc)
@@ -1962,12 +2045,13 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
             if (inv.type == MSG_BLOCK) {
                 UpdateBlockAvailability(pfrom->GetId(), inv.hash);
-                if (!fAlreadyHave && !fImporting && !fReindex && !mapBlocksInFlight.count(inv.hash)) {
+                if (!fAlreadyHave && !fImporting && !fReindex && !mapBlocksInFlight.count(inv.hash) && !fSentGetHeaders) {
                     // We used to request the full block here, but since headers-announcements are now the
                     // primary method of announcement on the network, and since, in the case that a node
                     // fell back to inv we probably have a reorg which we should get the headers for first,
                     // we now only provide a getheaders response here. When we receive the headers, we will
                     // then ask for the blocks we need.
+                    fSentGetHeaders = true;
                     connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::GETHEADERS, chainActive.GetLocator(pindexBestHeader), inv.hash));
                     LogPrint(BCLog::NET, "getheaders (%d) %s to peer=%d\n", pindexBestHeader->nHeight, inv.hash.ToString(), pfrom->GetId());
                 }
@@ -2193,7 +2277,19 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         std::deque<COutPoint> vWorkQueue;
         std::vector<uint256> vEraseQueue;
         CTransactionRef ptx;
-        vRecv >> ptx;
+        // Telemetry: a tx that fails to deserialize is caught by the
+        // ProcessMessages handler, which logs the message size but not the
+        // peer or the node's RSS. Log the peer and the bytes actually carried
+        // here, then rethrow so the existing behaviour (REJECT_MALFORMED,
+        // ban scoring) is unchanged.
+        try {
+            vRecv >> ptx;
+        } catch (const std::exception& e) {
+            LogPrint(BCLog::NET, "%s: malformed tx from peer=%d (%s): %s (%u bytes remaining in message, rss=%lu kB)\n",
+                     __func__, pfrom->GetId(), pfrom->GetAddrName(), e.what(),
+                     (unsigned)vRecv.size(), (unsigned long)GetProcessRSSKB());
+            throw;
+        }
         const CTransaction& tx = *ptx;
 
         CInv inv(MSG_TX, tx.GetHash());
@@ -2209,6 +2305,19 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
         std::list<CTransactionRef> lRemovedTxn;
 
+        // criticalData is excluded from the txid, so a transaction we already
+        // hold can arrive again with a different h* (see the h* commitment
+        // check in AcceptToMemoryPool for why that matters). AlreadyHave drops
+        // it just below without a trace; name it first, so a flood of twins -
+        // the bid-theft pattern - is visible in the log. Nothing else changes:
+        // first-seen still wins, and the peer is not penalised.
+        if (!tx.criticalData.IsNull() && mempool.exists(inv.hash)) {
+            const CTransactionRef ptxPool = mempool.get(inv.hash);
+            if (ptxPool && !(ptxPool->criticalData == tx.criticalData)) {
+                LogPrint(BCLog::MEMPOOL, "critical-data twin of pooled %s from peer=%d dropped (pooled h* %s, offered h* %s)\n",
+                         inv.hash.ToString(), pfrom->GetId(), ptxPool->criticalData.hashCritical.ToString(), tx.criticalData.hashCritical.ToString());
+            }
+        }
         if (!AlreadyHave(inv) &&
             AcceptToMemoryPool(mempool, state, ptx, &fMissingInputs, &lRemovedTxn, false /* bypass_limits */, 0 /* nAbsurdFee */)) {
             mempool.check(pcoinsTip.get());
@@ -2613,6 +2722,13 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 return true;
             } else if (status == READ_STATUS_FAILED) {
                 // Might have collided, fall back to getdata now :(
+                //
+                // Reset the in-flight state first. FillBlock clears the partial
+                // block's header before it can report this status, so leaving
+                // the partial block in place would let a second copy of this
+                // message re-enter FillBlock in that cleared state, which it is
+                // not prepared for.
+                MarkBlockAsReceived(resp.blockhash);
                 std::vector<CInv> invs;
                 invs.push_back(CInv(MSG_BLOCK | GetFetchFlags(pfrom), resp.blockhash));
                 connman->PushMessage(pfrom, msgMaker.Make(NetMsgType::GETDATA, invs));

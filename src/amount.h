@@ -23,6 +23,16 @@ static const CAmount CENT = 1000000;
  * critical; in unusual circumstances like a(nother) overflow bug that allowed
  * for the creation of coins out of thin air modification could lead to a fork.
  * */
+// MAX_MONEY is a per-value cap, NOT the total money supply. The total lifetime
+// supply is 210,000,000,000 coins, but that is spread across many UTXOs; no
+// single CAmount ever holds it, and it cannot: 210,000,000,000 * COIN =
+// 2.1e19 satoshis OVERFLOWS both int64 (max 9.22e18) and uint64 (max 1.84e19).
+// 91,000,000,000 * COIN = 9.1e18 sat is the largest round per-value cap that
+// fits int64 (CAmount). Writing it as uint64_t(210000000000) * COIN does NOT
+// evaluate to 210B - it silently wraps (uint64 overflow) to ~2.55e18 sat (~25.5B coins),
+// which would set MAX_MONEY *below* the live money supply and reject nearly all
+// transactions. (See also: because 91B*COIN is ~98.7% of INT64_MAX, sums of two
+// near-cap CAmounts overflow, so value-summing loops must check-before-add.)
 static const CAmount MAX_MONEY = 91000000000 * COIN;
 inline bool MoneyRange(const CAmount& nValue) { return (nValue >= 0 && nValue <= MAX_MONEY); }
 

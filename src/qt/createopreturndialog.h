@@ -8,6 +8,7 @@
 #include <QDialog>
 
 class PlatformStyle;
+class WalletModel;
 
 namespace Ui {
 class CreateOPReturnDialog;
@@ -21,6 +22,8 @@ public:
     explicit CreateOPReturnDialog(const PlatformStyle *_platformStyle, QWidget *parent = nullptr);
     ~CreateOPReturnDialog();
 
+    void setWalletModel(WalletModel* model);
+
 private Q_SLOTS:
     void on_pushButtonCreate_clicked();
 
@@ -28,6 +31,9 @@ private:
     Ui::CreateOPReturnDialog *ui;
 
     const PlatformStyle *platformStyle = nullptr;
+
+    //! Needed to prompt for the passphrase on an encrypted wallet.
+    WalletModel* walletModel = nullptr;
 
 };
 

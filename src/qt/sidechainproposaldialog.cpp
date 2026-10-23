@@ -34,50 +34,10 @@ SidechainProposalDialog::~SidechainProposalDialog()
 {
     delete ui;
 }
-// old DC
-void SidechainProposalDialogOLD::on_toolButtonHelp_clicked()
-{
-    // TODO move text into static const
-    QMessageBox::information(this, tr("Skydoge - information"),
-        tr("Sidechain address bytes:\n\n"
-           "Deposits to this sidechain must be sent to a specific address "
-           "(really, a specific script). It must be different from the "
-           "addresses in use by active sidechains.\n\n"
-           "Each sidechain must use a unique address or the sidechain software "
-           "will be confused.\n\n"
-           "The address will be based on 256 bits (encoded as 32 bytes of hex) "
-           "- you get to choose what these bits are.\n\n"
-           "Add the address bytes to the src/sidechain.h file of the sidechain."
-           "\n\n"
-           "Example:\n"
-           "static const std::string SIDECHAIN_ADDRESS_BYTES = \"6e1f86cb9785d4484750970c7f4cd42a142d3c50974a0a3128f562934774b191\";"),
-        QMessageBox::Ok);
-}
 
-void SidechainProposalDialog::on_toolButtonIDHash1_clicked()
+void SidechainProposalDialog::on_toolButtonHelp_clicked()
 {
-    // TODO display message based on current selected version
-    // TODO move text into static const
     QMessageBox::information(this, tr("Skydoge - information"),
-        tr("Release tarball hash:\n\n"
-           "hash of the original gitian software build of this sidechain.\n\n"
-           "Use the sha256sum utility to generate this hash, or copy the hash "
-           "when it is printed to the console after gitian builds complete.\n\n"
-           "Example:\n"
-           "sha256sum Skydoge-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
-           "Result:\n"
-           "fd9637e427f1e967cc658bfe1a836d537346ce3a6dd0746878129bb5bc646680  Skydoge-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
-           "Paste the resulting hash into this field."),
-        QMessageBox::Ok);
-}
-
-void SidechainProposalDialog::on_toolButtonIDHash2_clicked()
-{
-    // TODO display message based on current selected version
-    // TODO move text into static const
-    QMessageBox::information(this, tr("Skydoge - information"),
-// old DC
-//        tr("Build commit hash (160 bits):\n\n"
         tr("These fields are optional but highly recommended.\n\n"
            "Description:\n"
            "Brief description of the sidechain's purpose and where to find more information.\n\n"
@@ -86,9 +46,9 @@ void SidechainProposalDialog::on_toolButtonIDHash2_clicked()
            "Use the sha256sum utility to generate this hash, or copy the hash "
            "when it is printed to the console after gitian builds complete.\n\n"
            "Example:\n"
-           "sha256sum Drivechain-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
+           "sha256sum Skydoge-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
            "Result:\n"
-           "fd9637e427f1e967cc658bfe1a836d537346ce3a6dd0746878129bb5bc646680  Drivechain-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
+           "fd9637e427f1e967cc658bfe1a836d537346ce3a6dd0746878129bb5bc646680  Skydoge-12-0.21.00-x86_64-linux-gnu.tar.gz\n\n"
            "Build commit hash (160 bits):\n"
            "If the software was developed using git, the build commit hash "
            "should match the commit hash of the first sidechain release.\n"
@@ -98,15 +58,6 @@ void SidechainProposalDialog::on_toolButtonIDHash2_clicked()
            "Only this software can filter out invalid withdrawals."),
         QMessageBox::Ok);
 }
-
-void SidechainProposalDialog::on_toolButtonSoftwareHashes_clicked()
-{
-    // TODO display message based on current selected version
-    // TODO move text into static const
-    QMessageBox::information(this, tr("Skydoge - information"),
-        tr("These help users find the sidechain node software. "
-           "Only this software can filter out invalid withdrawals. \n\n"
-           "These fields are optional but highly recommended."),
 
 void SidechainProposalDialog::on_pushButtonCreate_clicked()
 {
@@ -127,14 +78,23 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
     // TODO also check if sidechain number is the same as an existing proposal
 
     // Check if this sidechain number is already being used and warn them.
-    if (scdb.IsSidechainActive(nSidechain)) {
+    // Read the global scdb under cs_main (ConnectBlock move-assigns it
+    // wholesale) in a scope that ends before the modal dialog below - holding
+    // cs_main while a dialog waits on the user would stall the validation
+    // thread for as long as the box is open.
+    bool fNumberInUse;
+    {
+        LOCK(cs_main);
+        fNumberInUse = scdb.IsSidechainActive(nSidechain);
+    }
+    if (fNumberInUse) {
         QString warning = "The sidechain number you have chosen is already in use!\n\n";
         warning += "This would create a sidechain replacement proposal which ";
         warning += "is much slower to activate than a new sidechain.\n\n";
         warning += "Are you sure?\n";
         int nRes = QMessageBox::critical(this, tr("Skydoge - warning"),
             warning,
-            QMessageBox::Ok, QMessageBox::Cancel);
+            QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel);
 
         if (nRes == QMessageBox::Cancel)
             return;
@@ -147,18 +107,6 @@ void SidechainProposalDialog::on_pushButtonCreate_clicked()
         return;
     }
 
-if (nHeight < DrivechainHeight) {
-
-
-    // TODO maybe we should allow sidechains with no description? Anyways this
-    // isn't a consensus rule right now
-    if (strDescription.empty()) {
-        QMessageBox::critical(this, tr("Skydoge - error"),
-            tr("Sidechain must have a description!"),
-            QMessageBox::Ok);
-        return;
-    }
-}
     if (nVersion > SIDECHAIN_VERSION_MAX) {
         QMessageBox::critical(this, tr("Skydoge - error"),
             tr("This sidechain has an invalid version number (too high)!"),
@@ -166,17 +114,6 @@ if (nHeight < DrivechainHeight) {
         return;
     }
 
-if (nHeight < DrivechainHeight) {
-
-
-    uint256 uHash = uint256S(strHash);
-    if (uHash.IsNull()) {
-        QMessageBox::critical(this, tr("Skydoge - error"),
-            tr("Invalid sidechain address bytes!"),
-            QMessageBox::Ok);
-        return;
-    }
-}
     const uint8_t nSC = nSidechain;
     const unsigned char vchSC[1] = { nSC };
 
@@ -190,7 +127,6 @@ if (nHeight < DrivechainHeight) {
     CBitcoinSecret vchSecret(key);
 
     if (!key.IsValid()) {
-        // Nobody should see this, but we don't want to fail silently
         QMessageBox::critical(this, tr("Skydoge - error"),
             tr("Private key outside allowed range!"),
             QMessageBox::Ok);
@@ -199,7 +135,7 @@ if (nHeight < DrivechainHeight) {
 
     CPubKey pubkey = key.GetPubKey();
     if (!key.VerifyPubKey(pubkey)) {
-        QMessageBox::critical(this, tr("Drivechain - error"),
+        QMessageBox::critical(this, tr("Skydoge - error"),
             tr("Failed to verify pubkey!"),
             QMessageBox::Ok);
         return;
@@ -232,11 +168,22 @@ if (nHeight < DrivechainHeight) {
         proposal.hashID2 = uint160S(strHashID2);
     proposal.nVersion = nVersion;
 
-    // Cache proposal so that it can be added to the next block we mine
-    scdb.CacheSidechainProposals(std::vector<Sidechain>{proposal});
+    {
+        // Both writes need cs_main. ConnectBlock move-assigns the whole scdb,
+        // so an unlocked read-modify-write here can be torn or silently
+        // dropped - and a lost proposal or ack is a missed activation vote,
+        // not a display glitch. The vote write in scdbdialog.cpp is locked for
+        // the same reason. Kept in one scope so the proposal and its ack
+        // cannot be split across a block connection, and released before the
+        // dialog below.
+        LOCK(cs_main);
 
-    // Cache sidechain hash to ACK it
-    scdb.CacheSidechainHashToAck(proposal.GetSerHash());
+        // Cache proposal so that it can be added to the next block we mine
+        scdb.CacheSidechainProposals(std::vector<Sidechain>{proposal});
+
+        // Cache sidechain hash to ACK it
+        scdb.CacheSidechainHashToAck(proposal.GetSerHash());
+    }
 
     QString message = QString("Sidechain proposal created!\n\n");
     message += QString("Sidechain Number:\n%1\n\n").arg(nSidechain);

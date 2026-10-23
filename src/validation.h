@@ -16,6 +16,7 @@
 #include <protocol.h> // For CMessageHeader::MessageStartChars
 #include <policy/feerate.h>
 #include <script/script_error.h>
+#include <streams.h>
 #include <sync.h>
 #include <versionbits.h>
 
@@ -149,13 +150,20 @@ static const unsigned int MAX_BLOCKS_TO_ANNOUNCE = 8;
 /** Maximum number of unconnecting headers announcements before DoS score */
 static const int MAX_UNCONNECTING_HEADERS = 10;
 
-static const bool DEFAULT_PEERBLOOMFILTERS = true;
+/** Serving BIP37 bloom filters to arbitrary peers is off by default.
+ *  A filter is attacker-supplied and is matched against every transaction and
+ *  block we relay to that peer, so an unauthenticated peer can spend our CPU
+ *  and memory for free. Upstream turned this default off for that reason.
+ *  An operator who needs to serve SPV clients turns it back on explicitly with
+ *  -peerbloomfilters=1, which also restores the NODE_BLOOM service bit. */
+static const bool DEFAULT_PEERBLOOMFILTERS = false;
 
 /** Default for -stopatheight */
 static const int DEFAULT_STOPATHEIGHT = 0;
 
-/** Maximum number of bytes added to a critical transaction (v3 - BMM etc) */
-static const int MAX_CRITICAL_DATA_BYTES = 21;
+// MAX_CRITICAL_DATA_BYTES moved to primitives/transaction.h so CCriticalData
+// deserialization can enforce the bound. Do not redefine it here: validation.h
+// pulls in transaction.h transitively, so a second definition would clash.
 
 struct BlockHasher
 {
@@ -182,7 +190,6 @@ extern int nScriptCheckThreads;
 extern bool fTxIndex;
 extern bool fIsBareMultisigStd;
 extern bool fRequireStandard;
-extern bool fCMPCTWit;
 extern bool fCheckBlockIndex;
 extern bool fCheckpointsEnabled;
 extern size_t nCoinCacheUsage;
@@ -193,6 +200,13 @@ extern CAmount maxTxFee;
 /** If the tip is older than this (in seconds), the node is considered to be in initial block download. */
 extern int64_t nMaxTipAge;
 extern bool fEnableReplacement;
+/** Suspend the node-local drivechain policy layers: the memory pool's own
+ *  drivechain checks and the withdrawal bundle ingestion checks. Set only by
+ *  -drivechainpolicybypass, which init refuses on every network but regtest.
+ *  No consensus rule reads it - it exists so that the functional suite can put
+ *  a transaction in a block the way a cooperating miner would, which is the
+ *  only way to find out what consensus does with one. */
+extern bool fDrivechainPolicyBypass;
 
 /** Block hash whose ancestors we will assume to have valid scripts without checking them. */
 extern uint256 hashAssumeValid;
@@ -280,8 +294,6 @@ bool LoadGenesisBlock(const CChainParams& chainparams);
 bool LoadBlockIndex(const CChainParams& chainparams);
 /** Update the chain tip based on database information. */
 bool LoadChainTip(const CChainParams& chainparams);
-/** Compact witness block information */
-void CompactWitBlockIndex();
 /** Unload database information */
 void UnloadBlockIndex();
 /** Run an instance of the script checking thread */
@@ -422,6 +434,18 @@ void InitScriptExecutionCache();
 bool ReadBlockFromDisk(CBlock& block, const CDiskBlockPos& pos, const Consensus::Params& consensusParams);
 bool ReadBlockFromDisk(CBlock& block, const CBlockIndex* pindex, const Consensus::Params& consensusParams);
 
+/** The block's serialized size AS COMMITTED - excluding criticalData, which is
+ *  suppressed from both the txid and the witness hash and so is covered by
+ *  nothing the block commits to. This is the quantity the small-block cap is
+ *  enforced on; see the definition in validation.cpp for why. Exposed so a test
+ *  can pin the enforced measure rather than re-deriving it. */
+uint64_t GetCommittedSerializedSize(const CBlock& block);
+/** One transaction's contribution to GetCommittedSerializedSize: its committed
+ *  size plus the fixed SMALL_BLOCK_V3_TX_CHARGE_BYTES if it is nVersion 3. The
+ *  block measure is the header and vtx count plus the sum of these; the miner
+ *  budgets with it so its accounting is the enforced one. */
+uint64_t GetChargedSerializedSize(const CTransaction& tx);
+
 /** Functions for validating blocks and updating the block tree */
 
 /** Context-independent validity checks */
@@ -434,7 +458,7 @@ bool TestBlockValidity(CValidationState& state, const CChainParams& chainparams,
 bool IsWitnessEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params);
 
 /** Check whether Skydoge are activated. */
-bool IsDrivechainEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params);
+bool IsSkydogeEnabled(const CBlockIndex* pindexPrev, const Consensus::Params& params);
 
 int GetWitnessCommitmentIndex(const CBlock& block);
 
@@ -446,6 +470,14 @@ void UpdateUncommittedBlockStructures(CBlock& block, const CBlockIndex* pindexPr
 
 /** Produce the necessary coinbase commitment for a block (modifies the hash, don't call for mined blocks). */
 std::vector<unsigned char> GenerateCoinbaseCommitment(CBlock& block, const CBlockIndex* pindexPrev, const Consensus::Params& consensusParams);
+
+/** Build the coinbase output that commits to one transaction's critical data.
+ *  Consensus requires every critical data transaction in a block to have a
+ *  matching commitment, so the block assembler has to charge this output to its
+ *  budgets while it is still deciding which transactions to include. It shares
+ *  this helper rather than approximating the output, so the reservation cannot
+ *  drift from what GenerateCriticalHashCommitments actually appends. */
+CTxOut GetCriticalHashCommitmentOut(const CCriticalData& data);
 
 /** Produce BMM h* (or other critical data) coinbase commitment(s) for a block */
 void GenerateCriticalHashCommitments(CBlock& block);
@@ -460,7 +492,33 @@ void GenerateSidechainProposalCommitment(CBlock& block, const Sidechain& sidecha
 
 void GenerateSidechainActivationCommitment(CBlock& block, const uint256& hash);
 
+//! True if a withdrawal-bundle index survives the two-byte upvote encoding
+//! without colliding with a sentinel byte pair. See validation.cpp.
+bool ScdbVoteIndexIsEncodable(size_t n);
+
 bool GenerateSCDBByteCommitment(CBlock& block, CScript& scriptOut, const std::vector<std::vector<SidechainWithdrawalState>>& vScores, const std::vector<std::string>& vVote);
+
+/** Append the SCDB hash commitment output to a block's coinbase. Required in
+ *  every block from SCDBCommitmentHeight; must be the final coinbase edit. */
+void GenerateSCDBHashCommitment(CBlock& block, const uint256& hashCommitment);
+
+/** The working sidechain state consensus reads for the block AFTER pindexPrev:
+ *  a copy of the global SCDB with pindexPrev's per-block record overlaid where
+ *  that record is complete. This is the ONE construction of that seed -
+ *  ConnectBlock validates against it, ComputeSCDBCommitment makes the miner
+ *  commit to it, and getscdbhash/getscdbstate report it. Do not build a
+ *  fourth copy inline; a reader assembling this state from a different
+ *  container is exactly the divergence class this helper exists to close.
+ *  Requires cs_main. */
+SidechainDB GetSCDBConsensusSeed(const CBlockIndex* pindexPrev, const Consensus::Params& consensusParams);
+
+/** Compute the SCDB commitment for a fully assembled block template: simulate
+ *  the block's sidechain effects on the working state ConnectBlock will use
+ *  and return GetCommitmentHash() of the result. The payouts and deposits are
+ *  discovered from the block itself, the same way ConnectBlock discovers them,
+ *  so no caller-supplied payout list can fall out of step with it. Requires
+ *  cs_main. */
+bool ComputeSCDBCommitment(const CBlock& block, const CBlockIndex* pindexPrev, uint256& hashCommitment);
 
 CScript GetNewsTokyoDailyHeader();
 CScript GetNewsUSDailyHeader();
@@ -536,10 +594,31 @@ CBlockFileInfo* GetBlockFileInfo(size_t n);
 bool DumpMempool();
 
 /** Load the mempool from disk. */
+//! How a cache file was read back.
+enum class CacheRead {
+    MISSING,    //!< no such file; nothing to load and nothing wrong
+    UNOPENABLE, //!< the file is there and will not open
+    OK,         //!< read as written
+    RECOVERED,  //!< only readable after undoing a text-mode write
+};
+
+/** Read a cache file, tolerating one an older Windows build wrote in text mode.
+ *  Fills vCandidate with the bytes as they sit on disk and, when they differ,
+ *  the same bytes with the CRLF expansion undone. The caller parses the first
+ *  candidate that works and rewrites the file at shutdown. */
+CacheRead ReadCacheFileCandidates(const fs::path& path, std::vector<CDataStream>& vCandidate);
+
 bool LoadMempool();
 
 /** Load cache of user set votes for withdrawals */
-bool LoadCustomVoteCache();
+/** fHold (0.45.2): blocks are still to be connected after this load, so the
+ *  votes are held back and installed by InstallReplayedCustomVotes. */
+bool LoadCustomVoteCache(bool fHold = false);
+
+/** 0.45.2: install the custom withdrawal votes LoadCustomVoteCache held back,
+ *  slot by slot, where the slot still holds the sidechain the vote was set
+ *  for. Call after InstallReplayedWithdrawalCache. NODE-LOCAL. */
+void InstallReplayedCustomVotes();
 
 /** Dump cache of user set votes for withdrawals */
 void DumpCustomVoteCache();
@@ -550,11 +629,56 @@ void DumpCustomVoteCache();
 /** Load the optional deposit cache from disk. */
 bool LoadDepositCache();
 
+/**
+ * Record that startup finished loading the block database and sidechain state,
+ * so the in-memory sidechain caches are authoritative and may be written back
+ * on shutdown. Until this is called, DumpDepositCache() leaves deposit.dat
+ * alone: an aborted startup can reach shutdown with an empty cache that must
+ * not be allowed to overwrite the real file.
+ */
+void SetSCDBStateLoaded();
+
 /** Dump the deposit cache to disk. */
 void DumpDepositCache();
 
-/** Load the withdrawal transaction cache from disk. */
-bool LoadWithdrawalCache(bool fReindex = false);
+/**
+ * Rebuild the sidechain deposit cache by re-scanning local block files.
+ *
+ * The repair path: the only thing in this tree that makes a node's sidechain
+ * state agree with its own chain again, where every durability measure instead
+ * preserves whatever the node already believes. Replaces the full reindex that
+ * a stale or missing deposit cache used to force, and costs a single pass of
+ * block reads - no re-download, no script verification, no coins view.
+ *
+ * Requires the per-block sidechain records, which drive the replay; a datadir
+ * missing them still needs a reindex. Builds into a local database and installs
+ * it only on success, so a failure leaves the node as it was. Caller must hold
+ * cs_main.
+ */
+bool RebuildSidechainDeposits(std::string& strError);
+
+/** Cross-check every carried treasury pointer against the unspent output set.
+ *  Reports and never repairs; returns the number that failed. */
+int AuditTreasuryAnchors();
+
+/** Do a block's deposits chain from the treasury pointers they extend?
+ *  `vDeposit` in block order, `scdbIn` holding the parent's pointers. A pure
+ *  function of the two; reads no coins view. Names the first failure. */
+bool CheckDepositContinuity(const std::vector<SidechainDeposit>& vDeposit,
+        const SidechainDB& scdbIn, uint8_t& nSidechainFail, uint256& txidFail);
+
+/** Load the withdrawal transaction cache from disk. fReindex: the chain is
+ *  about to be replayed from genesis (the spent and failed sets are then not
+ *  installed). fHoldBundles (0.45.2): blocks are still to be connected - the
+ *  raw bundles are then held back and installed by
+ *  InstallReplayedWithdrawalCache once they have been. */
+bool LoadWithdrawalCache(bool fReindex = false, bool fHoldBundles = false);
+
+/** 0.45.2: install the raw withdrawal bundles LoadWithdrawalCache held back
+ *  for a chain replay, keeping only the bundles the replayed chain can still
+ *  use. Call once the replay has finished (ThreadImport). NODE-LOCAL: the raw
+ *  bundle cache is in no record, commitment or hash. */
+void InstallReplayedWithdrawalCache();
 
 /** Dump the withdrawal cache to disk.
  * Spent, failed & raw transaction cache */
@@ -590,6 +714,12 @@ bool VerifyTxOutProof(const std::string& strProof);
 /** Flush SCDB cache data to disk */
 void DumpSCDBCache();
 
+/** false (and a message) if the sidechain records at
+ *  or above SidechainParamsHeight on the active chain - or, under
+ *  -reindex-chainstate, on the best header chain - are in the pre-fork
+ *  (narrow) format: an older release ran this data directory past the fork
+ *  and only a full -reindex rebuilds those records. */
+bool CheckSCDBRecordFormat(std::string& strError);
 /** Resync SCDB status & verify hashBlockLastSeen. Used during init and
  * when a block is disconnected. */
 bool ResyncSCDB(const CBlockIndex* pindex);

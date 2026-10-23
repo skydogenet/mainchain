@@ -15,6 +15,8 @@
 #include <utilstrencodings.h>
 #include <warnings.h>
 
+#include <limits>
+
 
 static CCriticalSection cs_nTimeOffset;
 static int64_t nTimeOffset = 0;
@@ -39,6 +41,13 @@ int64_t GetAdjustedTime()
 
 static int64_t abs64(int64_t n)
 {
+    // Negating the most negative int64 does not give a positive number - there
+    // isn't one - and the result wraps straight back to itself. Callers use this
+    // to bound a magnitude, so returning something negative would pass every
+    // upper-bound test and defeat the check entirely. Report the largest
+    // magnitude instead, which fails those tests as intended.
+    if (n == std::numeric_limits<int64_t>::min())
+        return std::numeric_limits<int64_t>::max();
     return (n >= 0 ? n : -n);
 }
 
@@ -47,6 +56,21 @@ static int64_t abs64(int64_t n)
 void AddTimeData(const CNetAddr& ip, int64_t nOffsetSample)
 {
     LOCK(cs_nTimeOffset);
+
+    // The sample is the difference between a timestamp the peer chose and our
+    // own clock, so its magnitude is bounded by nothing at all before it gets
+    // here. A peer that names a time near the end of the representable range
+    // produces an offset of matching size, and offsets that large are not a
+    // clock disagreement - they are an attempt to move our clock. Drop them
+    // before they can reach the median, which is what the adjustment is
+    // computed from.
+    static const int64_t MAX_TIME_SAMPLE = 24 * 60 * 60;
+    if (nOffsetSample > MAX_TIME_SAMPLE || nOffsetSample < -MAX_TIME_SAMPLE) {
+        LogPrint(BCLog::NET, "ignoring implausible time offset %+d from peer %s\n",
+                 nOffsetSample, ip.ToString());
+        return;
+    }
+
     // Ignore duplicates
     static std::set<CNetAddr> setKnown;
     if (setKnown.size() == BITCOIN_TIMEDATA_MAX_SAMPLES)

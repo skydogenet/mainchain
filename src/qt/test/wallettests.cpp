@@ -1,10 +1,6 @@
 #include <qt/test/wallettests.h>
 
-<<<<<<< HEAD
 #include <qt/skydogeamountfield.h>
-=======
-#include <qt/drivechainamountfield.h>
->>>>>>> master
 #include <qt/callback.h>
 #include <qt/optionsmodel.h>
 #include <qt/platformstyle.h>
@@ -14,11 +10,7 @@
 #include <qt/transactiontablemodel.h>
 #include <qt/transactionview.h>
 #include <qt/walletmodel.h>
-<<<<<<< HEAD
 #include <test/test_skydoge.h>
-=======
-#include <test/test_drivechain.h>
->>>>>>> master
 #include <validation.h>
 #include <wallet/wallet.h>
 #include <qt/overviewpage.h>

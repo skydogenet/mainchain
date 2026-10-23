@@ -8,6 +8,7 @@
 
 #include <qt/optionsmodel.h>
 
+#include <qt/skydogetheme.h>
 #include <qt/skydogeunits.h>
 #include <qt/guiutil.h>
 
@@ -151,11 +152,13 @@ void OptionsModel::Init(bool resetSettings)
     if (!gArgs.SoftSetArg("-lang", settings.value("language").toString().toStdString()))
         addOverriddenOption("-lang");
 
-    if (!settings.contains("nTheme"))
-        settings.setValue("nTheme", THEME_DEFAULT);
-    nTheme = settings.value("nTheme").toInt();
+    if (!settings.contains("theme")) {
+        // Migrate the legacy nTheme setting (1 was the dark theme)
+        settings.setValue("theme", settings.value("nTheme", 0).toInt() == 1 ? "qdark" : SkydogeTheme::DefaultId());
+    }
+    theme = settings.value("theme").toString();
 
-    Q_EMIT themeChanged(nTheme);
+    Q_EMIT themeChanged(theme);
 
     if (!settings.contains("nUSDBTC"))
         settings.setValue("nUSDBTC", DEFAULT_USD_BTC);
@@ -300,7 +303,7 @@ QVariant OptionsModel::data(const QModelIndex & index, int role) const
         case Listen:
             return settings.value("fListen");
         case Theme:
-            return nTheme;
+            return theme;
         case USDBTC:
             return nUSDBTC;
         default:
@@ -440,10 +443,11 @@ bool OptionsModel::setData(const QModelIndex & index, const QVariant & value, in
             }
             break;
         case Theme:
-            if (nTheme != value.toInt()) {
-                settings.setValue("nTheme", value);
-                nTheme = value.toInt();
-                Q_EMIT themeChanged(value.toInt());
+            if (theme != value.toString()) {
+                theme = value.toString();
+                settings.setValue("theme", theme);
+                SkydogeTheme::Apply(theme);
+                Q_EMIT themeChanged(theme);
             }
             break;
         case USDBTC:

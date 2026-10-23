@@ -271,7 +271,7 @@ void ManageNewsDialog::on_pushButtonDefaults_clicked()
     int nRes = QMessageBox::question(this, tr("Confirm news types reset"),
         tr("Are you sure you want to reset your news types? "
            "This will delete all but the built-in news types."),
-        QMessageBox::Ok, QMessageBox::Cancel);
+        QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel);
 
     if (nRes == QMessageBox::Cancel)
         return;
@@ -390,7 +390,7 @@ void ManageNewsDialog::removeType()
     // Show confirmation dialog
     int nRes = QMessageBox::question(this, tr("Confirm erasing news type"),
         tr("Are you sure you want to erase %1?").arg(QString::fromStdString(type.title)),
-        QMessageBox::Ok, QMessageBox::Cancel);
+        QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel);
 
     if (nRes == QMessageBox::Cancel)
         return;

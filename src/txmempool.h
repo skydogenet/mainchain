@@ -521,7 +521,28 @@ public:
 
     void RemoveExpiredCriticalRequests(std::vector<uint256>& vHashRemoved);
 
-    void SelectBMMRequests(std::vector<uint256>& vHashRemoved);
+    /** Remove the BMM requests no block built on the current tip can carry:
+     *  stale ones (prev bytes not the tip), ones for an inactive sidechain and
+     *  ones for an out-of-range slot. Valid competing requests for the same
+     *  slot are KEPT: which one a block carries is
+     *  RankBMMRequests' decision, made per template. */
+    void RemoveInvalidBMMRequests(std::vector<uint256>& vHashRemoved);
+    /** The BMM requests that may compete for each sidechain slot, BEST FIRST
+     *  - the valid requests whose ancestor package
+     *  meets minFeeRate, ordered by fee plus bid (the request's OP_TRUE
+     *  outputs, which the critical fee transaction collects) - BIP301's
+     *  first-price auction per block per slot - and the lowest txid on a tie.
+     *  A request with another BMM request among its unconfirmed ancestors
+     *  does not compete. Removes nothing. Policy only: consensus allows one
+     *  request per slot, any one.
+     *
+     *  0.45.2: this used to return only the
+     *  winner, and the block assembler excluded every other request for the
+     *  slot - so a winner the assembler could not place (one whose OP_TRUE
+     *  collection inputs alone overflow a small block) left the slot with no
+     *  BMM at all. The whole ranking is returned now; the assembler takes
+     *  the best request that fits and falls back to the next. */
+    std::map<uint8_t, std::vector<uint256>> RankBMMRequests(const CFeeRate& minFeeRate) const;
 
     void UpdateCTIPFromMempool(const std::map<uint8_t, SidechainCTIP>& mapCTIP);
 
@@ -584,6 +605,11 @@ public:
     void removeForReorg(const CCoinsViewCache *pcoins, unsigned int nMemPoolHeight, int flags);
     void removeConflicts(const CTransaction &tx);
     void removeForBlock(const std::vector<CTransactionRef>& vtx, unsigned int nBlockHeight);
+    /** Drop every entry whose serialized size exceeds nMaxSerializedSize, with
+     *  its descendants. Called once, on the block that brings the chain to the
+     *  small-block flag day: from the next block on such a transaction can
+     *  never be mined, so it is not grandfathered. */
+    void removeForSmallBlockActivation(unsigned int nMaxSerializedSize);
 
     void clear();
     void _clear(); //lock free

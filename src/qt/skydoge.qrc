@@ -169,4 +169,22 @@
         <file alias="radio_unchecked">res/qdarkstyle/rc/radio_unchecked.png</file>
         <file alias="darkstyle">res/qdarkstyle/style.qss</file>
     </qresource>
+    <qresource prefix="/themes">
+        <file alias="classic">res/themes/classic.qss</file>
+        <file alias="light">res/themes/light.qss</file>
+        <file alias="dark">res/themes/dark.qss</file>
+        <file alias="midnight">res/themes/midnight.qss</file>
+        <file alias="neon">res/themes/neon.qss</file>
+        <file alias="glass">res/themes/glass.qss</file>
+        <file alias="wow">res/themes/wow.qss</file>
+        <file alias="matrix">res/themes/matrix.qss</file>
+        <file alias="nord">res/themes/nord.qss</file>
+        <file alias="ocean">res/themes/ocean.qss</file>
+        <file alias="amethyst">res/themes/amethyst.qss</file>
+        <file alias="dracula">res/themes/dracula.qss</file>
+        <file alias="solar">res/themes/solar.qss</file>
+        <file alias="crimson">res/themes/crimson.qss</file>
+        <file alias="rose">res/themes/rose.qss</file>
+        <file alias="sepia">res/themes/sepia.qss</file>
+    </qresource>
 </RCC>

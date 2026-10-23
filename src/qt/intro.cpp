@@ -20,11 +20,27 @@
 
 #include <cmath>
 
-static const uint64_t GB_BYTES = 1000000000LL;
-/* Minimum free space (in GB) needed for data directory */
-static const uint64_t BLOCK_CHAIN_SIZE = 430;
-/* Minimum free space (in GB) needed for data directory when pruned; Does not include prune target */
-static const uint64_t CHAIN_STATE_SIZE = 10;
+/* One "GB" as the user's OS reports it. Windows Explorer and `df -h` both
+   divide by 1024^3 and label the result "GB", so a decimal 1e9 divisor here
+   printed a free-space figure ~7.4% HIGHER than the number the user can see
+   in their own file manager. guiutil.cpp:1009 already divides by
+   1024^3; these now agree. */
+static const uint64_t GB_BYTES = 1024LL * 1024 * 1024;
+/* Minimum free space (in GiB) needed for data directory.
+   MEASURED on mainnet at height 1,889,942 (2026-08-29): blk*.dat 1.61 GiB +
+   rev*.dat 0.25 GiB = 1.85 GiB of prunable block and undo data. The old value
+   of 14 was inherited, never rescaled for this chain, and overstated it ~7x.
+   Sized with headroom: at 60s spacing and current block sizes (198-1,220
+   bytes) this grows roughly 0.6 GiB/year. */
+static const uint64_t BLOCK_CHAIN_SIZE = 3;
+/* Minimum free space (in GiB) needed for data directory when pruned; does not
+   include the prune target. This is everything pruning does NOT reclaim, and
+   on this chain that is more than upstream's chainstate: MEASURED at the same
+   height, blocks/index 0.29 GiB + blocks/sidechain 0.65 GiB + blocks/opreturn
+   0.23 GiB + chainstate 0.12 GiB = 1.29 GiB. The two Drivechain-only stores
+   (sidechain, opreturn) are ~27% of the datadir and upstream has no constant
+   for them, so the old value of 1 UNDERstated this side. */
+static const uint64_t CHAIN_STATE_SIZE = 2;
 /* Total required space (in GB) depending on user choice (prune, not prune) */
 static uint64_t requiredSpace;
 

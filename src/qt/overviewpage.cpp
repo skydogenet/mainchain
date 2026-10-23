@@ -287,7 +287,7 @@ void OverviewPage::setBalance(const CAmount& balance, const CAmount& unconfirmed
 
     CAmount total = balance + unconfirmedBalance + immatureBalance + watchOnlyBalance + watchUnconfBalance + watchImmatureBalance;
     int nUSDBTC = walletModel->getOptionsModel()->getUSDBTC();
-    ui->labelUSDBTC->setText("$" + QLocale(QLocale::English).toString(nUSDBTC) + "/BTC");
+    ui->labelUSDBTC->setText("$" + QLocale(QLocale::English).toString(nUSDBTC) + " / 1 SKYDOGE");
     ui->labelUSDBTCTotal->setText("$" + QLocale(QLocale::English).toString(ConvertToFiat(total, nUSDBTC), 'f', 0));
 
     // only show immature (newly mined) balance if it's non-zero, so as not to complicate things
@@ -335,6 +335,14 @@ void OverviewPage::setClientModel(ClientModel *model)
 void OverviewPage::setWalletModel(WalletModel *model)
 {
     this->walletModel = model;
+
+    // The news and message composers need this to prompt for the passphrase
+    // when the wallet is encrypted; without it they can only refuse.
+    if (createNewsDialog)
+        createNewsDialog->setWalletModel(model);
+    if (opReturnDialog)
+        opReturnDialog->setWalletModel(model);
+
     if(model && model->getOptionsModel())
     {
         // Keep up to date with wallet

@@ -14,6 +14,7 @@
 #include <qt/newstablemodel.h>
 #include <qt/newstypestablemodel.h>
 #include <qt/platformstyle.h>
+#include <qt/walletmodel.h>
 
 #include <QMessageBox>
 
@@ -36,6 +37,11 @@ CreateNewsDialog::~CreateNewsDialog()
     delete ui;
 }
 
+void CreateNewsDialog::setWalletModel(WalletModel* model)
+{
+    walletModel = model;
+}
+
 void CreateNewsDialog::on_pushButtonCreate_clicked()
 {
     if (!newsTypesModel)
@@ -52,7 +58,7 @@ void CreateNewsDialog::on_pushButtonCreate_clicked()
     // Show confirmation dialog
     int nRes = QMessageBox::question(this, tr("Confirm news broadcast"),
         tr("Are you sure you want to spend %1 to broadcast this news?").arg(strFee),
-        QMessageBox::Ok, QMessageBox::Cancel);
+        QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Cancel);
 
     if (nRes == QMessageBox::Cancel)
         return;
@@ -65,12 +71,22 @@ void CreateNewsDialog::on_pushButtonCreate_clicked()
         return;
     }
 
+    // Ask for the passphrase if the wallet is encrypted, rather than refusing.
+    // The context relocks the wallet when it goes out of scope, so it has to
+    // outlive the transaction below; an invalid one means the user cancelled or
+    // mistyped, and they have already been told, so just stop.
+    std::unique_ptr<WalletModel::UnlockContext> unlockContext;
     if (vpwallets[0]->IsLocked()) {
-        // Locked wallet message box
-        messageBox.setWindowTitle("Wallet locked!");
-        messageBox.setText("Wallet must be unlocked to create transactions.");
-        messageBox.exec();
-        return;
+        if (!walletModel) {
+            messageBox.setWindowTitle("Wallet locked!");
+            messageBox.setText("Wallet must be unlocked to create transactions.");
+            messageBox.exec();
+            return;
+        }
+
+        unlockContext.reset(new WalletModel::UnlockContext(walletModel->requestUnlock()));
+        if (!unlockContext->isValid())
+            return;
     }
 
     // Lookup selected type
@@ -98,6 +114,10 @@ void CreateNewsDialog::on_pushButtonCreate_clicked()
 
     CTransactionRef tx;
     std::string strFail = "";
+    // Holding no locks here, which is the only safe place to do this - see
+    // CWallet::CreateSidechainDeposit.
+    vpwallets[0]->BlockUntilSyncedToCurrentChain();
+
     if (!vpwallets[0]->CreateOPReturnTransaction(tx, strFail, nFee, script))
     {
         messageBox.setWindowTitle("Creating transaction failed!");

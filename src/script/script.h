@@ -645,17 +645,21 @@ public:
     bool IsPayToWitnessScriptHash() const;
     bool IsWitnessProgram(int& version, std::vector<unsigned char>& program) const;
 
-    /** Script formats for old DC */
-    //bool IsCriticalHashCommit(uint256& hash) const;
-    /** Script formats for old DC */
-    bool IsSCDBHashMerkleRootCommit(uint256& hashMerkleRoot) const;
+
     /** Script formats for Drivechains */
     bool IsDrivechain(uint8_t& nSidechain) const;
     bool IsCriticalHashCommit(uint256& hash, std::vector<unsigned char>& vBytes) const;
     bool IsWithdrawalHashCommit(uint256& hash, uint8_t& nSidechain) const;
+    //! A BMM bid's commitment to its own h*, carried in the SIGNED part of the
+    //! request: OP_RETURN <36-byte push = 0xD1 'b' 'i' 'd' + hashCritical>.
+    //! criticalData itself is covered by no signature and no txid, so this is
+    //! the only thing that ties a bid to the hash it pays for. Built by
+    //! BMMBidCommitScript(), checked against criticalData by relay policy.
+    bool IsBMMBidCommit(uint256& hash) const;
     bool IsSidechainProposalCommit() const;
     bool IsSidechainActivationCommit(uint256& hashSidechain) const;
     bool IsSCDBBytes() const;
+    bool IsSCDBHashCommit(uint256& hashCommitment) const;
 
     /** News OP_RETURN script types */
     bool IsNewsUSDay() const;
@@ -710,5 +714,8 @@ public:
     CReserveScript() {}
     virtual ~CReserveScript() {}
 };
+
+/** The signed h* commitment output a BMM request carries; see CScript::IsBMMBidCommit. */
+CScript BMMBidCommitScript(const uint256& hashCritical);
 
 #endif // BITCOIN_SCRIPT_SCRIPT_H

@@ -44,6 +44,9 @@ ClientModel::ClientModel(OptionsModel *_optionsModel, QObject *parent) :
 {
     cachedBestHeaderHeight = -1;
     cachedBestHeaderTime = -1;
+    cachedNumBlocks = -1;
+    cachedTipBlockTime = -1;
+    cachedVerificationProgress = 0.0;
     peerTableModel = new PeerTableModel(this);
     banTableModel = new BanTableModel(this);
     pollTimer = new QTimer(this);
@@ -85,17 +88,25 @@ int ClientModel::getNumConnections(unsigned int flags) const
 
 int ClientModel::getNumBlocks() const
 {
-    LOCK(cs_main);
-    return chainActive.Height();
+    // Served from a cache kept fresh by BlockTipChanged. Only take the lock to
+    // seed the cache the first time, and even then never block the GUI thread:
+    // if cs_main is busy (e.g. mid-IBD) report the cached value and let the
+    // next tip notification fill it in.
+    if (cachedNumBlocks == -1) {
+        TRY_LOCK(cs_main, lockMain);
+        if (lockMain)
+            cachedNumBlocks = chainActive.Height();
+    }
+    return cachedNumBlocks;
 }
 
 int ClientModel::getHeaderTipHeight() const
 {
     if (cachedBestHeaderHeight == -1) {
-        // make sure we initially populate the cache via a cs_main lock
-        // otherwise we need to wait for a tip update
-        LOCK(cs_main);
-        if (pindexBestHeader) {
+        // make sure we initially populate the cache, but without blocking the
+        // GUI thread; otherwise we just wait for the next tip update
+        TRY_LOCK(cs_main, lockMain);
+        if (lockMain && pindexBestHeader) {
             cachedBestHeaderHeight = pindexBestHeader->nHeight;
             cachedBestHeaderTime = pindexBestHeader->GetBlockTime();
         }
@@ -106,8 +117,8 @@ int ClientModel::getHeaderTipHeight() const
 int64_t ClientModel::getHeaderTipTime() const
 {
     if (cachedBestHeaderTime == -1) {
-        LOCK(cs_main);
-        if (pindexBestHeader) {
+        TRY_LOCK(cs_main, lockMain);
+        if (lockMain && pindexBestHeader) {
             cachedBestHeaderHeight = pindexBestHeader->nHeight;
             cachedBestHeaderTime = pindexBestHeader->GetBlockTime();
         }
@@ -131,10 +142,16 @@ quint64 ClientModel::getTotalBytesSent() const
 
 QDateTime ClientModel::getLastBlockDate() const
 {
-    LOCK(cs_main);
+    // Served from the tip cache kept fresh by BlockTipChanged. Seed it once
+    // without blocking the GUI thread on cs_main.
+    if (cachedTipBlockTime != -1)
+        return QDateTime::fromTime_t(cachedTipBlockTime);
 
-    if (chainActive.Tip())
-        return QDateTime::fromTime_t(chainActive.Tip()->GetBlockTime());
+    TRY_LOCK(cs_main, lockMain);
+    if (lockMain && chainActive.Tip()) {
+        cachedTipBlockTime = chainActive.Tip()->GetBlockTime();
+        return QDateTime::fromTime_t(cachedTipBlockTime);
+    }
 
     return QDateTime::fromTime_t(Params().GenesisBlock().GetBlockTime()); // Genesis block's time of current network
 }
@@ -154,14 +171,33 @@ double ClientModel::getVerificationProgress(const CBlockIndex *tipIn) const
     CBlockIndex *tip = const_cast<CBlockIndex *>(tipIn);
     if (!tip)
     {
-        LOCK(cs_main);
+        // Never block the GUI thread here; the tip is normally supplied by the
+        // caller (BlockTipChanged / numBlocksChanged), so a busy cs_main just
+        // means we briefly report the last known progress.
+        TRY_LOCK(cs_main, lockMain);
+        if (!lockMain)
+            return cachedVerificationProgress;
         tip = chainActive.Tip();
     }
-    return GuessVerificationProgress(Params().TxData(), tip);
+    double progress = GuessVerificationProgress(Params().TxData(), tip);
+    cachedVerificationProgress = progress;
+    return progress;
 }
 
 void ClientModel::updateTimer()
 {
+    // The block-count/date/progress caches are seeded opportunistically with a
+    // TRY_LOCK so the GUI thread never blocks on cs_main. If that first attempt
+    // loses the race the cache still holds its sentinel, and the widgets that
+    // were drawn once at start-up would keep showing "Block -1" until the next
+    // tip notification (a minute or more on mainnet). Retry here, and announce
+    // the values as soon as they become available.
+    if (cachedNumBlocks == -1) {
+        const int nBlocks = getNumBlocks();
+        if (nBlocks != -1)
+            Q_EMIT numBlocksChanged(nBlocks, getLastBlockDate(), getVerificationProgress(nullptr), false);
+    }
+
     // no locking required at this point
     // the following calls will acquire the required lock
     Q_EMIT mempoolSizeChanged(getMempoolSize(), getMempoolDynamicUsage());
@@ -283,16 +319,29 @@ void ClientModel::StopIgnoredBlockChangeTimer()
 void ClientModel::updateIgnoredBlockChanges()
 {
     // Check if any block count updates were held back and send it now unless
-    // the current state is newer.
-    if (cachedBestHeaderHeight > 0 &&
-            lastIgnoredBlockChange.count == cachedBestHeaderHeight) {
-        Q_EMIT numBlocksChanged(lastIgnoredBlockChange.count,
-                lastIgnoredBlockChange.date,
-                lastIgnoredBlockChange.nVerificationProgress,
-                lastIgnoredBlockChange.fHeader);
+    // the current state is newer. The held update is written from the
+    // validation thread under blockChangeMutex; date is implicitly shared, so
+    // reading or clearing it without the same lock races the writer. Snapshot
+    // and clear under the lock, and emit only after releasing it so no slot
+    // ever runs while the validation thread is blocked on the mutex.
+    int count;
+    QDateTime date;
+    double nVerificationProgress;
+    bool fHeader;
+    {
+        std::lock_guard<std::mutex> lock(blockChangeMutex);
+        const bool fSend = cachedBestHeaderHeight > 0 &&
+                lastIgnoredBlockChange.count == cachedBestHeaderHeight;
+        count = lastIgnoredBlockChange.count;
+        date = lastIgnoredBlockChange.date;
+        nVerificationProgress = lastIgnoredBlockChange.nVerificationProgress;
+        fHeader = lastIgnoredBlockChange.fHeader;
+        lastIgnoredBlockChange.clear();
+        if (!fSend)
+            return;
     }
 
-    lastIgnoredBlockChange.clear();
+    Q_EMIT numBlocksChanged(count, date, nVerificationProgress, fHeader);
 }
 
 void ClientModel::updateBanlist()
@@ -336,19 +385,73 @@ static void BannedListChanged(ClientModel *clientmodel)
 
 static void BlockTipChanged(ClientModel *clientmodel, bool initialSync, const CBlockIndex *pIndex, bool fHeader)
 {
-    // lock free async UI updates in case we have a new block tip
-    // during initial sync, only update the UI if the last update
-    // was > 250ms (MODEL_UPDATE_DELAY) ago. If an update is ignored
-    // it will be cached and sent later
+
     int64_t now = 0;
     if (initialSync)
         now = GetTimeMillis();
 
-    // Once we are synchronized we can stop the ignored block changes timer
-    if (!initialSync)
-        clientmodel->StopIgnoredBlockChangeTimer();
+    // Keep the active-tip caches fresh on every block-tip notification (this
+    // runs off the GUI thread with the tip already in hand), so the GUI-thread
+    // getters can serve height/time/progress without ever taking cs_main.
+    if (!fHeader) {
+        clientmodel->cachedNumBlocks = pIndex->nHeight;
+        clientmodel->cachedTipBlockTime = pIndex->GetBlockTime();
+    }
 
     int64_t& nLastUpdateNotification = fHeader ? nLastHeaderTipUpdateNotification : nLastBlockTipUpdateNotification;
+
+    if (initialSync && !fHeader) {
+        if (now - nLastUpdateNotification > MODEL_UPDATE_DELAY) {
+            QMetaObject::invokeMethod(clientmodel, "numBlocksChangedIBD", Qt::QueuedConnection,
+                    Q_ARG(int, pIndex->nHeight),
+                    Q_ARG(double, clientmodel->getVerificationProgress(pIndex)));
+
+            nLastUpdateNotification = now;
+        } else {
+            // Hold the update for the timer rather than dropping it, as the
+            // out-of-sync path below already does. The last block of a sync or
+            // a reindex arrives while this is still the initial-sync path, and
+            // if it lands inside the throttle window its update was discarded.
+            // Nothing then replaced it: the interface only recomputes whether
+            // the node is caught up when a new tip arrives, so on a chain that
+            // is not currently producing blocks it went on reporting a sync in
+            // progress indefinitely, for a node that was in fact at the tip.
+            // The timer's own condition - that the held count has reached the
+            // best header - is what decides whether this gets delivered.
+            clientmodel->UpdateBlockCountLater(pIndex->nHeight,
+                    QDateTime::fromTime_t(pIndex->GetBlockTime()),
+                    clientmodel->getVerificationProgress(pIndex),
+                    fHeader);
+        }
+        return;
+    }
+
+    if (initialSync && fHeader) {
+        // Record the header tip before returning. Throttling the *notification*
+        // during initial sync is deliberate - headers arrive far faster than the
+        // interface can usefully repaint - but returning before the cache is
+        // written left the getter serving whatever value it was seeded with on
+        // its first call, so the interface reported a header height frozen near
+        // where the sync began while the node had in fact fetched the entire
+        // header chain. Update the cache, then throttle.
+        clientmodel->cachedBestHeaderHeight = pIndex->nHeight;
+        clientmodel->cachedBestHeaderTime = pIndex->GetBlockTime();
+        return;
+    }
+
+
+    // Once we are synchronized we can stop the ignored block changes timer.
+    //
+    // Queued, not called directly. This function runs on the validation thread
+    // - which is why every other hand-off below goes through invokeMethod - and
+    // ignoredBlockChangeTimer belongs to the GUI thread. Qt refuses to stop a
+    // timer from any other thread: the call did nothing except print
+    // "QObject::killTimer: Timers cannot be stopped from another thread", so
+    // the timer in fact kept running for the life of the process, and this
+    // touched a QObject across threads on every block after the node caught up.
+    if (!initialSync)
+        QMetaObject::invokeMethod(clientmodel, "StopIgnoredBlockChangeTimer", Qt::QueuedConnection);
+
 
     if (fHeader) {
         // cache best headers time and height to reduce future cs_main locks

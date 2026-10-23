@@ -31,10 +31,10 @@ class SidechainPage;
 class SidechainWithdrawalTableModel;
 class MemPoolTableModel;
 class MiningDialog;
-class WalletFrame;
-class WalletModel;
 class MultisigLoungeDialog;
 class PaperWalletDialog;
+class WalletFrame;
+class WalletModel;
 class HelpMessageDialog;
 class ModalOverlay;
 class HashCalcDialog;
@@ -44,7 +44,11 @@ class DenialDialog;
 
 QT_BEGIN_NAMESPACE
 class QAction;
+class QActionGroup;
+class QMenu;
+class QProgressBar;
 class QTimer;
+class QToolButton;
 QT_END_NAMESPACE
 
 /**
@@ -102,8 +106,11 @@ private:
     QLabel *labelProgressPercentage;
     QLabel *labelNumBlocks;
     QLabel *labelLastBlock;
+    QLabel *labelMempool = nullptr;
+    QProgressBar *syncProgressBar = nullptr;
 
     QMenuBar *appMenuBar;
+    QActionGroup *themeActionGroup;
     QAction *overviewAction;
     QAction *historyAction;
     QAction *quitAction;
@@ -195,6 +202,33 @@ private:
     void createMenuBar();
     /** Create the toolbars */
     void createToolBars();
+    /** Tint the left-rail navigation icons to the accent of the given theme */
+    void applyNavIconTheme(const QString &themeId);
+
+    /** Build a frameless, theme-coloured custom title bar (non-macOS). */
+    void setupCustomTitleBar(const NetworkStyle *networkStyle);
+    QWidget *titleBar = nullptr;
+    QLabel *titleBarLabel = nullptr;
+    QLabel *networkBadge = nullptr;
+    QPoint titleDragOffset;
+    bool titleDragging = false;
+
+    // Live status shown at the bottom of the left nav rail
+    QLabel *navFooterBlock = nullptr;
+    QLabel *navFooterPeers = nullptr;
+    bool nodeSynced = false;
+    /** Refresh the peers/synced parts of the rail footer + status-bar cluster */
+    void refreshNavFooterPeers();
+
+    // Visible theme picker in the nav rail (shares the "This Node" theme menu)
+    QMenu *themeMenu = nullptr;
+    QToolButton *navThemeButton = nullptr;
+
+    // Bottom status-bar left cluster: dot · sync · headers · peers · mempool
+    QLabel *statusDot = nullptr;
+    QLabel *statusSync = nullptr;
+    QLabel *statusHeaders = nullptr;
+    QLabel *statusPeers = nullptr;
     /** Create system tray icon and notification */
     void createTrayIcon(const NetworkStyle *networkStyle);
     /** Create system tray menu (or setup the dock menu) */
@@ -227,6 +261,9 @@ public Q_SLOTS:
     /** Set number of blocks and last block date shown in the UI */
     void setNumBlocks(int count, const QDateTime& blockDate, double nVerificationProgress, bool headers);
 
+    /** Special high performance version for IBD */
+    void setNumBlocksIBD(int count, double nVerificationProgress);
+
     /** Notify the user of an event from the core network or transaction handling code.
        @param[in] title     the message box / notification title
        @param[in] message   the displayed text
@@ -235,9 +272,6 @@ public Q_SLOTS:
        @param[in] ret       pointer to a bool that will be modified to whether Ok was clicked (modal only)
     */
     void message(const QString &title, const QString &message, unsigned int style, bool *ret = nullptr);
-
-    /** Set the theme to the user's setting during init */
-    void initTheme();
 
 #ifdef ENABLE_WALLET
     /** Set the encryption status as shown in the UI.
@@ -253,6 +287,8 @@ public Q_SLOTS:
 #endif // ENABLE_WALLET
 
 private Q_SLOTS:
+    /** Toggle maximize / restore for the frameless window */
+    void toggleMaximize();
 #ifdef ENABLE_WALLET
     /** Switch to overview (home) page */
     void gotoOverviewPage();
@@ -384,8 +420,11 @@ private Q_SLOTS:
     /** Toggle networking */
     void toggleNetworkActive();
 
-    /** Update the theme */
-    void updateTheme(int nTheme);
+    /** Set the theme when one of the theme menu actions is triggered */
+    void themeActionTriggered(QAction *action);
+
+    /** Check the action of the current theme in the theme menu */
+    void updateThemeMenu(const QString &theme);
 
     /** Refresh the last block time */
     void updateBlockTime();

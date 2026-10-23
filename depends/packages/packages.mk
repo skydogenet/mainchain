@@ -1,8 +1,12 @@
-packages:=boost openssl libevent zeromq
+packages:=boost openssl libevent
+zmq_packages=zeromq
 native_packages := native_ccache
 
-qt_native_packages = native_protobuf
-qt_packages = qrencode protobuf zlib
+# No native package is needed for the GUI: protobuf was here for BIP70, which
+# this release removed, and nothing in configure.ac, Makefile.am or
+# Makefile.qt.include has referenced it since.
+qt_native_packages =
+qt_packages = qrencode zlib
 
 qt_x86_64_linux_packages:=qt expat dbus libxcb xcb_proto libXau xproto freetype fontconfig libX11 xextproto libXext xtrans
 qt_i686_linux_packages:=$(qt_x86_64_linux_packages)

@@ -68,6 +68,7 @@ The Bitcoin repo's [root README](/README.md) contains relevant information on th
 * Discuss general Bitcoin development on #bitcoin-dev on Freenode. If you don't have an IRC client use [webchat here](http://webchat.freenode.net/?channels=bitcoin-dev).
 
 ### Miscellaneous
+- [Mining Pool Integration](pool-integration.md)
 - [Assets Attribution](assets-attribution.md)
 - [Files](files.md)
 - [Fuzz-testing](fuzzing.md)

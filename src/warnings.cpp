@@ -72,12 +72,6 @@ std::string GetWarnings(const std::string& strFor)
         strGUI += (strGUI.empty() ? "" : uiAlertSeperator) + _("Warning: We do not appear to fully agree with our peers! You may need to upgrade, or other nodes may need to upgrade.");
     }
 
-    // Always show this warning:
-    std::string strTestDrive = "This is experimental sidechain software. " \
-                                " Use at your own risk!";
-    strStatusBar = strRPC = strTestDrive;
-    strGUI += (strGUI.empty() ? "" : uiAlertSeperator) + _(strTestDrive.c_str());
-
     if (strFor == "gui")
         return strGUI;
     else if (strFor == "statusbar")

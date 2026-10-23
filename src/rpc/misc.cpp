@@ -6,6 +6,7 @@
 #include <base58.h>
 #include <chain.h>
 #include <clientversion.h>
+#include <consensus/merkle.h>
 #include <consensus/validation.h>
 #include <core_io.h>
 #include <crypto/ripemd160.h>
@@ -25,6 +26,7 @@
 #include <util.h>
 #include <utilmoneystr.h>
 #include <utilstrencodings.h>
+#include <miner.h>
 #include <validation.h>
 #ifdef ENABLE_WALLET
 #include <wallet/coincontrol.h>
@@ -33,6 +35,8 @@
 #include <wallet/walletdb.h>
 #endif
 #include <warnings.h>
+
+#include <boost/thread/thread.hpp> // boost::this_thread::interruption_point
 
 #include <stdint.h>
 #ifdef HAVE_MALLOC_INFO
@@ -695,6 +699,16 @@ UniValue listsidechainctip(const JSONRPCRequest& request)
 
     // Is nSidechain valid?
     int nSidechain = request.params[0].get_int();
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+
+    // Security fix (SCDB read race): the global scdb is move-assigned wholesale
+    // by ConnectBlock under cs_main, so every read of it must hold cs_main too.
+    LOCK(cs_main);
+
     if (!scdb.IsSidechainActive(nSidechain))
         throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
 
@@ -780,6 +794,11 @@ UniValue listsidechaindeposits(const JSONRPCRequest& request)
     UniValue arr(UniValue::VARR);
 
 #ifdef ENABLE_WALLET
+    // Security fix (SCDB read race): the global scdb is move-assigned wholesale
+    // by ConnectBlock under cs_main, so hold cs_main across the deposit read and
+    // the mapBlockIndex lookups in the loop below (which also require it).
+    LOCK(cs_main);
+
     std::vector<SidechainDeposit> vDeposit = scdb.GetDeposits(nSidechain);
 
     for (auto rit = vDeposit.crbegin(); rit != vDeposit.crend(); rit++) {
@@ -799,8 +818,6 @@ UniValue listsidechaindeposits(const JSONRPCRequest& request)
         uint256 txid = d.tx.GetHash();
         std::set<uint256> setTxids;
         setTxids.insert(txid);
-
-        LOCK(cs_main);
 
         BlockMap::iterator it = mapBlockIndex.find(d.hashBlock);
         if (it == mapBlockIndex.end()) {
@@ -870,6 +887,16 @@ UniValue countsidechaindeposits(const JSONRPCRequest& request)
 
     // Is nSidechain valid?
     int nSidechain = request.params[0].get_int();
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+
+    // Security fix (SCDB read race): the global scdb is move-assigned wholesale
+    // by ConnectBlock under cs_main, so every read of it must hold cs_main too.
+    LOCK(cs_main);
+
     if (!scdb.IsSidechainActive(nSidechain))
         throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number");
 
@@ -896,8 +923,27 @@ UniValue addwithdrawal(const JSONRPCRequest& request)
             + HelpExampleRpc("addwithdrawal", "")
     );
 
+    // Testing only, and enforced rather than advisory: this writes straight
+    // into the global sidechain database with no block behind it, so on a real
+    // network it would leave this node's consensus state disagreeing with every
+    // peer's. Same gate as setmocktime.
+    if (!Params().MineBlocksOnDemand())
+        throw std::runtime_error("addwithdrawal is for regression testing (-regtest mode) only");
+
     // Is nSidechain valid?
     int nSidechain = request.params[0].get_int();
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+
+    // Block connection copies the SCDB, mutates the copy, and publishes it back
+    // wholesale, so an SCDB write made from this thread while that is in flight
+    // would be discarded without any error being reported. Hold cs_main across
+    // the read-modify-write (chainActive is read below and needs it regardless).
+    LOCK(cs_main);
+
     if (!scdb.IsSidechainActive(nSidechain)) {
         std::string strError = "Invalid sidechain number!";
         LogPrintf("%s: %s\n", __func__, strError);
@@ -911,7 +957,11 @@ UniValue addwithdrawal(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_MISC_ERROR, strError);
     }
 
-    if (!scdb.AddWithdrawal(nSidechain, hash, true /* fDebug */)) {
+    // Pass an explicit height so the new nHeight parameter is not silently
+    // bound from the bool literal (which would seed legacy params and drop
+    // fDebug). This RPC seeds SCDB state, so it must use the height whose
+    // rules apply to the next block.
+    if (!scdb.AddWithdrawal(nSidechain, hash, chainActive.Height() + 1, true /* fDebug */)) {
         std::string strError = "Failed to add withdrawal!";
         LogPrintf("%s: %s\n", __func__, strError);
         throw JSONRPCError(RPC_MISC_ERROR, strError);
@@ -953,6 +1003,18 @@ UniValue receivewithdrawalbundle(const JSONRPCRequest& request)
 
     // Is nSidechain valid?
     int nSidechain = request.params[0].get_int();
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+
+    // Block connection copies the SCDB, mutates the copy, and publishes it back
+    // wholesale, so a bundle cached from this thread while that is in flight
+    // would be dropped even though this call reported success. Hold cs_main
+    // across the whole read-modify-write.
+    LOCK(cs_main);
+
     if (!scdb.IsSidechainActive(nSidechain)) {
         strError = "Invalid sidechain number!";
         LogPrintf("%s: %s\n", __func__, strError);
@@ -974,6 +1036,34 @@ UniValue receivewithdrawalbundle(const JSONRPCRequest& request)
         strError = "Invalid withdrawal hex";
         LogPrintf("%s: %s\n", __func__, strError);
         throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+
+    // The bundle is
+    // cached, committed and voted on by its own hash, but a payout is approved
+    // by CTransaction::GetBlindHash(payout). CreateWithdrawalPayout builds the
+    // payout as version 2, lock time 0, the treasury input (final sequence),
+    // the bundle's outputs and then the change return; GetBlindHash replaces
+    // the inputs with one default input (null outpoint, final sequence) whose
+    // scriptSig is OP_0 and pops the change return. So the only bundle that
+    // can ever be paid is exactly that form. A bundle in any other form would
+    // gather votes for the whole period and then be skipped by every miner
+    // until it failed - refused here instead. RPC policy only, no consensus
+    // change; not suspended by -drivechainpolicybypass, because such a bundle
+    // is unpayable under every rule set.
+    {
+        CMutableTransaction canon;
+        canon.nVersion = 2;
+        canon.nLockTime = 0;
+        canon.vin.resize(1);
+        canon.vin[0].scriptSig = CScript() << OP_0;
+        canon.vout = mtx.vout;
+        if (CTransaction(canon).GetHash() != withdrawal.GetHash()) {
+            strError = "Rejecting withdrawal: not in the canonical bundle form (version 2, lock time 0, "
+                       "one input with a null outpoint, scriptSig OP_0 and the final sequence, then the "
+                       "bundle outputs) - it could be voted on but never paid out";
+            LogPrintf("%s: %s\n", __func__, strError);
+            throw JSONRPCError(RPC_INVALID_PARAMETER, strError);
+        }
     }
 
     // Reject the withdrawal if it spends more than the sidechain's CTIP as it won't
@@ -1031,6 +1121,108 @@ UniValue receivewithdrawalbundle(const JSONRPCRequest& request)
         break;
     }
 
+    // The payout is assembled by the miner, which appends the sidechain change
+    // return output and the CTIP input itself. So a bundle must arrive with
+    // neither: the destinations, the encoded fee and the "D" output only.
+    //
+    // A bundle that already carries a sidechain output produces a payout with two
+    // of them, whose value exceeds the CTIP. Nothing rejects that until a block
+    // template is assembled, and there it surfaces as a TestBlockValidity failure
+    // that aborts CreateNewBlock - which stops the node producing blocks at all,
+    // for any purpose, and survives restart because the bundle is written to
+    // withdrawal.dat. Catch it here instead, where the error can be reported to
+    // whoever submitted it.
+    for (const CTxOut& out : withdrawal.vout) {
+        uint8_t nSidechainOut;
+        if (out.scriptPubKey.IsDrivechain(nSidechainOut)) {
+            strError = "Rejecting Withdrawal: bundle must not contain a sidechain change output - the payout adds it!";
+            LogPrintf("%s: %s\n", __func__, strError);
+            throw JSONRPCError(RPC_MISC_ERROR, strError);
+        }
+    }
+
+    // The amount check above compares only the outputs against the CTIP. The
+    // payout also has to cover the mainchain fees encoded in the second output,
+    // so verify the whole sum closes before the bundle is cached. Both figures
+    // are already known here.
+    if (withdrawal.vout.size() < 3) {
+        strError = "Rejecting Withdrawal: too few outputs - expected the return destination, the encoded fee, and at least one payout!";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+    CAmount amountBundleFees = 0;
+    if (!DecodeWithdrawalFees(withdrawal.vout[1].scriptPubKey, amountBundleFees)) {
+        strError = "Rejecting Withdrawal: could not decode the mainchain fee output!";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+    // Escrow rules (BIP300 796c80eb): the fee output must be zero-value. From
+    // EscrowRulesHeight a payout of such a bundle is invalid, so caching it
+    // would only collect votes for a bundle that can never be paid. Refused
+    // regardless of height - every honest bundle builder writes 0 here.
+    // Node-local policy, suspended by -drivechainpolicybypass (regtest only).
+    if (withdrawal.vout[1].nValue != 0 && !fDrivechainPolicyBypass) {
+        strError = "Rejecting Withdrawal: the mainchain fee output must carry no value!";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+    // The change requirement - and only that requirement, the range checks
+    // beside it stand either way - is suspended by -drivechainpolicybypass.
+    // This guard is node-local RPC policy, and the bundle it refuses reaches a
+    // cooperating miner as raw bytes without passing through here at all, so a
+    // test that has to ask what the layers behind it do needs the bundle
+    // cached exactly as LoadWithdrawalCache would cache one. Regtest only.
+    if (!MoneyRange(amountBundleFees) || !MoneyRange(amount) ||
+            amount > MAX_MONEY - amountBundleFees ||
+            (amount + amountBundleFees >= ctip.amount && !fDrivechainPolicyBypass)) {
+        // Equality is refused as well as excess: a bundle that takes the whole
+        // treasury would leave a zero-value change output, which would close
+        // the sidechain's peg. Leave a remainder instead.
+        strError = "Rejecting Withdrawal: withdrawn amount plus mainchain fees "
+                   "must leave a non-zero change output - a bundle that empties "
+                   "the treasury would close the sidechain's peg permanently.";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+
+    // Small-block soft fork: bundles that cannot fit in a 50 KB block will
+    // never be paid out - reject them at ingestion so the sidechain can split
+    // the withdrawal into smaller bundles instead of stalling. (This check is
+    // deliberately not in CacheWithdrawalTx itself: LoadWithdrawalCache must
+    // still be able to reload legacy oversized bundles from disk.)
+    //
+    // Gated on the same activation height as every other small-block rule. The
+    // rule is deferred, so until the flag day the block size limit is unchanged
+    // and a larger bundle is still perfectly payable; rejecting it early would
+    // stall withdrawals that the rest of the network happily pays out.
+    const int nNextHeight = chainActive.Height() + 1;
+    if (nNextHeight >= Params().GetConsensus().SmallBlockHeight &&
+            ::GetSerializeSize(withdrawal, SER_NETWORK, PROTOCOL_VERSION) > SIDECHAIN_MAX_WITHDRAWAL_BUNDLE_BYTES) {
+        strError = strprintf("Rejecting Withdrawal: bundle is larger than %u bytes and could never be paid out in a small block!", SIDECHAIN_MAX_WITHDRAWAL_BUNDLE_BYTES);
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+    // The fixed cap above is the most a bundle may ever be; the room actually
+    // left for a payout is smaller, and shrinks with every active sidechain
+    // and pending proposal the coinbase must carry commitments for. A bundle
+    // that passes the fixed cap but not the live room would be cached, voted
+    // to the threshold, and then deferred by the assembler on every block
+    // ("no room in small block") - and because each block's vote for a slot
+    // downvotes every other withdrawal of that slot, nothing smaller could
+    // overtake it until it expired. Refuse it at the door instead, with the
+    // number the sidechain has to fit under. Measured in the enforced
+    // (charged) measure, as the assembler budgets.
+    if (nNextHeight >= Params().GetConsensus().SmallBlockHeight) {
+        const uint64_t nRoom = SmallBlockPayoutRoomBytes(nNextHeight);
+        const uint64_t nBundle = GetChargedSerializedSize(withdrawal);
+        if (nBundle > nRoom) {
+            strError = strprintf("Rejecting Withdrawal: bundle is %u bytes but at most %u bytes can be paid out beside the coinbase commitments of the %u active sidechains - split it",
+                                 nBundle, nRoom, scdb.GetActiveSidechainCount());
+            LogPrintf("%s: %s\n", __func__, strError);
+            throw JSONRPCError(RPC_MISC_ERROR, strError);
+        }
+    }
+
     // Add Withdrawal to our local cache so that we can create a Withdrawal hash commitment
     // in the next block we mine to begin the verification process
     if (!scdb.CacheWithdrawalTx(withdrawal, nSidechain)) {
@@ -1065,6 +1257,20 @@ UniValue verifybmm(const JSONRPCRequest& request)
     int nSidechain = request.params[2].get_int();
 
     // Is nSidechain valid?
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+
+    // Security fix (reorg-race crash + SCDB read race): hold cs_main across the
+    // scdb read below and the mapBlockIndex reads and ReadBlockFromDisk further
+    // down. The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, and a concurrent block connect/reorg can rehash mapBlockIndex or
+    // prune the CBlockIndex out from under this read (undefined behaviour /
+    // segfault) otherwise.
+    LOCK(cs_main);
+
     if (!scdb.IsSidechainActive(nSidechain)) {
         std::string strError = "Invalid sidechain number!";
         LogPrintf("%s: %s\n", __func__, strError);
@@ -1081,6 +1287,18 @@ UniValue verifybmm(const JSONRPCRequest& request)
     if (pblockindex == NULL)
     {
         std::string strError = "pblockindex null";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_MISC_ERROR, strError);
+    }
+
+    // A commitment only counts if the block
+    // carrying it is in the ACTIVE chain. mapBlockIndex also holds stale and
+    // invalid blocks (and ReadBlockFromDisk reads them), so a sidechain asking
+    // about a block that a reorg orphaned was told its h* was there - and a
+    // sidechain block whose commitment the mainchain no longer has stayed
+    // acceptable. RPC answer only, not consensus, no flag day.
+    if (!chainActive.Contains(pblockindex)) {
+        std::string strError = "Block not in active chain";
         LogPrintf("%s: %s\n", __func__, strError);
         throw JSONRPCError(RPC_MISC_ERROR, strError);
     }
@@ -1166,6 +1384,10 @@ UniValue verifydeposit(const JSONRPCRequest& request)
     uint256 txid = uint256S(request.params[1].get_str());
     int nTx = request.params[2].get_int();
 
+    // Security fix (reorg-race crash): hold cs_main across the mapBlockIndex
+    // reads and ReadBlockFromDisk below (see verifybmm).
+    LOCK(cs_main);
+
     if (!mapBlockIndex.count(hashBlock)) {
         std::string strError = "Block not found";
         LogPrintf("%s: %s\n", __func__, strError);
@@ -1176,6 +1398,18 @@ UniValue verifydeposit(const JSONRPCRequest& request)
     if (pblockindex == NULL)
     {
         std::string strError = "pblockindex null";
+        LogPrintf("%s: %s\n", __func__, strError);
+        throw JSONRPCError(RPC_INTERNAL_ERROR, strError);
+    }
+
+    // A deposit is only real if the block carrying it is in the ACTIVE chain.
+    // mapBlockIndex also holds stale and invalid blocks, so without this a
+    // sidechain asking about a deposit in an orphaned block was answered with
+    // its txid, i.e. "valid". This is the one bind the sidechain's
+    // VerifyDeposit(hashMainBlock, txid, nTx) cannot make for itself, and the
+    // same check verifybmm-style callers already make for BMM commitments.
+    if (!chainActive.Contains(pblockindex)) {
+        std::string strError = "Block not in active chain";
         LogPrintf("%s: %s\n", __func__, strError);
         throw JSONRPCError(RPC_INTERNAL_ERROR, strError);
     }
@@ -1200,7 +1434,10 @@ UniValue verifydeposit(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_INTERNAL_ERROR, strError);
     }
 
-    if ((int)block.vtx.size() <= nTx) {
+    // Security fix: also reject a negative nTx, otherwise block.vtx[nTx] below
+    // is an out-of-bounds vector read (the upper-bound check alone let a
+    // negative index through).
+    if (nTx < 0 || (int)block.vtx.size() <= nTx) {
         std::string strError = "nTx out of range for block";
         LogPrintf("%s: %s\n", __func__, strError);
         throw JSONRPCError(RPC_INTERNAL_ERROR, strError);
@@ -1236,6 +1473,11 @@ UniValue listpreviousblockhashes(const JSONRPCRequest& request)
             + HelpExampleRpc("listpreviousblockhashes", "")
             );
 
+    // Security fix (reorg-race crash): hold cs_main across the chainActive
+    // reads so a concurrent reorg cannot shrink the chain between the height
+    // read and chainActive[i], which would return null and crash the node.
+    LOCK(cs_main);
+
     int nHeight = chainActive.Height();
     int nStart = nHeight - 4;
     if (!(nHeight > 0) || !(nStart > 0))
@@ -1269,6 +1511,12 @@ UniValue listactivesidechains(const JSONRPCRequest& request)
             + HelpExampleRpc("listactivesidechains", "")
             );
 
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
     std::vector<Sidechain> vActive = scdb.GetActiveSidechains();
     UniValue ret(UniValue::VARR);
     for (const Sidechain& s : vActive) {
@@ -1298,6 +1546,12 @@ UniValue listsidechainactivationstatus(const JSONRPCRequest& request)
             );
 
     std::vector<SidechainActivationStatus> vStatus;
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
     vStatus = scdb.GetSidechainActivationStatus();
 
     UniValue ret(UniValue::VARR);
@@ -1326,6 +1580,12 @@ UniValue listsidechainproposals(const JSONRPCRequest& request)
             + HelpExampleRpc("listsidechainproposals", "")
             );
 
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
     std::vector<Sidechain> vProposal = scdb.GetSidechainProposals();
     UniValue ret(UniValue::VARR);
     for (const Sidechain& s : vProposal) {
@@ -1342,12 +1602,98 @@ UniValue listsidechainproposals(const JSONRPCRequest& request)
     return ret;
 }
 
+
+UniValue acksidechain(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() == 0)
+        throw std::runtime_error(
+            "acksidechain\n"
+            "acksidechain sidechain proposals\n"
+            "\nArguments:\n"
+            "\nExamples:\n"
+            + HelpExampleCli("acksidechain", "")
+            + HelpExampleRpc("acksidechain", "")
+            );
+    uint256 strSChash = uint256S(request.params[0].get_str());
+
+    // The SCDB is republished wholesale on block connection; without cs_main
+    // this ACK can be discarded without the caller being told.
+    LOCK(cs_main);
+
+    scdb.CacheSidechainHashToAck(strSChash);
+
+    return NullUniValue;
+
+}
+
+UniValue nacksidechain(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() == 0)
+        throw std::runtime_error(
+            "nacksidechain\n"
+            "nacksidechain sidechain proposals\n"
+            "\nArguments:\n"
+            "\nExamples:\n"
+            + HelpExampleCli("nacksidechain", "")
+            + HelpExampleRpc("nacksidechain", "")
+            );
+    uint256 strSChash = uint256S(request.params[0].get_str());
+
+    // See acksidechain: needs cs_main so the removal is not silently reverted.
+    LOCK(cs_main);
+
+    scdb.RemoveSidechainHashToAck(strSChash);
+
+    return NullUniValue;
+
+}
+
+UniValue listhashsidechain(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 0)
+        throw std::runtime_error(
+            "listhashsidechain\n"
+            "listhashsidechain sidechain proposals\n"
+            "Lists the acksidechain RPC list only (not -acksidechainproposal), each hash\n"
+            "BYTE-REVERSED relative to getsidechainactivationstatus \"proposalhash\".\n"
+            "\nArguments:\n"
+            "\nExamples:\n"
+            + HelpExampleCli("listhashsidechain", "")
+            + HelpExampleRpc("listhashsidechain", "")
+            );
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
+    std::vector<uint256> vHash = scdb.GetSidechainsToActivate();
+    int longueur = vHash.size();  
+          UniValue ret(UniValue::VARR);     
+	for (int i = 0; i < longueur; i++) {
+
+       		 UniValue obj(UniValue::VOBJ);
+       		 obj.push_back(Pair("Hash" + std::to_string(i) + ": ", HexStr(vHash[i])));
+
+       		 ret.push_back(obj);
+    }
+
+
+    return ret;
+
+}
+
 UniValue getsidechainactivationstatus(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 1)
         throw std::runtime_error(
             "getsidechainactivationstatus\n"
             "List activation status for nSidechain.\n"
+            "\"proposalhash\" is the form -acksidechainproposal and acksidechain take\n"
+            "(listhashsidechain prints the same hash byte-reversed).\n"
+            "\"ackedbysetting\" is true if -acksidechainproposal names the proposal;\n"
+            "\"minerack\" is true if a block this node builds now acks it (for any reason:\n"
+            "-acksidechainproposal, the acksidechain list, or -activatesidechains).\n"
             "\nArguments:\n"
             "\nExamples:\n"
             + HelpExampleCli("getsidechainactivationstatus", "")
@@ -1355,6 +1701,12 @@ UniValue getsidechainactivationstatus(const JSONRPCRequest& request)
             );
 
     std::vector<SidechainActivationStatus> vStatus;
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
     vStatus = scdb.GetSidechainActivationStatus();
 
     UniValue ret(UniValue::VARR);
@@ -1365,10 +1717,49 @@ UniValue getsidechainactivationstatus(const JSONRPCRequest& request)
         obj.push_back(Pair("nage", s.nAge));
         obj.push_back(Pair("nfail", s.nFail));
         obj.push_back(Pair("proposalhash", s.proposal.GetSerHash().ToString()));
+        obj.push_back(Pair("ackedbysetting", IsConfiguredSidechainProposalAck(s.proposal.GetSerHash())));
+        obj.push_back(Pair("minerack", MinerAcksSidechainProposal(s.proposal.GetSerHash())));
 
         ret.push_back(obj);
     }
 
+    return ret;
+}
+
+UniValue listsidechainproposalacks(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 0)
+        throw std::runtime_error(
+            "listsidechainproposalacks\n"
+            "Diagnostic for -acksidechainproposal: one entry per configured value, saying\n"
+            "what it matches right now. No consensus effect.\n"
+            "\nResult:\n"
+            "[\n"
+            "  {\n"
+            "    \"hash\" : \"hex\",          (string) the configured value\n"
+            "    \"status\" : \"s\",          (string) \"pending\" (a pending proposal: the miner acks it),\n"
+            "                               \"active\" (that sidechain has activated: nothing left to ack),\n"
+            "                               \"reversed\" (matches nothing, but the byte-reversed form is a\n"
+            "                               pending proposal - the listhashsidechain byte order was given),\n"
+            "                               \"nomatch\" (matches no pending proposal and no active sidechain)\n"
+            "    \"proposalhash\" : \"hex\",  (string, \"reversed\" only) the value that should have been given\n"
+            "  }, ...\n"
+            "]\n"
+            "\nExamples:\n"
+            + HelpExampleCli("listsidechainproposalacks", "")
+            + HelpExampleRpc("listsidechainproposalacks", "")
+            );
+
+    LOCK(cs_main);
+    UniValue ret(UniValue::VARR);
+    for (const ConfiguredSidechainAckStatus& st : GetConfiguredSidechainProposalAckStatus()) {
+        UniValue obj(UniValue::VOBJ);
+        obj.push_back(Pair("hash", st.hash.ToString()));
+        obj.push_back(Pair("status", ConfiguredSidechainAckStatusName(st.status)));
+        if (st.status == ConfiguredSidechainAckStatus::REVERSED)
+            obj.push_back(Pair("proposalhash", st.hashMatch.ToString()));
+        ret.push_back(obj);
+    }
     return ret;
 }
 
@@ -1440,7 +1831,11 @@ UniValue createsidechainproposal(const JSONRPCRequest& request)
     if (!strHashID2.empty())
         proposal.hashID2 = uint160S(strHashID2);
 
-    // Cache proposal so that it can be added to the next block we mine
+    // Cache proposal so that it can be added to the next block we mine.
+    // cs_main: block connection republishes the SCDB wholesale, so an unlocked
+    // write here can vanish even though this call reported success.
+    LOCK(cs_main);
+
     scdb.CacheSidechainProposals(std::vector<Sidechain>{proposal});
 
     // Cache the hash of the sidechain to ACK it
@@ -1478,6 +1873,16 @@ UniValue setwithdrawalvote(const JSONRPCRequest& request)
 
     // nSidechain
     int nSidechain = request.params[1].get_int();
+
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+
+    // Vote state lives in the SCDB, which block connection republishes
+    // wholesale; without cs_main a vote set here can be silently reverted.
+    LOCK(cs_main);
 
     if (!scdb.IsSidechainActive(nSidechain))
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Sidechain number");
@@ -1525,6 +1930,10 @@ UniValue clearwithdrawalvotes(const JSONRPCRequest& request)
             + HelpExampleRpc("clearwithdrawalvotes", "")
             );
 
+    // See setwithdrawalvote: the SCDB is republished wholesale on block
+    // connection, so this reset needs cs_main to not be silently undone.
+    LOCK(cs_main);
+
     scdb.ResetWithdrawalVotes();
 
     return NullUniValue;
@@ -1543,8 +1952,16 @@ UniValue listwithdrawalvotes(const JSONRPCRequest& request)
 
     UniValue ret(UniValue::VARR);
 
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
     std::vector<std::string> vVote = scdb.GetVotes();
-    for (uint8_t i = 0; i < vVote.size(); i++) {
+    // Index with size_t: vVote holds SIDECHAIN_ACTIVATION_MAX_ACTIVE (256)
+    // entries, which a uint8_t counter cannot represent as a bound.
+    for (size_t i = 0; i < vVote.size(); i++) {
         std::string strVote = "";
         if (vVote[i].size() == 64)
             strVote = vVote[i];
@@ -1556,7 +1973,7 @@ UniValue listwithdrawalvotes(const JSONRPCRequest& request)
             strVote = "Abstain";
 
         UniValue obj(UniValue::VOBJ);
-        obj.push_back(Pair("nSidechain", i));
+        obj.push_back(Pair("nSidechain", (int)i));
         obj.push_back(Pair("vote", strVote));
         ret.push_back(obj);
     }
@@ -1585,14 +2002,40 @@ UniValue getaveragefee(const JSONRPCRequest& request)
     if (request.params.size() >= 1)
         nBlocks = request.params[0].get_int();
 
+    // Security fix: a negative block_count passes the "> nHeight" guard below,
+    // makes the loop body never run, and leaves nTx == 0 -> division by zero
+    // (SIGFPE) at the end. Reject it up front.
+    if (nBlocks < 0)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid number of blocks!");
+
+    // Security fix (node stall): the scan loop below reads each block from disk
+    // while holding cs_main (taken next). Bound the number of blocks so a large
+    // caller-supplied block_count cannot hold cs_main across an unbounded disk
+    // read and freeze the node. 2016 (one retarget period) is ample for a fee
+    // average.
+    static const int MAX_AVERAGE_FEE_BLOCKS = 2016;
+    if (nBlocks > MAX_AVERAGE_FEE_BLOCKS)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Too many blocks requested!");
+
+    // Security fix (reorg-race crash): hold cs_main across all reads of
+    // chainActive / mapBlockIndex below. Without it a concurrent reorg can
+    // shrink chainActive between the height read and the indexed access,
+    // making chainActive[i] return null and crashing the node.
+    LOCK(cs_main);
+
     int nHeight = chainActive.Height();
     if (request.params.size() == 2) {
         int nHeightIn = request.params[1].get_int();
-        if (nHeightIn > nHeight)
+        if (nHeightIn < 0 || nHeightIn > nHeight)
             throw JSONRPCError(RPC_MISC_ERROR, "Invalid start height!");
 
         nHeight = nHeightIn;
     }
+
+    // Guard the no-blocks case (empty chain) so chainActive[i] is never
+    // dereferenced with a negative index below.
+    if (nHeight < 0)
+        throw JSONRPCError(RPC_MISC_ERROR, "Chain has no blocks!");
 
     if (nBlocks > nHeight)
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Invalid number of blocks!");
@@ -1620,11 +2063,22 @@ UniValue getaveragefee(const JSONRPCRequest& request)
         CAmount nSubsidy = GetBlockSubsidy(i, Params().GetConsensus());
         CAmount nCoinbase = block.vtx[0]->GetValueOut();
 
-        // Record total fees in the block
-        nTotalFees += nCoinbase - nSubsidy;
+        // Record total fees in the block. Check-before-add: each coinbase is
+        // <= MAX_MONEY, but MAX_MONEY is ~98.7% of INT64_MAX here, so summing
+        // across blocks could overflow int64 (UB). Guard the positive case.
+        const CAmount nDelta = nCoinbase - nSubsidy;
+        if (nDelta > 0 && nTotalFees > MAX_MONEY - nDelta)
+            throw JSONRPCError(RPC_MISC_ERROR, "Accumulated fee total out of range!");
+        nTotalFees += nDelta;
         // Record number of transactions
         nTx += block.vtx.size();
     }
+
+    // Belt-and-braces: nTx is >= 1 here (the loop runs at least once and every
+    // block has a coinbase), but guard the division anyway - integer div-by-zero
+    // is a SIGFPE process crash.
+    if (nTx == 0)
+        throw JSONRPCError(RPC_MISC_ERROR, "No transactions in scanned range!");
 
     UniValue result(UniValue::VOBJ);
     result.push_back(Pair("feeaverage", ValueFromAmount(nTotalFees / nTx)));
@@ -1651,6 +2105,17 @@ UniValue getworkscore(const JSONRPCRequest& request)
 
     // nSidechain
     int nSidechain = request.params[0].get_int();
+
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
 
     if (!scdb.IsSidechainActive(nSidechain))
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Sidechain number");
@@ -1703,6 +2168,17 @@ UniValue listwithdrawalstatus(const JSONRPCRequest& request)
     // nSidechain
     int nSidechain = request.params[0].get_int();
 
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
     if (!scdb.IsSidechainActive(nSidechain))
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Sidechain number");
 
@@ -1713,8 +2189,8 @@ UniValue listwithdrawalstatus(const JSONRPCRequest& request)
         UniValue obj(UniValue::VOBJ);
 
         obj.push_back(Pair("hash", s.hash.ToString()));
-        obj.push_back(Pair("nblocksleft", s.nBlocksLeft));
-        obj.push_back(Pair("nworkscore", s.nWorkScore));
+        obj.push_back(Pair("nblocksleft", (int64_t)s.nBlocksLeft));
+        obj.push_back(Pair("nworkscore", (int64_t)s.nWorkScore));
 
         ret.push_back(obj);
     }
@@ -1724,15 +2200,18 @@ UniValue listwithdrawalstatus(const JSONRPCRequest& request)
 
 UniValue listcachedwithdrawaltx(const JSONRPCRequest& request)
 {
-    if (request.fHelp || request.params.size() != 1)
+    if (request.fHelp || request.params.size() < 1 || request.params.size() > 2)
         throw std::runtime_error(
-            "listcachedwithdrawaltx\n"
+            "listcachedwithdrawaltx nsidechain ( verbose )\n"
             "List my cached Withdrawal(s) for nSidechain\n"
             "\nArguments:\n"
             "1. nsidechain     (numeric, required) Sidechain number to list Withdrawal(s) of\n"
+            "2. verbose        (boolean, optional, default=false) Also return each bundle's raw\n"
+            "                  transaction hex, as receivewithdrawalbundle takes it\n"
             "\nResult: (array)\n"
             "{\n"
             "  \"hash\" : x (string) hash of Withdrawal\n"
+            "  \"hex\" : x  (string) raw bundle hex (only with verbose=true)\n"
             "}\n"
             "\n"
             "\nExample:\n"
@@ -1741,6 +2220,18 @@ UniValue listcachedwithdrawaltx(const JSONRPCRequest& request)
 
     // nSidechain
     int nSidechain = request.params[0].get_int();
+
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+    const bool fVerbose = request.params.size() > 1 && !request.params[1].isNull() && request.params[1].get_bool();
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
 
     if (!scdb.IsSidechainActive(nSidechain))
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Sidechain number");
@@ -1758,6 +2249,10 @@ UniValue listcachedwithdrawaltx(const JSONRPCRequest& request)
 
         UniValue obj(UniValue::VOBJ);
         obj.push_back(Pair("hash", i.second.GetHash().ToString()));
+        // 0.45.2: the bytes, so an operator can keep a copy to re-submit
+        // (receivewithdrawalbundle <slot> <hex>) - nothing else prints them.
+        if (fVerbose)
+            obj.push_back(Pair("hex", EncodeHexTx(CTransaction(i.second))));
 
         ret.push_back(obj);
     }
@@ -1785,6 +2280,17 @@ UniValue havespentwithdrawal(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Withdrawal hash");
 
     int nSidechain = request.params[1].get_int();
+
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
 
     if (!scdb.IsSidechainActive(nSidechain))
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Sidechain number");
@@ -1815,6 +2321,17 @@ UniValue havefailedwithdrawal(const JSONRPCRequest& request)
 
     int nSidechain = request.params[1].get_int();
 
+    // Security fix: range-check the int before it is truncated to uint8_t by
+    // IsSidechainActive(); an out-of-range value (e.g. 256+S) would otherwise
+    // alias an active slot and later index a 256-element vector out of bounds.
+    if (nSidechain < 0 || nSidechain >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+        throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
     if (!scdb.IsSidechainActive(nSidechain))
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid Sidechain number");
 
@@ -1839,6 +2356,12 @@ UniValue listspentwithdrawals(const JSONRPCRequest& request)
             "\nExample:\n"
             + HelpExampleCli("listspentwithdrawals", "")
             );
+
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
 
     std::vector<SidechainSpentWithdrawal> vSpent = scdb.GetSpentWithdrawalCache();
 
@@ -1872,6 +2395,12 @@ UniValue listfailedwithdrawals(const JSONRPCRequest& request)
             + HelpExampleCli("listfailedwithdrawals", "")
             );
 
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
     std::vector<SidechainFailedWithdrawal> vFailed = scdb.GetFailedWithdrawalCache();
 
     UniValue ret(UniValue::VARR);
@@ -1896,7 +2425,13 @@ UniValue gettotalscdbhash(const JSONRPCRequest& request)
             );
 
     UniValue ret(UniValue::VOBJ);
-    ret.push_back(Pair("hashscdbtotal", scdb.GetTestHash().ToString()));
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
+    ret.push_back(Pair("hashscdbtotal", scdb.GetTestHash(chainActive.Height()).ToString()));
 
     return ret;
 }
@@ -1951,8 +2486,8 @@ UniValue getscdbdataforblock(const JSONRPCRequest& request)
         for (auto& y : x) {
             UniValue obj(UniValue::VOBJ);
             obj.push_back(Pair("nsidechain", y.nSidechain));
-            obj.push_back(Pair("nblocksleft", y.nBlocksLeft));
-            obj.push_back(Pair("nworkscore", y.nWorkScore));
+            obj.push_back(Pair("nblocksleft", (int64_t)y.nBlocksLeft));
+            obj.push_back(Pair("nworkscore", (int64_t)y.nWorkScore));
             obj.push_back(Pair("withdrawalbundle", y.hash.ToString()));
             ret.push_back(obj);
         }
@@ -1979,6 +2514,12 @@ UniValue listfailedbmm(const JSONRPCRequest& request)
             + HelpExampleCli("listfailedbmm", "")
             );
 
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
     std::set<uint256> setTxid = scdb.GetRemovedBMM();
 
     UniValue ret(UniValue::VARR);
@@ -1986,6 +2527,327 @@ UniValue listfailedbmm(const JSONRPCRequest& request)
         UniValue obj(UniValue::VOBJ);
         obj.push_back(Pair("txid", u.ToString()));
         ret.push_back(obj);
+    }
+
+    return ret;
+}
+
+//! Bounds on a user-created news topic. The day count matches the maximum the
+//! interface's own spin box allows, so a topic made here cannot be one the
+//! interface would refuse to make.
+static const int MAX_NEWS_TYPE_DAYS = 1337;
+static const size_t MAX_NEWS_TYPE_TITLE_CHARS = 128;
+
+//! Ceiling on how much listnews will assemble in memory for one call.
+static const size_t MAX_LISTNEWS_RESULT_BYTES = 8 * 1024 * 1024;
+
+//! Render an OP_RETURN payload as text for a JSON reply.
+//!
+//! The bytes are arbitrary and mostly are not text at all - every block carries
+//! a segwit commitment, which is an OP_RETURN full of binary - so copying them
+//! into a JSON string produces a reply the client cannot parse. That is not
+//! hypothetical: getopreturndata failed with "couldn't parse reply from server"
+//! on any ordinary block, which is nearly all of them. Keep the printable
+//! characters and drop the rest; the untouched bytes are in the hex field
+//! alongside for anything that needs them. SAFE_CHARS_DEFAULT is the widest of
+//! the available sets, so ordinary prose survives it intact.
+static std::string DecodeOPReturnText(const CScript& script)
+{
+    std::string strRaw;
+    for (const unsigned char& c : script)
+        strRaw += c;
+
+    // Keep printable ASCII and drop everything else. SanitizeString's widest
+    // set is narrower than it sounds - it discards apostrophes, quotes and
+    // most punctuation - which mangles ordinary prose. Bytes 0x20 to 0x7e are
+    // the whole printable range, and univalue escapes the quote and backslash
+    // among them correctly, so this is safe to put in a JSON string while
+    // keeping the text readable.
+    //
+    // Anything above 0x7f is dropped rather than passed through: univalue's
+    // writer emits high bytes raw, so a payload that is not valid UTF-8 would
+    // produce a reply the client cannot parse - which is the bug this function
+    // exists to fix. That means non-ASCII text does not survive here; the
+    // untouched bytes are in the hex field alongside.
+    std::string strOut;
+    strOut.reserve(strRaw.size());
+    for (const unsigned char c : strRaw) {
+        if (c >= 0x20 && c <= 0x7e)
+            strOut += (char)c;
+    }
+    return strOut;
+}
+
+//! The two topics the interface ships with. They are not stored in the news
+//! type database - the GUI holds them in a static list - so they are repeated
+//! here to give a command-line user the same starting set. Keep in step with
+//! vDefaultType in qt/newstypestablemodel.cpp.
+static const struct { const char* header; const char* title; int nDays; } vBuiltinNewsType[] = {
+    { "a1a1a1a1", "Daily Doge", 7 },
+    { "a2a2a2a2", "Doge Extra", 7 },
+};
+
+UniValue listnewstypes(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 0)
+        throw std::runtime_error(
+            "listnewstypes\n"
+            "\nList the news topics this node knows, built in and user created.\n"
+            "\nThe header bytes are what broadcastnews takes as its first argument.\n"
+            "\nResult:\n"
+            "[\n"
+            "  {\n"
+            "    \"title\"    : (string) topic name\n"
+            "    \"header\"   : (string) header bytes, as hex\n"
+            "    \"days\"     : (numeric) length of the ranking period in days\n"
+            "    \"builtin\"  : (boolean) true if it ships with the wallet\n"
+            "    \"hash\"     : (string) identifier for removenewstype (user topics only)\n"
+            "    \"url\"      : (string) shareable topic string (user topics only)\n"
+            "  }\n"
+            "]\n"
+            "\nExamples:\n"
+            + HelpExampleCli("listnewstypes", "")
+            + HelpExampleRpc("listnewstypes", "")
+            );
+
+    UniValue ret(UniValue::VARR);
+
+    for (const auto& t : vBuiltinNewsType) {
+        UniValue obj(UniValue::VOBJ);
+        obj.push_back(Pair("title", t.title));
+        obj.push_back(Pair("header", t.header));
+        obj.push_back(Pair("days", t.nDays));
+        obj.push_back(Pair("builtin", true));
+        ret.push_back(obj);
+    }
+
+    std::vector<NewsType> vType;
+    popreturndb->GetNewsTypes(vType);
+    for (const NewsType& type : vType) {
+        UniValue obj(UniValue::VOBJ);
+        obj.push_back(Pair("title", type.title));
+        obj.push_back(Pair("header", HexStr(type.header.begin(), type.header.end())));
+        obj.push_back(Pair("days", type.nDays));
+        obj.push_back(Pair("builtin", false));
+        obj.push_back(Pair("hash", type.GetHash().ToString()));
+        obj.push_back(Pair("url", type.GetShareURL()));
+        ret.push_back(obj);
+    }
+
+    return ret;
+}
+
+UniValue createnewstype(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 3)
+        throw std::runtime_error(
+            "createnewstype \"title\" \"header\" days\n"
+            "\nAdd a news topic to this node. Local only - a topic is a label for\n"
+            "header bytes, and nothing about it is broadcast. Others see the same\n"
+            "posts once they add a topic with the same header.\n"
+            "\nArguments:\n"
+            "1. \"title\"   (string, required) name to display\n"
+            "2. \"header\"  (string, required) 4 header bytes as 8 hex characters (ex: a1a1a1a1)\n"
+            "3. days      (numeric, required) length of the ranking period, 1 or more\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"hash\" : (string) identifier for removenewstype\n"
+            "  \"url\"  : (string) shareable topic string\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("createnewstype", "\"My Topic\" \"a3a3a3a3\" 7")
+            + HelpExampleRpc("createnewstype", "\"My Topic\", \"a3a3a3a3\", 7")
+            );
+
+    const std::string strTitle = request.params[0].get_str();
+    if (strTitle.empty())
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Title cannot be empty");
+    // Bounded because the topic is written to disk and displayed; nothing
+    // rejects a multi-megabyte one otherwise, and it would be permanent.
+    if (strTitle.size() > MAX_NEWS_TYPE_TITLE_CHARS)
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+            strprintf("Title must be %u characters or fewer", MAX_NEWS_TYPE_TITLE_CHARS));
+
+    const std::string strHeader = request.params[1].get_str();
+    // Matches what broadcastnews accepts, so a topic created here can always be
+    // posted to.
+    if (strHeader.size() != 8 || !IsHex(strHeader))
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Header must be 8 hex characters (4 bytes)");
+
+    const int nDays = request.params[2].get_int();
+    // The upper bound is the one the interface already enforces on this field,
+    // and it is not cosmetic. The news table walks back from the tip until it
+    // reaches tip time minus nDays; a huge value makes that QDateTime invalid,
+    // the stop condition never fires, and the walk runs to the genesis block -
+    // a database read per block, on the GUI thread, holding cs_main. Writing a
+    // topic through this command must not be able to wedge a wallet that later
+    // views it.
+    if (nDays < 1 || nDays > MAX_NEWS_TYPE_DAYS)
+        throw JSONRPCError(RPC_INVALID_PARAMETER,
+            strprintf("Days must be between 1 and %d", MAX_NEWS_TYPE_DAYS));
+
+    NewsType type;
+    type.title = strTitle;
+    type.nDays = nDays;
+    const std::vector<unsigned char> vBytes = ParseHex(strHeader);
+    type.header = CScript(vBytes.begin(), vBytes.end());
+
+    popreturndb->WriteNewsType(type);
+
+    UniValue obj(UniValue::VOBJ);
+    obj.push_back(Pair("hash", type.GetHash().ToString()));
+    obj.push_back(Pair("url", type.GetShareURL()));
+    return obj;
+}
+
+UniValue removenewstype(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 1)
+        throw std::runtime_error(
+            "removenewstype \"hash\"\n"
+            "\nRemove a user created news topic from this node. Built in topics\n"
+            "cannot be removed. Posts already on the chain are unaffected.\n"
+            "\nArguments:\n"
+            "1. \"hash\"  (string, required) topic identifier from listnewstypes\n"
+            "\nExamples:\n"
+            + HelpExampleCli("removenewstype", "\"<hash>\"")
+            + HelpExampleRpc("removenewstype", "\"<hash>\"")
+            );
+
+    const std::string strHash = request.params[0].get_str();
+    if (strHash.size() != 64 || !IsHex(strHash))
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid topic hash");
+
+    const uint256 hash = uint256S(strHash);
+
+    // Report a hash that matches nothing rather than silently succeeding.
+    std::vector<NewsType> vType;
+    popreturndb->GetNewsTypes(vType);
+    bool fFound = false;
+    for (const NewsType& type : vType) {
+        if (type.GetHash() == hash) {
+            fFound = true;
+            break;
+        }
+    }
+    if (!fFound)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "No user created topic with that hash");
+
+    popreturndb->EraseNewsType(hash);
+
+    return NullUniValue;
+}
+
+UniValue listnews(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() > 2)
+        throw std::runtime_error(
+            "listnews ( count \"header\" )\n"
+            "\nList OP_RETURN posts from recent blocks, newest block first.\n"
+            "\nArguments:\n"
+            "1. count     (numeric, optional, default=100) how many blocks back to read, 1 to 10000\n"
+            "2. \"header\"  (string, optional) only return posts whose data starts with\n"
+            "               these header bytes, as hex. Omit for every post.\n"
+            "\nResult:\n"
+            "[\n"
+            "  {\n"
+            "    \"blockhash\" : (string) block containing the post\n"
+            "    \"height\"    : (numeric) height of that block\n"
+            "    \"txid\"      : (string) transaction id\n"
+            "    \"fees\"      : (string) fee paid, which is the post's bid\n"
+            "    \"size\"      : (numeric) transaction size\n"
+            "    \"hex\"       : (string) the output script data, as hex\n"
+            "    \"decode\"    : (string) that data as text\n"
+            "  }\n"
+            "]\n"
+            "\nExamples:\n"
+            + HelpExampleCli("listnews", "50")
+            + HelpExampleCli("listnews", "1000 \"a1a1a1a1\"")
+            + HelpExampleRpc("listnews", "50, \"a1a1a1a1\"")
+            );
+
+    int nCount = 100;
+    if (request.params.size() > 0) {
+        nCount = request.params[0].get_int();
+        // Bounded because each block read is a database lookup and the result
+        // is assembled in memory before it is returned.
+        if (nCount < 1 || nCount > 10000)
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Count must be between 1 and 10000");
+    }
+
+    std::vector<unsigned char> vFilter;
+    if (request.params.size() > 1) {
+        const std::string strHeader = request.params[1].get_str();
+        if (strHeader.empty() || (strHeader.size() % 2) != 0 || !IsHex(strHeader))
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Header must be an even number of hex characters");
+        vFilter = ParseHex(strHeader);
+    }
+
+    // Take the block hashes under cs_main and let go of it before touching the
+    // database. Holding it across the reads would stall block connection, the
+    // network threads and getblocktemplate for as long as they take, and they
+    // are not cheap: the OP_RETURN index runs to hundreds of megabytes on
+    // mainnet and is opened with a 500-byte cache (nOPReturnCache), so every
+    // lookup goes to the operating system or the disk. Ten thousand of those
+    // is seconds on an SSD and considerably worse on a spinning disk.
+    //
+    // A reorg between the snapshot and the reads is harmless. Block hashes are
+    // immutable, so the worst case is a row describing a block that has just
+    // left the active chain - stale, not wrong - and the hash is reported in
+    // the row, so a caller can tell.
+    std::vector<std::pair<uint256, int>> vBlock;
+    {
+        LOCK(cs_main);
+
+        const CBlockIndex* pindex = chainActive.Tip();
+        for (int i = 0; i < nCount && pindex != nullptr; i++, pindex = pindex->pprev)
+            vBlock.emplace_back(pindex->GetBlockHash(), pindex->nHeight);
+    }
+
+    UniValue ret(UniValue::VARR);
+    size_t nBytes = 0;
+
+    for (const std::pair<uint256, int>& block : vBlock) {
+        std::vector<OPReturnData> vData;
+        if (!popreturndb->GetBlockData(block.first, vData))
+            continue;
+
+        for (const OPReturnData& d : vData) {
+            // d.script is the whole output script, so the header sits one byte
+            // in, past OP_RETURN.
+            if (!vFilter.empty()) {
+                if (d.script.size() < vFilter.size() + 1)
+                    continue;
+                if (!std::equal(vFilter.begin(), vFilter.end(), d.script.begin() + 1))
+                    continue;
+            }
+
+            // The count bounds blocks read, not data returned, and there is no
+            // per-block ceiling on how much OP_RETURN a block may carry - a
+            // single output may hold MAX_DRIVECHAIN_DATA_BYTES and a block may
+            // hold many. Left unbounded, one call on a chain carrying real
+            // payloads assembles gigabytes here before anything is sent. Fail
+            // loudly instead of truncating, so a caller is never quietly handed
+            // a partial answer it might read as the whole of the news.
+            nBytes += d.script.size() * 3 + 256;
+            if (nBytes > MAX_LISTNEWS_RESULT_BYTES) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER,
+                    strprintf("Result exceeds %u bytes. Ask for fewer blocks, or narrow it with the header argument.",
+                              MAX_LISTNEWS_RESULT_BYTES));
+            }
+
+            UniValue obj(UniValue::VOBJ);
+            obj.push_back(Pair("blockhash", block.first.ToString()));
+            obj.push_back(Pair("height", block.second));
+            obj.push_back(Pair("txid", d.txid.ToString()));
+            obj.push_back(Pair("fees", FormatMoney(d.fees)));
+            obj.push_back(Pair("size", (uint64_t)d.nSize));
+            obj.push_back(Pair("hex", HexStr(d.script.begin(), d.script.end(), false)));
+
+            obj.push_back(Pair("decode", DecodeOPReturnText(d.script)));
+
+            ret.push_back(obj);
+        }
     }
 
     return ret;
@@ -2011,6 +2873,8 @@ UniValue getopreturndata(const JSONRPCRequest& request)
             );
 
     uint256 hashBlock = uint256S(request.params[0].get_str());
+
+    LOCK(cs_main);
 
     BlockMap::iterator it = mapBlockIndex.find(hashBlock);
     if (it == mapBlockIndex.end()) {
@@ -2038,11 +2902,7 @@ UniValue getopreturndata(const JSONRPCRequest& request)
         obj.push_back(Pair("fees", FormatMoney(d.fees)));
         obj.push_back(Pair("hex", HexStr(d.script.begin(), d.script.end(), false)));
 
-        std::string strDecode;
-        for (const unsigned char& c : d.script) {
-            strDecode += c;
-        }
-        obj.push_back(Pair("decode", strDecode));
+        obj.push_back(Pair("decode", DecodeOPReturnText(d.script)));
 
         ret.push_back(obj);
     }
@@ -2065,9 +2925,769 @@ UniValue getactivesidechaincount(const JSONRPCRequest& request)
             + HelpExampleCli("getactivesidechaincount", "")
             );
 
+    // The global scdb is move-assigned wholesale by ConnectBlock under
+    // cs_main, so reading it without that lock can walk a container that is
+    // being replaced. Read-only here, and no wallet sync call intervenes, so
+    // the lock spans the rest of the function.
+    LOCK(cs_main);
+
     int count = scdb.GetActiveSidechainCount();
 
     return count;
+}
+
+//! Append the consensus-container fields shared by getscdbhash and
+//! getscdbstate.
+//!
+//! The commands' existing fields read the process-global SCDB and their
+//! meaning is frozen: archived census readings and upgrade checks compare
+//! them across binaries, so a redefinition would silently compare two
+//! different containers while both agree on every healthy node. Everything
+//! the consensus container has to say is therefore reported through these
+//! ADDITIVE fields; an older binary simply lacks them, which a census must
+//! read as "instrument not fitted", never as agreement.
+//!
+//! Requires cs_main.
+static void PushSCDBValidationFields(UniValue& obj, const CBlockIndex* pTip,
+        const uint256& hashGlobalConsensus, const uint256& hashGlobalCommitment)
+{
+    AssertLockHeld(cs_main);
+
+    // The container ConnectBlock actually validates the next block against:
+    // the global with the tip's per-block record overlaid where that record
+    // is complete. Same construction, same helper, as ConnectBlock and the
+    // miner use - a reading assembled from any other container reports a
+    // state consensus never consults.
+    SidechainDB scdbValidation = GetSCDBConsensusSeed(pTip, Params().GetConsensus());
+    const uint256 hashValidationConsensus = scdbValidation.GetConsensusHash(pTip ? pTip->nHeight : 0);
+    const uint256 hashValidationCommitment = scdbValidation.GetCommitmentHash(pTip ? pTip->nHeight : 0);
+
+    obj.push_back(Pair("validationconsensushash", hashValidationConsensus.ToString()));
+    obj.push_back(Pair("validationcommitmenthash", hashValidationCommitment.ToString()));
+    obj.push_back(Pair("validationblockhash", scdbValidation.GetHashBlockLastSeen().ToString()));
+
+    // The one boolean the census wants: does the in-memory global agree with
+    // the container consensus reads? False while insync is false merely
+    // restates staleness; false while insync is true is drift - the global
+    // holds validity-relevant state the record chain does not.
+    obj.push_back(Pair("validationmatch",
+            hashValidationConsensus == hashGlobalConsensus &&
+            hashValidationCommitment == hashGlobalCommitment));
+
+    // Whether this node's own caches are sound enough for it to be used as a
+    // census reference, COMPUTED ON DEMAND rather than latched.
+    //
+    // ConnectBlock logs and alerts when it notices either condition, but a log
+    // line and an -alertnotify are one-shot: they cannot say the node has since
+    // been repaired. A sticky global warning is worse than useless here for the
+    // same reason - rebuildscdb never clears it, so a repaired node keeps
+    // claiming to be broken until it restarts, and the single shared warning
+    // string means the SCDB claim can also overwrite an unrelated clock or disk
+    // warning. Reading the live state is the only form that answers "is it
+    // sound NOW", which is the only question a census actually asks.
+    //
+    // depositcachesound is the deposits-present / pointer-consistent check;
+    // it CANNOT see the all-empty variant (an active slot with neither pointer
+    // nor deposits), so true here is not a clean bill of health on its own.
+    // treasurylogsound is the internal mapCTIP/mapTreasury invariant, which
+    // should never be false on any build.
+    uint8_t nSlotUnsupported = 0;
+    const bool fDepositCacheSound = scdb.DepositCacheSupportsTreasury(nSlotUnsupported);
+    obj.push_back(Pair("depositcachesound", fDepositCacheSound));
+    if (!fDepositCacheSound)
+        obj.push_back(Pair("depositcacheunsoundslot", (int)nSlotUnsupported));
+
+    SidechainDB::TreasuryLogAudit audit;
+    scdb.GetTreasuryLog(&audit);
+    obj.push_back(Pair("treasurylogsound", audit.IsClean()));
+    if (!audit.IsClean()) {
+        UniValue objAudit(UniValue::VOBJ);
+        UniValue arrMissing(UniValue::VARR), arrStale(UniValue::VARR), arrMismatched(UniValue::VARR);
+        for (const uint8_t n : audit.vMissing) arrMissing.push_back((int)n);
+        for (const uint8_t n : audit.vStale) arrStale.push_back((int)n);
+        for (const uint8_t n : audit.vMismatched) arrMismatched.push_back((int)n);
+        objAudit.push_back(Pair("nolog", arrMissing));
+        objAudit.push_back(Pair("nopointer", arrStale));
+        objAudit.push_back(Pair("mismatched", arrMismatched));
+        obj.push_back(Pair("treasurylogaudit", objAudit));
+    }
+
+    // What the tip's own coinbase committed, read back from the block itself.
+    // From SCDBCommitmentHeight, validationcommitmenthash equals this value
+    // on any node holding the chain's records - provably, not hopefully:
+    // ConnectBlock computes the committed hash from the post-connect
+    // scdbCache and writes the tip's record from that same state, so the
+    // overlay above reproduces every hashed container. Comparing against it
+    // is node-vs-chain rather than node-vs-node, which two nodes wrong in
+    // the same way would pass. Empty (and the match false) whenever the tip
+    // carries no commitment - every block below SCDBCommitmentHeight.
+    bool fTipCommit = false;
+    uint256 hashTipCommit;
+    if (pTip) {
+        CBlock block;
+        if (ReadBlockFromDisk(block, pTip, Params().GetConsensus()) &&
+                !block.vtx.empty() && block.vtx[0]) {
+            // Takes the last matching output; ConnectBlock requires exactly one.
+            uint256 hashOut;
+            for (const CTxOut& out : block.vtx[0]->vout) {
+                if (out.scriptPubKey.IsSCDBHashCommit(hashOut)) {
+                    hashTipCommit = hashOut;
+                    fTipCommit = true;
+                }
+            }
+        }
+    }
+    obj.push_back(Pair("tipcommitment", fTipCommit ? hashTipCommit.ToString() : ""));
+    obj.push_back(Pair("tipcommitmentmatch",
+            fTipCommit && hashTipCommit == hashValidationCommitment));
+}
+
+UniValue getscdbhash(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 0)
+        throw std::runtime_error(
+            "getscdbhash\n"
+            "\nHash of the sidechain database state that block validity depends on.\n"
+            "\nTwo honest nodes at the same block must report the same hash. If they\n"
+            "do not, they disagree about something consensus reads, and one of them\n"
+            "will reject a block the other accepts - usually surfacing much later as\n"
+            "a refused withdrawal payout.\n"
+            "\nCompare across nodes by matching on blockhash first; a hash taken at a\n"
+            "different height is not comparable.\n"
+            "\nThis reports state only and changes nothing. No block carries\n"
+            "consensushash; commitmenthash is the form a coinbase commits to from\n"
+            "SCDBCommitmentHeight - the same state minus everything that depends\n"
+            "on the committing block's own hash.\n"
+            "\nTwo containers are reported. consensushash, commitmenthash and\n"
+            "blockhash read the process-global SCDB, exactly as every archived\n"
+            "reading of those names did. The validation* fields read the container\n"
+            "block validity is actually decided against: the global with the tip's\n"
+            "per-block record overlaid where that record is complete - the same\n"
+            "construction ConnectBlock validates with and the miner commits to.\n"
+            "On a healthy node the two agree (validationmatch true).\n"
+            "\nFrom SCDBCommitmentHeight, validationcommitmenthash is exactly the\n"
+            "value the tip's own coinbase committed: ConnectBlock computes the\n"
+            "committed hash from the post-connect state and writes the tip's\n"
+            "record from that same state, so overlaying the record reproduces it.\n"
+            "tipcommitment reads that committed value back out of the tip's\n"
+            "coinbase, so tipcommitmentmatch compares this node against the chain\n"
+            "itself rather than against another node.\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"consensushash\"  : (string) hash of the validity-relevant state\n"
+            "                      (global SCDB)\n"
+            "  \"commitmenthash\" : (string) the committed form of the same state\n"
+            "                      (global SCDB)\n"
+            "  \"blockhash\"      : (string) the block that state describes\n"
+            "  \"chaintip\"       : (string) the node's current tip\n"
+            "  \"insync\"         : (boolean) whether the two above agree\n"
+            "  \"testhash\"       : (string) legacy hash, includes node-local caches\n"
+            "  \"validationconsensushash\"  : (string) consensushash of the container\n"
+            "                                 block validity is decided against\n"
+            "  \"validationcommitmenthash\" : (string) committed form of that container;\n"
+            "                                 from SCDBCommitmentHeight this is what\n"
+            "                                 the tip's own coinbase committed\n"
+            "  \"validationblockhash\"      : (string) the block that container describes\n"
+            "  \"validationmatch\"          : (boolean) global and validation container\n"
+            "  \"depositcachesound\"       : (boolean) this node's deposit cache accounts for its\n"
+            "                                treasury pointers. Cannot see the all-empty variant.\n"
+            "  \"treasurylogsound\"        : (boolean) mapCTIP and the treasury log agree. False\n"
+            "                                means this node's SCDB is internally corrupt.\n"
+            "  \"tipcommitment\"            : (string) the value the tip's coinbase\n"
+            "                                 committed; empty when the tip carries no\n"
+            "                                 commitment (always below\n"
+            "                                 SCDBCommitmentHeight)\n"
+            "  \"tipcommitmentmatch\"       : (boolean) tipcommitment present and equal\n"
+            "                                 to validationcommitmenthash\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("getscdbhash", "")
+            + HelpExampleRpc("getscdbhash", "")
+            );
+
+    LOCK(cs_main);
+
+    const uint256 hashBlockLastSeen = scdb.GetHashBlockLastSeen();
+    const CBlockIndex* pTip = chainActive.Tip();
+    const uint256 hashTip = pTip ? pTip->GetBlockHash() : uint256();
+
+    // Into locals so the validationmatch comparison below is against the very
+    // values reported; the reported values themselves are unchanged.
+    const uint256 hashGlobalConsensus = scdb.GetConsensusHash(chainActive.Height());
+    const uint256 hashGlobalCommitment = scdb.GetCommitmentHash(chainActive.Height());
+
+    UniValue obj(UniValue::VOBJ);
+    obj.push_back(Pair("consensushash", hashGlobalConsensus.ToString()));
+    obj.push_back(Pair("commitmenthash", hashGlobalCommitment.ToString()));
+    obj.push_back(Pair("blockhash", hashBlockLastSeen.ToString()));
+    obj.push_back(Pair("chaintip", hashTip.ToString()));
+    // A node whose SCDB has fallen behind its own tip is already in the state
+    // this command exists to detect, so say so rather than making the caller
+    // compare the two strings.
+    obj.push_back(Pair("insync", hashBlockLastSeen == hashTip));
+    obj.push_back(Pair("testhash", scdb.GetTestHash(chainActive.Height()).ToString()));
+
+    // Appended after every pre-existing field so archived readings stay
+    // comparable position-for-position as well as name-for-name.
+    PushSCDBValidationFields(obj, pTip, hashGlobalConsensus, hashGlobalCommitment);
+
+    return obj;
+}
+
+UniValue getscdbstate(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 0)
+        throw std::runtime_error(
+            "getscdbstate\n"
+            "\nThe sidechain database state that block validity depends on, in full.\n"
+            "\nThis is the preimage of getscdbhash. That command says whether two\n"
+            "nodes agree; this one says what they disagree about. Compare the\n"
+            "section hashes first to find which group differs, then compare the\n"
+            "array under that name - a full diff of the whole output is rarely\n"
+            "what you want.\n"
+            "\nOnly comparable between nodes reporting the same blockhash.\n"
+            "\nThis reports state only and changes nothing. No block carries\n"
+            "consensushash; commitmenthash is the form a coinbase commits to from\n"
+            "SCDBCommitmentHeight.\n"
+            "\nThe hashes and the arrays below them read the process-global SCDB,\n"
+            "exactly as every archived reading did. The validation* and tip*\n"
+            "fields appended at the end read the container block validity is\n"
+            "actually decided against - the global with the tip's per-block\n"
+            "record overlaid where that record is complete. From\n"
+            "SCDBCommitmentHeight, validationcommitmenthash is exactly what the\n"
+            "tip's own coinbase committed (ConnectBlock computed the committed\n"
+            "hash from the same post-connect state it wrote the tip's record\n"
+            "from), and tipcommitment reads that value back out of the coinbase.\n"
+            "See getscdbhash for the per-field description.\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"consensushash\"  : (string) merkle root of every section below\n"
+            "                      (global SCDB)\n"
+            "  \"commitmenthash\" : (string) the committed form of the same state\n"
+            "                      (global SCDB)\n"
+            "  \"blockhash\"      : (string) the block this state describes\n"
+            "  \"chaintip\"       : (string) the node's current tip\n"
+            "  \"insync\"         : (boolean) whether the two above agree\n"
+            "  \"blocks\"         : (numeric) height of the chain tip\n"
+            "  \"sections\"       : [ { \"name\", \"hash\", \"leaves\" }, ... ]\n"
+            "  \"sidechains\"        : [ ... ] occupied slots only\n"
+            "  \"withdrawalstatus\"  : [ ... ] bundles being voted on\n"
+            "  \"activationstatus\"  : [ ... ] pending sidechain proposals\n"
+            "  \"ctip\"              : [ ... ] treasury pointer per sidechain,\n"
+            "                          each with viewunspent/viewamount/\n"
+            "                          viewnsidechain/anchored read from the\n"
+            "                          coins view. anchored false means this\n"
+            "                          node's pointer is not backed by the\n"
+            "                          output set - see listdrivechaincoins\n"
+            "  \"failedwithdrawals\" : [ ... ]\n"
+            "  \"spentwithdrawals\"  : [ ... ]\n"
+            "  \"validationconsensushash\"  : (string) see getscdbhash\n"
+            "  \"validationcommitmenthash\" : (string) see getscdbhash\n"
+            "  \"validationblockhash\"      : (string) see getscdbhash\n"
+            "  \"validationmatch\"          : (boolean) see getscdbhash\n"
+            "  \"depositcachesound\"       : (boolean) this node's deposit cache accounts for its\n"
+            "                                treasury pointers. Cannot see the all-empty variant.\n"
+            "  \"treasurylogsound\"        : (boolean) mapCTIP and the treasury log agree. False\n"
+            "                                means this node's SCDB is internally corrupt.\n"
+            "  \"tipcommitment\"            : (string) see getscdbhash\n"
+            "  \"tipcommitmentmatch\"       : (boolean) see getscdbhash\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("getscdbstate", "")
+            + HelpExampleRpc("getscdbstate", "")
+            );
+
+    LOCK(cs_main);
+
+    const uint256 hashBlockLastSeen = scdb.GetHashBlockLastSeen();
+    const CBlockIndex* pTip = chainActive.Tip();
+    const uint256 hashTip = pTip ? pTip->GetBlockHash() : uint256();
+
+    // Into locals so the validationmatch comparison below is against the very
+    // values reported; the reported values themselves are unchanged.
+    const uint256 hashGlobalConsensus = scdb.GetConsensusHash(chainActive.Height());
+    const uint256 hashGlobalCommitment = scdb.GetCommitmentHash(chainActive.Height());
+
+    UniValue obj(UniValue::VOBJ);
+    obj.push_back(Pair("consensushash", hashGlobalConsensus.ToString()));
+    obj.push_back(Pair("commitmenthash", hashGlobalCommitment.ToString()));
+    obj.push_back(Pair("blockhash", hashBlockLastSeen.ToString()));
+    obj.push_back(Pair("chaintip", hashTip.ToString()));
+    obj.push_back(Pair("insync", hashBlockLastSeen == hashTip));
+    obj.push_back(Pair("blocks", pTip ? pTip->nHeight : 0));
+
+    // Section hashes come from the same leaves the consensus hash is built
+    // from, so a section hash cannot agree while the hash it feeds disagrees.
+    // The arrays below are a rendering of those leaves for reading; where a
+    // rendering and a section hash ever disagreed, the hash would be the one
+    // telling the truth.
+    std::vector<SidechainDB::ConsensusSection> vSection;
+    scdb.GetConsensusSections(vSection, chainActive.Height());
+
+    UniValue sections(UniValue::VARR);
+    for (const SidechainDB::ConsensusSection& section : vSection) {
+        UniValue s(UniValue::VOBJ);
+        s.push_back(Pair("name", section.name));
+        s.push_back(Pair("hash", ComputeMerkleRoot(section.vLeaf).ToString()));
+        s.push_back(Pair("leaves", (uint64_t)section.vLeaf.size()));
+        sections.push_back(s);
+    }
+    obj.push_back(Pair("sections", sections));
+
+    // The sidechain table is 256 fixed slots and the hash covers all of them,
+    // but printing 254 empty ones buries the two that matter. A slot is
+    // skipped only when it is byte-identical to a never-used slot, so anything
+    // capable of changing the hash is still shown.
+    UniValue sidechains(UniValue::VARR);
+    const std::vector<Sidechain> vSidechain = scdb.GetSidechains();
+    for (size_t i = 0; i < vSidechain.size(); i++) {
+        Sidechain blank;
+        blank.nSidechain = i;
+        if (vSidechain[i].GetSerHash() == blank.GetSerHash())
+            continue;
+
+        UniValue s(UniValue::VOBJ);
+        s.push_back(Pair("nsidechain", (int)vSidechain[i].nSidechain));
+        s.push_back(Pair("active", vSidechain[i].fActive));
+        s.push_back(Pair("version", vSidechain[i].nVersion));
+        s.push_back(Pair("title", vSidechain[i].title));
+        s.push_back(Pair("description", vSidechain[i].description));
+        s.push_back(Pair("hashid1", vSidechain[i].hashID1.ToString()));
+        s.push_back(Pair("hashid2", vSidechain[i].hashID2.ToString()));
+        s.push_back(Pair("serhash", vSidechain[i].GetSerHash().ToString()));
+        sidechains.push_back(s);
+    }
+    obj.push_back(Pair("sidechains", sidechains));
+
+    UniValue withdrawals(UniValue::VARR);
+    const std::vector<std::vector<SidechainWithdrawalState>> vState = scdb.GetState();
+    for (size_t i = 0; i < vState.size(); i++) {
+        for (const SidechainWithdrawalState& state : vState[i]) {
+            UniValue s(UniValue::VOBJ);
+            s.push_back(Pair("nsidechain", (int)state.nSidechain));
+            s.push_back(Pair("hash", state.hash.ToString()));
+            s.push_back(Pair("blocksleft", (int)state.nBlocksLeft));
+            s.push_back(Pair("workscore", (int)state.nWorkScore));
+            withdrawals.push_back(s);
+        }
+    }
+    obj.push_back(Pair("withdrawalstatus", withdrawals));
+
+    UniValue activation(UniValue::VARR);
+    for (const SidechainActivationStatus& a : scdb.GetSidechainActivationStatus()) {
+        UniValue s(UniValue::VOBJ);
+        s.push_back(Pair("nsidechain", (int)a.proposal.nSidechain));
+        s.push_back(Pair("age", a.nAge));
+        s.push_back(Pair("fail", a.nFail));
+        s.push_back(Pair("title", a.proposal.title));
+        s.push_back(Pair("serhash", a.GetSerHash().ToString()));
+        activation.push_back(s);
+    }
+    obj.push_back(Pair("activationstatus", activation));
+
+    // The field that is not restored from the per-block record, and so the one
+    // a divergence is most likely to show up in.
+    //
+    // Each pointer is also reported against the coins view, so one census
+    // reading answers both questions: whether two nodes agree with each other
+    // (the section hashes) and whether this node agrees with the one store
+    // every node shares (anchored). A pointer that is not anchored is naming
+    // money that is not where this node believes it is - the condition
+    // CTIPAnchorHeight makes a block-level rule once it is set.
+    UniValue ctip(UniValue::VARR);
+    for (const std::pair<const uint8_t, SidechainCTIP>& p : scdb.GetCTIP()) {
+        UniValue s(UniValue::VOBJ);
+        s.push_back(Pair("nsidechain", (int)p.first));
+        s.push_back(Pair("txid", p.second.out.hash.ToString()));
+        s.push_back(Pair("n", (uint64_t)p.second.out.n));
+        s.push_back(Pair("amount", ValueFromAmount(p.second.amount)));
+
+        bool fAnchored = false;
+        if (pcoinsTip) {
+            const Coin& coin = pcoinsTip->AccessCoin(p.second.out);
+            uint8_t nSidechainCoin;
+            const bool fUnspent = !coin.IsSpent();
+            s.push_back(Pair("viewunspent", fUnspent));
+            if (fUnspent) {
+                s.push_back(Pair("viewamount", ValueFromAmount(coin.out.nValue)));
+                s.push_back(Pair("viewnsidechain",
+                        coin.out.scriptPubKey.IsDrivechain(nSidechainCoin)
+                            ? (int)nSidechainCoin : -1));
+                fAnchored = coin.out.scriptPubKey.IsDrivechain(nSidechainCoin)
+                        && nSidechainCoin == p.first
+                        && coin.out.nValue == p.second.amount;
+            }
+        }
+        s.push_back(Pair("anchored", fAnchored));
+        ctip.push_back(s);
+    }
+    obj.push_back(Pair("ctip", ctip));
+
+    UniValue failed(UniValue::VARR);
+    for (const SidechainFailedWithdrawal& f : scdb.GetFailedWithdrawalCache()) {
+        UniValue s(UniValue::VOBJ);
+        s.push_back(Pair("nsidechain", (int)f.nSidechain));
+        s.push_back(Pair("hash", f.hash.ToString()));
+        failed.push_back(s);
+    }
+    obj.push_back(Pair("failedwithdrawals", failed));
+
+    UniValue spent(UniValue::VARR);
+    for (const SidechainSpentWithdrawal& sw : scdb.GetSpentWithdrawalCache()) {
+        UniValue s(UniValue::VOBJ);
+        s.push_back(Pair("nsidechain", (int)sw.nSidechain));
+        s.push_back(Pair("hash", sw.hash.ToString()));
+        s.push_back(Pair("blockhash", sw.hashBlock.ToString()));
+        spent.push_back(s);
+    }
+    obj.push_back(Pair("spentwithdrawals", spent));
+
+    // Appended after every pre-existing field so archived readings stay
+    // comparable position-for-position as well as name-for-name.
+    PushSCDBValidationFields(obj, pTip, hashGlobalConsensus, hashGlobalCommitment);
+
+    return obj;
+}
+
+//! One unspent OP_DRIVECHAIN output found by the scan below.
+struct DrivechainCoin
+{
+    COutPoint out;
+    CAmount amount;
+    int nHeight;
+    bool fCoinBase;
+};
+
+//! Order the scan's findings so two nodes reporting the same UTXO snapshot
+//! print the same bytes. The cursor walks the database in txid order, which is
+//! neither stable across implementations nor useful to read; oldest first is
+//! both, and it puts a forked lineage's root above the branch that left it.
+static bool DrivechainCoinOrder(const DrivechainCoin& a, const DrivechainCoin& b)
+{
+    if (a.nHeight != b.nHeight)
+        return a.nHeight < b.nHeight;
+    if (a.out.hash != b.out.hash)
+        return a.out.hash < b.out.hash;
+    return a.out.n < b.out.n;
+}
+
+//! Collect every unspent OP_DRIVECHAIN output in the UTXO database, grouped by
+//! the slot its script names.
+//!
+//! The cursor sees the database and not the in-memory coins cache, so the
+//! caller must flush first or the answer describes a block already passed. The
+//! snapshot's own block is returned rather than assumed to be the chain tip.
+static bool ScanDrivechainCoins(CCoinsView* view, std::map<uint8_t, std::vector<DrivechainCoin>>& mapCoin, uint256& hashBestBlock)
+{
+    std::unique_ptr<CCoinsViewCursor> pcursor(view->Cursor());
+    assert(pcursor);
+
+    hashBestBlock = pcursor->GetBestBlock();
+
+    while (pcursor->Valid()) {
+        boost::this_thread::interruption_point();
+        COutPoint key;
+        Coin coin;
+        if (!pcursor->GetKey(key) || !pcursor->GetValue(coin))
+            return error("%s: unable to read value", __func__);
+
+        uint8_t nSidechain;
+        if (!coin.IsSpent() && coin.out.scriptPubKey.IsDrivechain(nSidechain)) {
+            DrivechainCoin c;
+            c.out = key;
+            c.amount = coin.out.nValue;
+            c.nHeight = coin.nHeight;
+            c.fCoinBase = coin.fCoinBase;
+            mapCoin[nSidechain].push_back(c);
+        }
+
+        pcursor->Next();
+    }
+
+    for (std::pair<const uint8_t, std::vector<DrivechainCoin>>& p : mapCoin)
+        std::sort(p.second.begin(), p.second.end(), DrivechainCoinOrder);
+
+    return true;
+}
+
+UniValue listdrivechaincoins(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() > 1)
+        throw std::runtime_error(
+            "listdrivechaincoins ( nsidechain )\n"
+            "\nEvery unspent sidechain treasury output, grouped by slot.\n"
+            "\nThe treasury pointer a node reports names one output per slot. It\n"
+            "cannot say whether the slot holds anything else, because no other\n"
+            "call enumerates the treasury script - so value that came adrift from\n"
+            "the pointer is not merely unspendable, it is invisible. This scans\n"
+            "the unspent output set for the script itself and reports what is\n"
+            "actually there, whatever the pointer says.\n"
+            "\nTwo readings matter. A slot whose stranded amount is non-zero holds\n"
+            "coins no withdrawal bundle can reach: its deposit chain forked, and\n"
+            "the pointer followed one branch. A slot reporting ctipunspent false\n"
+            "is worse - the pointer names an output that is gone, which is the\n"
+            "state a treasury-anchored consensus rule could not accept.\n"
+            "\nThis reads the unspent output set and changes nothing. It walks the\n"
+            "whole set, so it takes as long as gettxoutsetinfo does.\n"
+            "\nThe scan and the pointers are read at different instants. Compare\n"
+            "bestblock against scdbblockhash before treating a mismatch as real;\n"
+            "insync false means a block landed mid-call and the reading should be\n"
+            "taken again.\n"
+            "\nArguments:\n"
+            "1. \"nsidechain\"   (numeric, optional) Report this slot only\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"height\"        : (numeric) height of the scanned snapshot\n"
+            "  \"bestblock\"     : (string) block the scanned snapshot describes\n"
+            "  \"scdbblockhash\" : (string) block the treasury pointers describe\n"
+            "  \"insync\"        : (boolean) whether the two above agree\n"
+            "  \"count\"         : (numeric) unspent treasury outputs found\n"
+            "  \"amount\"        : (numeric) their total value\n"
+            "  \"stranded\"      : (numeric) total value no pointer names\n"
+            "  \"slots\" : [\n"
+            "    {\n"
+            "      \"nsidechain\"  : (numeric) the slot\n"
+            "      \"active\"      : (boolean) whether the slot is occupied\n"
+            "      \"count\"       : (numeric) unspent treasury outputs in it\n"
+            "      \"amount\"      : (numeric) their total value\n"
+            "      \"stranded\"    : (numeric) value the pointer does not name\n"
+            "      \"hasctip\"     : (boolean) whether a pointer is recorded\n"
+            "      \"ctipunspent\" : (boolean) whether that pointer's output exists\n"
+            "      \"ctip\"        : { \"txid\", \"n\", \"amount\" } the pointer\n"
+            "      \"coins\" : [\n"
+            "        {\n"
+            "          \"txid\", \"n\", \"amount\", \"height\", \"coinbase\",\n"
+            "          \"isctip\" : (boolean) whether the pointer names this one\n"
+            "        }, ...\n"
+            "      ]\n"
+            "    }, ...\n"
+            "  ]\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("listdrivechaincoins", "")
+            + HelpExampleCli("listdrivechaincoins", "2")
+            + HelpExampleRpc("listdrivechaincoins", "2")
+            );
+
+    // Range-check before the truncation to uint8_t, as listsidechainctip does:
+    // an out-of-range slot number would otherwise alias a real one.
+    bool fFilter = !request.params.empty() && !request.params[0].isNull();
+    int nFilter = 0;
+    if (fFilter) {
+        nFilter = request.params[0].get_int();
+        if (nFilter < 0 || nFilter >= SIDECHAIN_ACTIVATION_MAX_ACTIVE)
+            throw JSONRPCError(RPC_MISC_ERROR, "Invalid sidechain number!");
+    }
+
+    // The cursor reads the database, not the coins cache above it, so an
+    // unflushed node would report the treasury as it stood at the last flush.
+    FlushStateToDisk();
+
+    std::map<uint8_t, std::vector<DrivechainCoin>> mapCoin;
+    uint256 hashBestBlock;
+    if (!ScanDrivechainCoins(pcoinsdbview.get(), mapCoin, hashBestBlock))
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to read UTXO set");
+
+    // cs_main is deliberately not held across the scan - it walks the whole
+    // unspent set and would stall block processing for as long as that takes.
+    // The pointers are therefore read afterwards and may describe a later
+    // block; the two block hashes are reported so the caller can see it.
+    LOCK(cs_main);
+
+    std::map<uint8_t, SidechainCTIP> mapCTIP = scdb.GetCTIP();
+    const uint256 hashSCDBBlock = scdb.GetHashBlockLastSeen();
+
+    int nHeight = 0;
+    BlockMap::const_iterator it = mapBlockIndex.find(hashBestBlock);
+    if (it != mapBlockIndex.end() && it->second)
+        nHeight = it->second->nHeight;
+
+    // Report a slot if the scan found coins in it or a pointer names it. A slot
+    // with a pointer and no coins is the failure the ctipunspent field exists
+    // for, so it must not be dropped for having nothing to list.
+    std::set<uint8_t> setSlot;
+    for (const std::pair<const uint8_t, std::vector<DrivechainCoin>>& p : mapCoin)
+        setSlot.insert(p.first);
+    for (const std::pair<const uint8_t, SidechainCTIP>& p : mapCTIP)
+        setSlot.insert(p.first);
+
+    CAmount amountTotal = 0;
+    CAmount amountStrandedTotal = 0;
+    int64_t nCountTotal = 0;
+
+    UniValue slots(UniValue::VARR);
+    for (const uint8_t nSidechain : setSlot) {
+        if (fFilter && nSidechain != nFilter)
+            continue;
+
+        const std::vector<DrivechainCoin>& vCoin = mapCoin[nSidechain];
+
+        std::map<uint8_t, SidechainCTIP>::const_iterator itCTIP = mapCTIP.find(nSidechain);
+        const bool fHasCTIP = itCTIP != mapCTIP.end();
+
+        CAmount amountSlot = 0;
+        CAmount amountStranded = 0;
+        bool fCTIPUnspent = false;
+
+        UniValue coins(UniValue::VARR);
+        for (const DrivechainCoin& coin : vCoin) {
+            const bool fIsCTIP = fHasCTIP && itCTIP->second.out == coin.out;
+            if (fIsCTIP)
+                fCTIPUnspent = true;
+            else
+                amountStranded += coin.amount;
+            amountSlot += coin.amount;
+
+            UniValue c(UniValue::VOBJ);
+            c.push_back(Pair("txid", coin.out.hash.ToString()));
+            c.push_back(Pair("n", (int64_t)coin.out.n));
+            c.push_back(Pair("amount", ValueFromAmount(coin.amount)));
+            c.push_back(Pair("height", coin.nHeight));
+            c.push_back(Pair("coinbase", coin.fCoinBase));
+            c.push_back(Pair("isctip", fIsCTIP));
+            coins.push_back(c);
+        }
+
+        UniValue s(UniValue::VOBJ);
+        s.push_back(Pair("nsidechain", (int)nSidechain));
+        s.push_back(Pair("active", scdb.IsSidechainActive(nSidechain)));
+        s.push_back(Pair("count", (int64_t)vCoin.size()));
+        s.push_back(Pair("amount", ValueFromAmount(amountSlot)));
+        s.push_back(Pair("stranded", ValueFromAmount(amountStranded)));
+        s.push_back(Pair("hasctip", fHasCTIP));
+        s.push_back(Pair("ctipunspent", fCTIPUnspent));
+        if (fHasCTIP) {
+            UniValue ctip(UniValue::VOBJ);
+            ctip.push_back(Pair("txid", itCTIP->second.out.hash.ToString()));
+            ctip.push_back(Pair("n", (int64_t)itCTIP->second.out.n));
+            ctip.push_back(Pair("amount", ValueFromAmount(itCTIP->second.amount)));
+            s.push_back(Pair("ctip", ctip));
+        }
+        s.push_back(Pair("coins", coins));
+        slots.push_back(s);
+
+        amountTotal += amountSlot;
+        amountStrandedTotal += amountStranded;
+        nCountTotal += vCoin.size();
+    }
+
+    UniValue obj(UniValue::VOBJ);
+    obj.push_back(Pair("height", nHeight));
+    obj.push_back(Pair("bestblock", hashBestBlock.ToString()));
+    obj.push_back(Pair("scdbblockhash", hashSCDBBlock.ToString()));
+    obj.push_back(Pair("insync", hashBestBlock == hashSCDBBlock));
+    obj.push_back(Pair("count", nCountTotal));
+    obj.push_back(Pair("amount", ValueFromAmount(amountTotal)));
+    obj.push_back(Pair("stranded", ValueFromAmount(amountStrandedTotal)));
+    obj.push_back(Pair("slots", slots));
+
+    return obj;
+}
+
+UniValue rebuildscdb(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 0)
+        throw std::runtime_error(
+            "rebuildscdb\n"
+            "\nRebuild the sidechain deposit cache by re-scanning local blocks.\n"
+            "\nThe repair for a node whose sidechain state does not match its own\n"
+            "chain - a stale or missing deposit cache, or a treasury tip that a\n"
+            "reindex would disagree with. Until this existed the only remedy was a\n"
+            "full reindex, which re-verifies every block in the chain.\n"
+            "\nThis reads blocks only. It does not re-download anything, does not\n"
+            "verify scripts, and does not touch the UTXO set, so it costs one pass\n"
+            "over the blocks that could carry a deposit rather than a full\n"
+            "revalidation. Blocks from before any sidechain was active are skipped\n"
+            "without being read.\n"
+            "\nIt needs this node's per-block sidechain records. A data directory\n"
+            "missing them still needs a reindex, and the call reports that rather\n"
+            "than rebuilding a partial cache.\n"
+            "\nThe node is unavailable while this runs, and nothing is changed\n"
+            "unless it completes: the rebuild is assembled separately and installed\n"
+            "only on success.\n"
+            "\nCompare getscdbhash before and after, or against another node at the\n"
+            "same block, to see whether anything actually moved.\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"blockhash\"     : (string) block the rebuilt state describes\n"
+            "  \"blocks\"        : (number) height of that block\n"
+            "  \"consensushash\" : (string) consensus state after the rebuild\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("rebuildscdb", "")
+            + HelpExampleRpc("rebuildscdb", "")
+            );
+
+    LOCK(cs_main);
+
+    // RebuildSidechainDeposits verifies the rebuilt cache supports the treasury
+    // BEFORE it installs it, and returns false without changing the live state
+    // if it does not - so a false return here means the node was left exactly as
+    // it was, and strError already names the slot and points at -reindex. A
+    // legacy datadir with a mixed record history is the case that produces an
+    // unsupported pointer; it must never be reported as a good rebuild, and now
+    // it is reported as a failure that changed nothing rather than a broken
+    // state installed live.
+    std::string strError;
+    if (!RebuildSidechainDeposits(strError))
+        throw JSONRPCError(RPC_INTERNAL_ERROR,
+                "Sidechain rebuild failed: " + strError);
+
+    const CBlockIndex* pTip = chainActive.Tip();
+
+    UniValue obj(UniValue::VOBJ);
+    obj.push_back(Pair("blockhash", scdb.GetHashBlockLastSeen().ToString()));
+    obj.push_back(Pair("blocks", pTip ? pTip->nHeight : 0));
+    obj.push_back(Pair("consensushash", scdb.GetConsensusHash(chainActive.Height()).ToString()));
+
+    return obj;
+}
+
+UniValue getsidechaindbinfo(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size())
+        throw std::runtime_error(
+            "getsidechaindbinfo\n"
+            "Report which block the sidechain database is at, and whether that is\n"
+            "the block the chain is on.\n"
+            "\nThe two can only differ while a block is being connected. A node that\n"
+            "reports them differing at rest is serving sidechain state, including\n"
+            "the treasury tip of every slot, that does not correspond to its own\n"
+            "chain - which makes it reject withdrawal payouts the rest of the\n"
+            "network accepts. Until this call existed there was no way to observe\n"
+            "that from outside the process.\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"hashblocklastseen\" : (string) block the sidechain database is at\n"
+            "  \"chaintip\"          : (string) block the chain is on\n"
+            "  \"insync\"            : (bool)   whether the two agree\n"
+            "  \"blocks\"            : (number) height of the chain tip\n"
+            "}\n"
+            "\nExample:\n"
+            + HelpExampleCli("getsidechaindbinfo", "")
+            + HelpExampleRpc("getsidechaindbinfo", "")
+            );
+
+    LOCK(cs_main);
+
+    const uint256 hashLastSeen = scdb.GetHashBlockLastSeen();
+    const CBlockIndex* pTip = chainActive.Tip();
+    const uint256 hashTip = pTip ? pTip->GetBlockHash() : uint256();
+
+    // The sidechain database does not record a block until it has connected one
+    // past genesis, so on a node still at the genesis tip its last-seen block is
+    // null while the two are legitimately in step. Treat that as in sync, so the
+    // report matches the help text rather than flagging a healthy fresh node.
+    const bool fAtGenesis = pTip && pTip->GetBlockHash() == Params().GetConsensus().hashGenesisBlock;
+    const bool fInSync = hashLastSeen == hashTip || (hashLastSeen.IsNull() && (!pTip || fAtGenesis));
+
+    UniValue ret(UniValue::VOBJ);
+    ret.push_back(Pair("hashblocklastseen", hashLastSeen.ToString()));
+    ret.push_back(Pair("chaintip", hashTip.ToString()));
+    ret.push_back(Pair("insync", fInSync));
+    ret.push_back(Pair("blocks", pTip ? pTip->nHeight : 0));
+
+    return ret;
 }
 
 UniValue echo(const JSONRPCRequest& request)
@@ -2124,7 +3744,12 @@ static const CRPCCommand commands[] =
     { "Drivechain",  "listactivesidechains",          &listactivesidechains,            {}},
     { "Drivechain",  "listsidechainactivationstatus", &listsidechainactivationstatus,   {}},
     { "Drivechain",  "listsidechainproposals",        &listsidechainproposals,          {}},
+    { "Drivechain",  "acksidechain",                  &acksidechain,   {"hash"}},
+    { "Drivechain",  "nacksidechain",                 &nacksidechain,          {"hash"}},
+    { "Drivechain",  "listhashsidechain",                 &listhashsidechain,          {}},
     { "Drivechain",  "getsidechainactivationstatus",  &getsidechainactivationstatus,    {}},
+    { "Drivechain",  "listsidechainproposalacks",     &listsidechainproposalacks,       {}},
+
     { "Drivechain",  "createsidechainproposal",       &createsidechainproposal,         {"nsidechain", "title", "description", "keyhash", "nversion", "hashid1", "hashid2"}},
     { "Drivechain",  "clearwithdrawalvotes",          &clearwithdrawalvotes,            {}},
     { "Drivechain",  "setwithdrawalvote",             &setwithdrawalvote,               {"vote", "nsidechain", "hashwithdrawal"}},
@@ -2133,7 +3758,7 @@ static const CRPCCommand commands[] =
     { "Drivechain",  "getworkscore",                  &getworkscore,                    {"nsidechain", "hashwithdrawal"}},
     { "Drivechain",  "havespentwithdrawal",           &havespentwithdrawal,             {"hashwithdrawal", "nsidechain"}},
     { "Drivechain",  "havefailedwithdrawal",          &havefailedwithdrawal,            {"hashwithdrawal", "nsidechain"}},
-    { "Drivechain",  "listcachedwithdrawaltx",        &listcachedwithdrawaltx,          {"nsidechain"}},
+    { "Drivechain",  "listcachedwithdrawaltx",        &listcachedwithdrawaltx,          {"nsidechain", "verbose"}},
     { "Drivechain",  "listwithdrawalstatus",          &listwithdrawalstatus,            {"nsidechain"}},
     { "Drivechain",  "listspentwithdrawals",          &listspentwithdrawals,            {}},
     { "Drivechain",  "listfailedwithdrawals",         &listfailedwithdrawals,           {}},
@@ -2141,9 +3766,18 @@ static const CRPCCommand commands[] =
     { "Drivechain",  "getscdbdataforblock",           &getscdbdataforblock,             {"blockhash"}},
     { "Drivechain",  "listfailedbmm",                 &listfailedbmm,                   {}},
     { "Drivechain",  "getactivesidechaincount",       &getactivesidechaincount,         {}},
+    { "Drivechain",  "getsidechaindbinfo",            &getsidechaindbinfo,              {}},
+    { "Drivechain",  "getscdbhash",                   &getscdbhash,                     {}},
+    { "Drivechain",  "getscdbstate",                  &getscdbstate,                    {}},
+    { "Drivechain",  "rebuildscdb",                   &rebuildscdb,                     {}},
+    { "Drivechain",  "listdrivechaincoins",           &listdrivechaincoins,             {"nsidechain"}},
 
     /* Coin News RPC */
     { "CoinNews",    "getopreturndata",               &getopreturndata,                 {"blockhash"}},
+    { "CoinNews",    "listnews",                      &listnews,                        {"count","header"}},
+    { "CoinNews",    "listnewstypes",                 &listnewstypes,                   {}},
+    { "CoinNews",    "createnewstype",                &createnewstype,                  {"title","header","days"}},
+    { "CoinNews",    "removenewstype",                &removenewstype,                  {"hash"}},
 
 };
 
